@@ -1,0 +1,22 @@
+[package]
+name = "qingjian-android"
+description = "Android 输入法：JNI 桥接，把平台无关的 Core 接到 InputMethodService"
+version = "0.1.0-dev"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# cdylib 是产物 libqingjian_android.so（Gradle 按这个名字打进 APK）；rlib 给端到端测试用。
+[lib]
+name = "qingjian_android"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+qingjian-core.workspace = true
+qingjian-dictionary.workspace = true
+thiserror.workspace = true
+
+jni = "0.21"
+
+[lints]
+workspace = true
