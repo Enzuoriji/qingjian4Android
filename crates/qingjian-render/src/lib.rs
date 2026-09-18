@@ -31,7 +31,9 @@ pub use keyboard::{
     InputMode, Key, KeyId, KeyRow, KeyStyle, KeyboardLayout, KeyboardState, ShiftState,
 };
 pub use layout::Layout;
-pub use renderer::{Rendered, RenderedKeyboard, RenderedStatus, Renderer, StatusCell};
+pub use renderer::{
+    BarHit, BarHitId, Rendered, RenderedBar, RenderedKeyboard, RenderedStatus, Renderer, StatusCell,
+};
 pub use shadow::Shadow;
 pub use theme::{FontSpec, KeyboardTheme, Palette, Theme};
 

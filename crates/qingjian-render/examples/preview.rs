@@ -14,6 +14,9 @@ use qingjian_render::{
 /// 预览键盘用的宽度（点）——按一台常见手机的竖屏宽。
 const KEYBOARD_WIDTH: f32 = 360.0;
 
+/// 预览候选条用的宽度（点），同上。
+const BAR_WIDTH: f32 = 360.0;
+
 #[derive(Parser)]
 struct Args {
     /// PNG 输出目录。
@@ -181,6 +184,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // 候选条（安卓）：空态与一页候选。宽度按手机竖屏，高度是主题定死的
+    for (theme_name, theme) in [("light", Theme::light()), ("dark", Theme::dark())] {
+        for (state_name, bar_frame) in [("empty", Frame::default()), ("page", bar_page())] {
+            let started = Instant::now();
+            let rendered = renderer.render_bar(&bar_frame, BAR_WIDTH, &theme, args.scale)?;
+            let elapsed = started.elapsed();
+            let path = args.out.join(format!("bar-{state_name}-{theme_name}.png"));
+            rendered.rendered.pixmap.save_png(&path)?;
+            let (w, h) = rendered.rendered.content_size_points();
+            println!(
+                "{:<28} {:>4.0}×{:<4.0}pt  {:>8.2?}  {} 个可点区域  {}",
+                format!("bar-{state_name}-{theme_name}"),
+                w,
+                h,
+                elapsed,
+                rendered.hits.len(),
+                path.display()
+            );
+        }
+    }
+    println!(
+        "候选条固定高度 {:.1}pt（与内容无关）",
+        Renderer::bar_height(&Theme::light())
+    );
+
     for probe in [
         "青简 hello 🙂 日本語 骨直曜",
         "開発(かいはつ)する",
@@ -248,6 +276,15 @@ fn nihao() -> Frame {
         sentence: None,
         status: None,
     }
+}
+
+/// 候选条上的一页：手机一页 5 个（比桌面的 9 个少，也比一开始定的 6 个少——
+/// 360pt 宽下 6 格放不下三字词，会截成「你…」），取 nihao 那页的前 5 条。
+fn bar_page() -> Frame {
+    let mut frame = nihao();
+    frame.rows.truncate(5);
+    frame.footer = Some("1/2".to_owned());
+    frame
 }
 
 /// 横排真机截图那一次云端整句到了：拼音行右侧带云朵的整句补全。

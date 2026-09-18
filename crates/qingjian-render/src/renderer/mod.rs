@@ -2,6 +2,7 @@
 //!
 //! 内部全用像素：主题里的点数进来先乘缩放倍数。文字的 y 都指行框顶边，字形在行高里垂直居中。
 
+mod bar;
 mod columns;
 mod horizontal;
 mod item;
@@ -22,6 +23,7 @@ use crate::shadow::Shadow;
 use crate::text::{TextPainter, TextSize, TextStyle};
 use crate::theme::{FontSpec, Theme};
 
+pub use bar::{BarHit, BarHitId, RenderedBar};
 pub use keyboard::RenderedKeyboard;
 pub use rendered::Rendered;
 pub use status::{RenderedStatus, StatusCell};
