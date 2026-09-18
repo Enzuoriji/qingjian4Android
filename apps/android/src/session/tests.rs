@@ -441,3 +441,114 @@ fn the_bar_is_drawn_at_the_fixed_height() {
         "候选条高度必须是主题定死的那个值"
     );
 }
+
+#[test]
+fn the_mode_key_switches_to_english_and_back() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "ni");
+    assert!(preedit(&session).is_some(), "中文模式下该在组句");
+
+    tap_key(&mut session, KeyId::Mode);
+
+    assert!(session.english(), "该切到英文模式");
+    assert!(
+        session.frame.preedit.is_none(),
+        "切换时该把没上屏的拼音丢掉，实际还剩 {:?}",
+        preedit(&session)
+    );
+
+    // 英文模式直输：字母直接打出去，不进缓冲区、也没有候选
+    type_text(&mut session, "hi");
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("hi"),
+        "英文模式该把字母直接打出去"
+    );
+    assert!(preedit(&session).is_none(), "英文模式不该组句");
+    assert!(drawn(&session).is_empty(), "英文模式还没有候选可给");
+
+    // 切回中文，同一串又当拼音算
+    tap_key(&mut session, KeyId::Mode);
+    assert!(!session.english(), "该切回中文模式");
+    type_text(&mut session, "ni");
+    assert_eq!(preedit(&session).as_deref(), Some("ni"));
+}
+
+#[test]
+fn shift_gives_uppercase_in_english_mode_only() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    // 中文模式：Shift 只影响键帽，喂进去的还是小写拼音
+    tap_key(&mut session, KeyId::Shift);
+    type_text(&mut session, "ni");
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("ni"),
+        "中文模式下 Shift 不该改变拼音"
+    );
+    tap_key(&mut session, KeyId::Shift);
+
+    // 英文模式：大小写跟着 Shift 走
+    tap_key(&mut session, KeyId::Mode);
+    type_text(&mut session, "hi");
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("hi"),
+        "没锁定时该是小写"
+    );
+
+    tap_key(&mut session, KeyId::Shift);
+    type_text(&mut session, "hi");
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("HI"),
+        "锁了 Shift 该是大写"
+    );
+}
+
+#[test]
+fn english_mode_punctuation_stays_half_width() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_key(&mut session, KeyId::Mode);
+
+    tap_key(&mut session, KeyId::Comma);
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some(","),
+        "英文模式该打半角"
+    );
+}
+
+#[test]
+fn the_comma_key_commits_the_word_then_the_punctuation() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+
+    tap_key(&mut session, KeyId::Comma);
+
+    // 组句中打标点：先上屏高亮候选，再打标点，顺序不能反
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("你好，"),
+        "该先上屏「你好」再打全角逗号"
+    );
+    assert!(session.frame.preedit.is_none(), "标点之后拼音该清空");
+}
+
+#[test]
+fn the_comma_key_alone_is_just_a_punctuation() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_key(&mut session, KeyId::Comma);
+    assert_eq!(session.take_commit().as_deref(), Some("，"));
+    assert!(session.take_commands().is_empty(), "标点不该走原样按键");
+}

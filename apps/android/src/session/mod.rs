@@ -8,13 +8,13 @@ use std::path::Path;
 use qingjian_core::{Candidate, CandidateKind, Engine, MarkedKind};
 use qingjian_dictionary::Dictionary;
 use qingjian_render::{
-    BarHitId, FontLibrary, Frame, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Preedit,
-    PreeditSegment, PreeditStyle, RenderedBar, RenderedKeyboard, Renderer, Row, ShiftState, Theme,
+    BarHitId, FontLibrary, Frame, InputMode, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme,
+    Preedit, PreeditSegment, PreeditStyle, RenderedBar, RenderedKeyboard, Renderer, Row,
+    ShiftState, Theme,
 };
 
 use crate::action::{self, Act, Command};
 use crate::error::SessionError;
-use crate::probe;
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP};
 
@@ -124,9 +124,6 @@ pub struct Session {
 
     /// 这一按是不是落在候选条上（划动翻页只认从候选条起手的）。
     pressed_in_bar: bool,
-
-    /// 最近一次「按下又抬起」碰到的目标（M3 调试用，M4 删）。
-    last_touched: Option<Hit>,
 }
 
 impl Session {
@@ -164,25 +161,13 @@ impl Session {
             pressed: None,
             pressed_at: (0.0, 0.0),
             pressed_in_bar: false,
-            last_touched: None,
         })
     }
 
-    /// 敲入一个字符（调试通路用，正常走 [`Self::touch`]）。
-    pub fn push(&mut self, c: char) {
-        self.engine.push(c);
-        self.recompose();
-    }
-
-    /// 清空缓冲区（调试通路用）。
+    /// 清空缓冲区。换应用时壳调它，免得在 A 应用敲的拼音跑到 B 应用里。
     pub fn clear(&mut self) {
         self.engine.clear();
         self.recompose();
-    }
-
-    /// 当前候选的文本，调试阶段用来验证链路。
-    pub fn candidates(&self) -> Vec<String> {
-        self.candidates.iter().map(|c| c.text.clone()).collect()
     }
 
     /// 壳报告输入视图的宽度（点）、屏幕密度、底部被系统占掉的高度、明暗，
@@ -211,6 +196,11 @@ impl Session {
     /// 候选条该有多高（点）。固定值，与有没有候选无关。
     pub fn bar_height(&self) -> f32 {
         Renderer::bar_height(&self.theme())
+    }
+
+    /// 现在是英文模式吗。
+    fn english(&self) -> bool {
+        self.state.mode == InputMode::English
     }
 
     /// 当前该用的候选窗主题。
@@ -334,7 +324,6 @@ impl Session {
                 self.pressed_in_bar = false;
                 self.set_pressed(None);
                 if let Some(target) = fired {
-                    self.last_touched = Some(target);
                     self.act(target);
                 } else if swiped && delta.abs() > self.swipe_min() {
                     self.apply(Act::Page(if delta < 0.0 { 1 } else { -1 }));
@@ -347,14 +336,6 @@ impl Session {
             }
         }
         self.mask()
-    }
-
-    /// 最近一次按下又抬起碰到的东西的调试名称（M3 临时件，M4 删）。
-    pub fn last_touched_name(&self) -> String {
-        self.last_touched.map_or_else(String::new, |hit| match hit {
-            Hit::Key(key) => format!("{key:?}"),
-            Hit::Bar(id) => format!("{id:?}"),
-        })
     }
 
     /// 这一轮下来哪些面要重取、有没有话要交给应用。
@@ -421,11 +402,7 @@ impl Session {
     /// 碰到了某个目标：先翻成动作，再执行。
     fn act(&mut self, target: Hit) {
         match target {
-            Hit::Key(key) => {
-                if let Some(act) = action::on_key(key) {
-                    self.apply(act);
-                }
-            }
+            Hit::Key(key) => self.apply(action::on_key(key)),
             Hit::Bar(id) => self.apply(action::on_bar(id)),
         }
     }
@@ -433,11 +410,7 @@ impl Session {
     /// 执行一个动作。引擎在什么状态决定同一动作的不同走法，都写在这里。
     fn apply(&mut self, act: Act) {
         match act {
-            Act::Push(c) => {
-                // 拼音不分大小写：中文模式下 Shift 只影响键帽显示，不改变喂进去的字母
-                self.engine.push(c.to_ascii_lowercase());
-                self.recompose();
-            }
+            Act::Push(c) => self.type_letter(c),
             Act::CommitCandidate(index) => {
                 let absolute = self.page * PAGE_SIZE + index;
                 if let Some(candidate) = self.candidates.get(absolute).cloned() {
@@ -482,12 +455,79 @@ impl Session {
             }
             Act::Page(step) => self.turn_page(step),
             Act::ToggleShift => {
+                // 安卓上的习惯是单击锁定、再击解锁（桌面才是按住）
                 self.state.shift = match self.state.shift {
                     ShiftState::Off => ShiftState::Locked,
                     _ => ShiftState::Off,
                 };
                 self.keyboard_dirty = true;
             }
+            Act::ToggleMode => {
+                self.state.mode = match self.state.mode {
+                    InputMode::Chinese => InputMode::English,
+                    InputMode::English => InputMode::Chinese,
+                };
+                // 切换时把没上屏的拼音丢掉：留着的话，英文模式下那串字母会按英文词算候选
+                self.engine.clear();
+                self.engine
+                    .set_english_mode(self.state.mode == InputMode::English);
+                self.keyboard_dirty = true;
+                self.recompose();
+            }
+            Act::Punctuate(c) => self.punctuate(c),
+        }
+    }
+
+    /// 打一个标点。
+    ///
+    /// 还在组句就先把高亮候选上屏——手机上打标点应当结束当前这串拼音，「nihao」+「，」得到
+    /// 「你好，」而不是把逗号插到拼音前面去。桌面的做法是把标点收进「英文直输段」（`nihao,` 整串
+    /// 一起算），那是给实体键盘的，触摸键盘上不是这个预期，这里不跟。
+    fn punctuate(&mut self, c: char) {
+        if !self.engine.composition().is_empty()
+            && let Some(candidate) = self.candidates.get(self.page * PAGE_SIZE).cloned()
+        {
+            let text = self.engine.commit(&candidate);
+            self.pending_commit
+                .get_or_insert_with(String::new)
+                .push_str(&text);
+        }
+        // 英文模式打半角，不劳引擎转
+        if self.english() {
+            self.engine.note_passthrough(c);
+            self.commit_text(c.to_string());
+            return;
+        }
+        // 转得了全角就让引擎转（它还要记账），转不了原样打出去并告知
+        let text = match self.engine.punctuate(c) {
+            Some(text) => text.to_owned(),
+            None => {
+                self.engine.note_passthrough(c);
+                c.to_string()
+            }
+        };
+        self.commit_text(text);
+    }
+
+    /// 敲一个字母。
+    ///
+    /// 中文模式：进组句缓冲区，大小写不影响拼音（Shift 只改键帽）。
+    ///
+    /// 英文模式：**直输**，字母不进缓冲区、直接打给应用，大小写跟着 Shift 走。
+    /// 引擎的英文候选要另外喂一张英文词表（`Engine::with_english`），安卓这边还没随包带，
+    /// 所以给不了候选——这也是别的壳关掉英文候选时走的那条路。要接候选得先把英文词表生成出来。
+    fn type_letter(&mut self, c: char) {
+        if self.english() {
+            let c = if self.state.shift.is_upper() {
+                c.to_ascii_uppercase()
+            } else {
+                c.to_ascii_lowercase()
+            };
+            self.engine.note_passthrough(c);
+            self.commit_text(c.to_string());
+        } else {
+            self.engine.push(c.to_ascii_lowercase());
+            self.recompose();
         }
     }
 
@@ -578,26 +618,6 @@ impl Session {
             self.engine.note_page_turn();
             self.refresh();
         }
-    }
-
-    /// 位图通路的探针（M0 临时件，收尾时删）：`which` 0 是色块、其余是文字。
-    /// 返回能过 JNI 的字节串，画不出来（渲染器没建起来、字体挂了）时返回空。
-    pub fn probe(&mut self, which: i32) -> Vec<u8> {
-        let pixmap = match which {
-            0 => Some(probe::colors()),
-            _ => self.renderer.as_mut().and_then(|r| probe::text(r).ok()),
-        };
-        pixmap.map_or_else(Vec::new, |pixmap| surface::encode(&pixmap))
-    }
-
-    /// 探针用：报告[探针文字](probe::SAMPLE)的每个字实际落到了哪个字族（M0 临时件）。
-    ///
-    /// 字体出问题时靠它定位：中文落成日文面、emoji 找不到字体，都会在这里显出来。
-    pub fn trace(&mut self) -> Vec<String> {
-        self.renderer
-            .as_mut()
-            .map(|renderer| renderer.trace_families(probe::SAMPLE, &Theme::light()))
-            .unwrap_or_default()
     }
 }
 

@@ -2,7 +2,8 @@
 //!
 //! Kotlin 侧 `Bitmap.createBitmap(w, h, ARGB_8888)` + `copyPixelsFromBuffer` 直接吃这段字节：
 //! `ARGB_8888` 的内存布局就是预乘 RGBA（`ARGB` 只是 `getPixel` 那套打包的说法），与 tiny-skia 的
-//! `Pixmap` 一致，既不用换通道也不用重新预乘。**这条"不用转换"是 M0 探针在本机与设备上实测确认的**，
+//! `Pixmap` 一致，既不用换通道也不用重新预乘。**这条「不用转换」当初用一次性探针在本机与设备上实测确认过**
+//! （探针已随收尾删掉，结论留着），
 //! macOS 壳那边也是同样的结论（`NSBitmapImageRep` 逐行拷贝、零转换）。
 
 use qingjian_render::Pixmap;

@@ -29,4 +29,10 @@ pub enum Act {
 
     /// 上档锁定 / 解锁。
     ToggleShift,
+
+    /// 中 / 英切换。
+    ToggleMode,
+
+    /// 打一个标点。给的是半角原字符，转不转全角由引擎按设置定。
+    Punctuate(char),
 }

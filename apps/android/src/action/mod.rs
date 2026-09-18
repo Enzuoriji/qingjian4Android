@@ -14,16 +14,17 @@ pub use command::Command;
 
 use qingjian_render::{BarHitId, KeyId};
 
-/// 碰到一个键该干什么。`None` 是这个键还没接上（中 / 英切换留给 M4）。
-pub fn on_key(key: KeyId) -> Option<Act> {
+/// 碰到一个键该干什么。
+pub fn on_key(key: KeyId) -> Act {
     match key {
-        KeyId::Letter(c) => Some(Act::Push(c)),
-        KeyId::Space => Some(Act::CommitHighlighted),
-        KeyId::Enter => Some(Act::CommitRaw),
-        KeyId::Backspace => Some(Act::Backspace),
-        KeyId::Shift => Some(Act::ToggleShift),
-        // 中 / 英切换是 M4；逗号要按「组句中进英文直输段」处理，也是 M4，先不接错
-        KeyId::Mode | KeyId::Comma => None,
+        KeyId::Letter(c) => Act::Push(c),
+        KeyId::Space => Act::CommitHighlighted,
+        KeyId::Enter => Act::CommitRaw,
+        KeyId::Backspace => Act::Backspace,
+        KeyId::Shift => Act::ToggleShift,
+        KeyId::Mode => Act::ToggleMode,
+        // 键盘上画的是全角「，」，这里给引擎的是半角原字符，转不转由它按设置定
+        KeyId::Comma => Act::Punctuate(','),
     }
 }
 
@@ -44,21 +45,25 @@ mod tests {
 
     #[test]
     fn letters_go_to_the_engine() {
-        assert_eq!(on_key(KeyId::Letter('a')), Some(Act::Push('a')));
+        assert_eq!(on_key(KeyId::Letter('a')), Act::Push('a'));
     }
 
     #[test]
-    fn the_three_editing_keys_map_to_their_own_actions() {
-        assert_eq!(on_key(KeyId::Space), Some(Act::CommitHighlighted));
-        assert_eq!(on_key(KeyId::Enter), Some(Act::CommitRaw));
-        assert_eq!(on_key(KeyId::Backspace), Some(Act::Backspace));
+    fn the_editing_keys_map_to_their_own_actions() {
+        assert_eq!(on_key(KeyId::Space), Act::CommitHighlighted);
+        assert_eq!(on_key(KeyId::Enter), Act::CommitRaw);
+        assert_eq!(on_key(KeyId::Backspace), Act::Backspace);
     }
 
     #[test]
-    fn unimplemented_keys_do_nothing_rather_than_something_wrong() {
-        // 逗号在组句中要进英文直输段，接一半会让标点跑到中文前面去
-        assert_eq!(on_key(KeyId::Comma), None);
-        assert_eq!(on_key(KeyId::Mode), None);
+    fn the_mode_key_toggles_rather_than_pushing_something() {
+        assert_eq!(on_key(KeyId::Mode), Act::ToggleMode);
+    }
+
+    #[test]
+    fn the_comma_key_hands_the_engine_the_half_width_character() {
+        // 键帽上画的是「，」，但引擎拿到的该是半角 —— 全角与否是它的判断
+        assert_eq!(on_key(KeyId::Comma), Act::Punctuate(','));
     }
 
     #[test]

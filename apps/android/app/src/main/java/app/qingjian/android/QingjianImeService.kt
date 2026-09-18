@@ -4,7 +4,6 @@ import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
 import android.util.Log
 import android.view.KeyEvent
-import android.view.MotionEvent
 import android.view.View
 import java.io.File
 import java.util.Locale
@@ -12,8 +11,8 @@ import java.util.Locale
 /**
  * 青简的输入法服务。
  *
- * 现在是 M3 的形态：能打字、能选词——敲字母出候选，点候选（或空格）上屏到应用里。
- * 键按下态、中 / 英切换、符号面板是 M4。
+ * 能打字、能选词、中 / 英可切——敲字母出候选，点候选（或空格）上屏到应用里。
+ * 数字 / 符号面板、翻页手势的更多花样、无障碍都还没做，见 `docs/design/keyboard.md`。
  *
  * 这里是青简唯一碰安卓输入框的地方：Rust 那边只产「要上屏的文本」与「要原样转发的按键」，
  * 用什么 API 送出去是这一层的事。
@@ -37,7 +36,6 @@ class QingjianImeService : InputMethodService() {
             return
         }
         Log.i(TAG, "会话已打开，词库 ${dictionary.length() / 1024} KB")
-        checkEngine()
     }
 
     override fun onCreateInputView(): View {
@@ -60,12 +58,6 @@ class QingjianImeService : InputMethodService() {
             }
             if (flags and QingjianNative.FLAG_KEYBOARD != 0) {
                 refreshKeyboard(view)
-            }
-            if (action == MotionEvent.ACTION_UP) {
-                val hit = QingjianNative.lastTouched(handle)
-                if (hit.isNotEmpty()) {
-                    Log.i(TAG, "按了 $hit")
-                }
             }
         }
         return view
@@ -125,16 +117,6 @@ class QingjianImeService : InputMethodService() {
         refreshKeyboard(view)
     }
 
-    /** 引擎还活着吗——敲一段拼音看有没有候选。渲染器出问题时靠它区分「引擎坏了」还是「画不出来」。 */
-    private fun checkEngine() {
-        QingjianNative.clear(handle)
-        for (letter in ENGINE_PROBE) {
-            QingjianNative.push(handle, letter)
-        }
-        Log.i(TAG, "$ENGINE_PROBE 的候选：${QingjianNative.candidates(handle).replace('\n', ' ')}")
-        QingjianNative.clear(handle)
-    }
-
     /** 重新取一张候选条位图贴上。Rust 那边没脏就会返回同一张，不会白画。 */
     private fun refreshBar(view: QingjianSurfaceView) {
         if (handle == 0L) return
@@ -144,12 +126,6 @@ class QingjianImeService : InputMethodService() {
             return
         }
         QingjianNative.toBitmap(bytes)?.let(view::setBar)
-        // 验收用：光看位图看不出候选对不对，把文本也打一份（M4 删）。
-        // 只打头几个——完整词库下「shi」有五百个候选，全打出来日志没法看。
-        val candidates = QingjianNative.candidates(handle).split('\n').filter { it.isNotEmpty() }
-        val head = candidates.take(CANDIDATE_LOG_LIMIT).joinToString(" ")
-        val rest = (candidates.size - CANDIDATE_LOG_LIMIT).takeIf { it > 0 }?.let { " 等 $it 个" }
-        Log.i(TAG, "候选：${head.ifEmpty { "（空）" }}${rest ?: ""}")
     }
 
     /** 重新取一张键盘位图贴上。Rust 那边没脏就会返回同一张，不会白画。 */
@@ -181,11 +157,5 @@ class QingjianImeService : InputMethodService() {
 
         /** 随包词库的文件名，放在应用私有目录。 */
         const val DICTIONARY = "dict.qj"
-
-        /** 引擎自检用的拼音。 */
-        const val ENGINE_PROBE = "kaifa"
-
-        /** 候选日志最多打几个（M3 临时件，M4 删）。 */
-        const val CANDIDATE_LOG_LIMIT = 6
     }
 }

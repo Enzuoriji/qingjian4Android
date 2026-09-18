@@ -6,7 +6,6 @@
 mod action;
 mod bridge;
 mod error;
-mod probe;
 mod session;
 mod surface;
 mod touch;

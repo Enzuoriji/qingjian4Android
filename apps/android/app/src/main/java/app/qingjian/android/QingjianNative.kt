@@ -16,24 +16,8 @@ object QingjianNative {
     /** 释放会话。 */
     external fun close(handle: Long)
 
-    /** 敲入一个字符。 */
-    external fun push(handle: Long, ch: Char)
-
-    /** 清空缓冲区。 */
+    /** 清空缓冲区。换应用时调，免得在 A 应用敲的拼音跑到 B 应用里。 */
     external fun clear(handle: Long)
-
-    /** 当前候选的文本，一行一个。调试阶段用来验证链路，正式版换成自绘位图。 */
-    external fun candidates(handle: Long): String
-
-    /**
-     * 位图通路的探针（M0 临时件）：`which` 0 是色块、其余是文字。
-     *
-     * 返回 8 字节头（宽、高各一个 Int）+ 预乘 RGBA 像素，见 [toBitmap]。
-     */
-    external fun probe(handle: Long, which: Int): ByteArray?
-
-    /** 探针用（M0 临时件）：报告探针文字落到哪些字族，` | ` 分隔。 */
-    external fun probeTrace(handle: Long): String
 
     /**
      * 告诉 Rust 输入视图有多宽（点）、屏幕密度、底部被系统占掉多高、是不是深色。
@@ -73,9 +57,6 @@ object QingjianNative {
     /** 取走要原样交给应用的按键编号（并清掉）；这次没有返回空数组。编号见 [COMMAND_BACKSPACE]。 */
     external fun takeCommands(handle: Long): IntArray?
 
-    /** 最近一次按下又抬起碰到的目标的调试名称（M3 临时件）。 */
-    external fun lastTouched(handle: Long): String
-
     /** [takeCommands] 里的编号：删应用里的一个字符。 */
     const val COMMAND_BACKSPACE = 1
 
@@ -99,7 +80,7 @@ object QingjianNative {
     }
 
     /**
-     * 把 [probe] 回来的字节串还原成 Bitmap。
+     * 把 [barSurface] / [keyboardSurface] 回来的字节串还原成 Bitmap。
      *
      * 安卓 `ARGB_8888` 的内存布局就是预乘 RGBA，`copyPixelsFromBuffer` 是裸内存拷贝、不做转换，
      * 所以 tiny-skia 的像素可以原样直通。**不要用 `setPixels(int[])`**：那条路径假定的是非预乘数据。

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use jni::JNIEnv;
 use jni::objects::{JObject, JString};
-use jni::sys::{jboolean, jbyteArray, jchar, jfloat, jint, jintArray, jlong, jstring};
+use jni::sys::{jboolean, jbyteArray, jfloat, jint, jintArray, jlong, jstring};
 
 use crate::session::Session;
 use crate::touch::MotionAction;
@@ -67,23 +67,6 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_close(
     }));
 }
 
-/// 敲入一个字符。`ch` 是 UTF-16 码元，BMP 之内与 `char` 同值。
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_app_qingjian_android_QingjianNative_push(
-    _env: JNIEnv,
-    _this: JObject,
-    handle: jlong,
-    ch: jchar,
-) {
-    let Some(session) = (unsafe { from_handle(handle) }) else {
-        return;
-    };
-
-    if let Some(c) = char::from_u32(u32::from(ch)) {
-        session.push(c);
-    }
-}
-
 /// 清空缓冲区。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_clear(
@@ -93,64 +76,6 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_clear(
 ) {
     if let Some(session) = unsafe { from_handle(handle) } {
         session.clear();
-    }
-}
-
-/// 当前候选的文本，一行一个。调试阶段用来验证链路，正式版换成自绘位图。
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_app_qingjian_android_QingjianNative_candidates(
-    env: JNIEnv,
-    _this: JObject,
-    handle: jlong,
-) -> jstring {
-    let text = unsafe { from_handle(handle) }
-        .map(|session| session.candidates().join("\n"))
-        .unwrap_or_default();
-
-    match env.new_string(text) {
-        Ok(value) => value.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
-}
-
-/// 位图通路的探针（M0 临时件，键盘接上之后删）：`which` 0 是色块、其余是文字。
-///
-/// 返回 8 字节头（宽高，各 u32 大端）+ 预乘 RGBA，见 [`crate::surface`]。
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_app_qingjian_android_QingjianNative_probe(
-    env: JNIEnv,
-    _this: JObject,
-    handle: jlong,
-    which: jint,
-) -> jbyteArray {
-    let bytes = match unsafe { from_handle(handle) } {
-        Some(session) => {
-            catch_unwind(AssertUnwindSafe(|| session.probe(which))).unwrap_or_default()
-        }
-        None => Vec::new(),
-    };
-
-    match env.byte_array_from_slice(&bytes) {
-        Ok(array) => array.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
-}
-
-/// 探针用（M0 临时件）：报告探针文字落到了哪些字族，` | ` 分隔。
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_app_qingjian_android_QingjianNative_probeTrace(
-    env: JNIEnv,
-    _this: JObject,
-    handle: jlong,
-) -> jstring {
-    let families = match unsafe { from_handle(handle) } {
-        Some(session) => catch_unwind(AssertUnwindSafe(|| session.trace())).unwrap_or_default(),
-        None => Vec::new(),
-    };
-
-    match env.new_string(families.join(" | ")) {
-        Ok(value) => value.into_raw(),
-        Err(_) => std::ptr::null_mut(),
     }
 }
 
@@ -300,24 +225,4 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_takeCommands(
         return std::ptr::null_mut();
     }
     array.into_raw()
-}
-
-/// 最近一次按下又抬起碰到的东西的调试名称（M3 临时件，M4 删）。
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_app_qingjian_android_QingjianNative_lastTouched(
-    env: JNIEnv,
-    _this: JObject,
-    handle: jlong,
-) -> jstring {
-    let name = match unsafe { from_handle(handle) } {
-        Some(session) => {
-            catch_unwind(AssertUnwindSafe(|| session.last_touched_name())).unwrap_or_default()
-        }
-        None => String::new(),
-    };
-
-    match env.new_string(name) {
-        Ok(value) => value.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
 }
