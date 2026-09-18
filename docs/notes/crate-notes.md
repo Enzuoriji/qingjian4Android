@@ -202,6 +202,13 @@ JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `Qin
   **多指那套状态机也跟着分成两份**（`keyboard/presses` 与 `Session::pressed`），两边的判定**不一样**：
   键「还落在同一个键上」就一直算按着（键大，抖几像素不该掉字），候选条「挪出触摸阈值」才算没挪窝（横向拖是翻页手势）；
   共用的 `within_slop` 在 `src/touch.rs`，阈值那点事只留一个版本。
+- **按键震动（`KeyFeedback.kt`，2026-09-18）**：**直连马达**（`VibrationEffect.createOneShot`，20 ms），
+  **不走 `View.performHapticFeedback`**——那条路要经「视图 → 窗口 → 系统」三层转手，任何一层不买账都是
+  **静默不震**：真机上带着 `VIRTUAL_KEY` + `FLAG_IGNORE_GLOBAL_SETTING` + `VIBRATE` 权限照样不震，
+  而同一台机器 Gboard 震得好好的（说明马达与系统那层没问题）。直连只有一步，成不成一眼看得出来。
+  候选条那一按不震（那是点选项，不是敲键）。清单里要 `VIBRATE` 权限。20 ms 是起点、待调；
+  「长按与抬起力度不同」这类花样等有设置项再说（也没有读系统那个触摸震动开关：读它是一次跨进程查询，
+  每敲一下一次太贵）。
 - **按键语义在 `src/action/`**：渲染器报的 `KeyId` / `BarHitId` 先翻成 `Act`（纯翻译，不看状态、能单独测），
   再由 `Session::apply` 按引擎状态执行——退格有拼音就删字母、没拼音就把退格交给应用；空格有候选就上屏、没有就当空格打出去。
 - **交给应用的东西分两类**：上屏文本走 `commitText`（`takeCommit`），删字与回车走原样按键 `sendKeyEvent`（`takeCommands`）——

@@ -88,12 +88,15 @@ class QingjianSurfaceView(context: Context) : View(context) {
         // 而 POINTER_DOWN / POINTER_UP 指的是另一根。两只拇指快速交替时接触时间会重叠，
         // 混着报会让两根手指互相吃掉对方（真机上「点快了掉字母」）。
         val index = event.actionIndex
-        onTouch?.invoke(
-            event.actionMasked,
-            event.getPointerId(index),
-            event.getX(index),
-            event.getY(index),
-        )
+        val action = event.actionMasked
+        val y = event.getY(index)
+        // 按下就震一下，与原生那条路同一个手感。**候选条不震**：那是点选项，不是敲键。
+        if ((action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) &&
+            y >= (bar?.height ?: 0)
+        ) {
+            keyFeedback(this)
+        }
+        onTouch?.invoke(action, event.getPointerId(index), event.getX(index), y)
         if (event.actionMasked == MotionEvent.ACTION_UP) {
             performClick()
         }
