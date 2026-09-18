@@ -8,18 +8,25 @@ import android.view.View
 import android.view.WindowInsets
 
 /**
- * 贴一张自绘位图的视图。
+ * 贴自绘位图的视图：上面一张候选条、下面一张键盘。
  *
- * 候选条与键盘都由 `qingjian-render` 出位图，这里只负责画出来、把触摸原样转出去——
+ * 两块面都由 `qingjian-render` 出位图，这里只负责画出来、把触摸原样转出去——
  * 不画任何控件、不做任何排版，也**不判断点到了什么**（命中测试在 Rust 里）。
  *
- * 高度由 Rust 告知（键盘主题定的），自己不去猜：安卓按视图量出来的尺寸给输入法窗口大小，
- * 不给高度的话窗口会被撑满整屏。
+ * 触摸坐标**不分块**：视图的 y 轴就是整块输入视图的 y 轴，候选条在上、键盘在下，
+ * 按 y 分派是 Rust 那边的事。所以这里绝不能用两个子视图去拼。
+ *
+ * 高度由两张位图加起来得到，不自己去算：安卓按视图量出来的尺寸给输入法窗口大小，
+ * 报小了会被裁掉，报大了窗口底下留一条空白。
  */
 class QingjianSurfaceView(context: Context) : View(context) {
-    private var bitmap: Bitmap? = null
+    /** 上方候选条。 */
+    private var bar: Bitmap? = null
 
-    /** 视图该有多高（像素），0 表示还不知道。 */
+    /** 下方键盘。 */
+    private var keyboard: Bitmap? = null
+
+    /** 视图该有多高（像素），0 表示位图还没到。 */
     private var contentHeight = 0
 
     /** 屏幕底部被系统手势条 / 导航栏占掉的高度（像素）。 */
@@ -29,20 +36,27 @@ class QingjianSurfaceView(context: Context) : View(context) {
     val bottomInsetPoints: Float
         get() = bottomInset / resources.displayMetrics.density
 
-    /** 触摸回调 `(actionMasked, x, y)`。 */
+    /** 触摸回调 `(actionMasked, x, y)`，坐标是整块输入视图的。 */
     var onTouch: ((Int, Float, Float) -> Unit)? = null
 
     /** 尺寸变化时回调，用来让服务重新告诉 Rust 该画多宽（转屏等）。 */
     var onConfigure: (() -> Unit)? = null
 
-    fun setBitmap(value: Bitmap) {
-        bitmap = value
+    fun setBar(value: Bitmap) {
+        bar = value
+        refreshHeight()
         invalidate()
     }
 
-    /** Rust 告知键盘该有多高（点），变了就重新量一次。 */
-    fun setContentHeightPoints(points: Float) {
-        val pixels = (points * resources.displayMetrics.density).toInt()
+    fun setKeyboard(value: Bitmap) {
+        keyboard = value
+        refreshHeight()
+        invalidate()
+    }
+
+    /** 两张位图加起来就是视图该有的高度，变了就重新量一次。 */
+    private fun refreshHeight() {
+        val pixels = (bar?.height ?: 0) + (keyboard?.height ?: 0)
         if (pixels > 0 && pixels != contentHeight) {
             contentHeight = pixels
             requestLayout()
@@ -85,6 +99,11 @@ class QingjianSurfaceView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         // 位图密度是 DENSITY_NONE，这里按 1:1 贴，不会被缩放
-        bitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+        var y = 0f
+        bar?.let {
+            canvas.drawBitmap(it, 0f, y, null)
+            y += it.height
+        }
+        keyboard?.let { canvas.drawBitmap(it, 0f, y, null) }
     }
 }

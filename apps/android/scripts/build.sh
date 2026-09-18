@@ -12,7 +12,8 @@
 #   QINGJIAN_GRADLE    gradle 可执行文件。缺省找 PATH 里的 gradle，再找 D:\DSH\gradle-*，最后找仓库里的 gradlew
 #   JAVA_HOME          gradle 要 Java 17+。缺省找 C:\Program Files\Java\jdk-17
 #
-# 词库：data/generated/dict.qj 优先；没有就用 data/generated/dict.tsv 现打；都没有退回 assets/sample/dict.tsv。
+# 词库：data/generated/dict.qj 优先；没有就用 data/generated/dict.tsv 现打；再退回基础词库
+# assets/lexicon/dict.tsv（9.3 万条，够翻页）；最后才是随包的样例（148 条，只够验通路）。
 # 打出来的 .qj 落在 target/android/，不动仓库里的文件（`--out-dir` 是顶层参数，要写在子命令前面）。
 #
 # .so 编完会 llvm-strip 掉调试信息（38 MB → 8 MB），为的是别让 jniLibs 白占 60 MB、gradle 打包也快些。
@@ -152,10 +153,12 @@ if [[ -f "$ROOT/data/generated/dict.qj" ]]; then
   cp "$ROOT/data/generated/dict.qj" "$DICT_OUT"
 elif [[ -f "$ROOT/data/generated/dict.tsv" ]]; then
   pack_dict "$ROOT/data/generated/dict.tsv" "青简词库"
+elif [[ -f "$ROOT/assets/lexicon/dict.tsv" ]]; then
+  pack_dict "$ROOT/assets/lexicon/dict.tsv" "青简基础词库"
 elif [[ -f "$ROOT/assets/sample/dict.tsv" ]]; then
   pack_dict "$ROOT/assets/sample/dict.tsv" "青简样例词库"
 else
-  echo "找不到词库（data/generated/ 与 assets/sample/ 都没有）" >&2
+  echo "找不到词库（data/generated/、assets/lexicon/ 与 assets/sample/ 都没有）" >&2
   exit 1
 fi
 

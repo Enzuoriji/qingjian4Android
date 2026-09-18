@@ -11,8 +11,8 @@ import java.util.Locale
 /**
  * 青简的输入法服务。
  *
- * 现在是 M1 的形态：视图贴的是**键盘**的位图，触摸原样转给 Rust 做命中测试，
- * 命中哪个键只打日志——还没接引擎。接引擎在 M3。
+ * 现在是 M2 的形态：候选条与键盘都画出来了，敲字母能出候选——但**还不能选词**。
+ * 点候选、空格上屏、退格删字母是 M3。
  */
 class QingjianImeService : InputMethodService() {
     /** Rust 侧的会话句柄，0 表示没打开。 */
@@ -44,6 +44,9 @@ class QingjianImeService : InputMethodService() {
         view.onConfigure = { configure(view) }
         view.onTouch = { action, x, y ->
             val flags = QingjianNative.touch(handle, action, x, y)
+            if (flags and QingjianNative.FLAG_BAR != 0) {
+                refreshBar(view)
+            }
             if (flags and QingjianNative.FLAG_KEYBOARD != 0) {
                 refreshKeyboard(view)
             }
@@ -57,19 +60,19 @@ class QingjianImeService : InputMethodService() {
         return view
     }
 
-    /** 按当前屏幕宽度告诉 Rust 该画多宽，并把键盘高度要回来设给视图。 */
+    /** 按当前屏幕宽度告诉 Rust 该画多宽，并把整块输入视图的高度要回来。 */
     private fun configure(view: QingjianSurfaceView) {
         if (handle == 0L) return
         val metrics = resources.displayMetrics
-        val widthPoints = metrics.widthPixels / metrics.density
-        val height = QingjianNative.configureKeyboard(
+        QingjianNative.configure(
             handle,
-            widthPoints,
+            metrics.widthPixels / metrics.density,
             metrics.density,
             view.bottomInsetPoints,
             isDark(),
         )
-        view.setContentHeightPoints(height)
+        // 高度不用自己算：视图按两张位图加起来的像素高自己量
+        refreshBar(view)
         refreshKeyboard(view)
     }
 
@@ -80,6 +83,23 @@ class QingjianImeService : InputMethodService() {
             QingjianNative.push(handle, letter)
         }
         Log.i(TAG, "$ENGINE_PROBE 的候选：${QingjianNative.candidates(handle).replace('\n', ' ')}")
+        QingjianNative.clear(handle)
+    }
+
+    /** 重新取一张候选条位图贴上。Rust 那边没脏就会返回同一张，不会白画。 */
+    private fun refreshBar(view: QingjianSurfaceView) {
+        if (handle == 0L) return
+        val bytes = QingjianNative.barSurface(handle)
+        if (bytes == null || bytes.isEmpty()) {
+            Log.e(TAG, "候选条没画出来（渲染器没建起来，或者还没配过宽度）")
+            return
+        }
+        QingjianNative.toBitmap(bytes)?.let(view::setBar)
+        // M2 验收用：光看位图看不出候选对不对，把文本也打一份（M4 删）。
+        // 只打头几个——完整词库下「shi」有五百个候选，全打出来日志没法看。
+        val candidates = QingjianNative.candidates(handle).split('\n').filter { it.isNotEmpty() }
+        val head = candidates.take(CANDIDATE_LOG_LIMIT).joinToString(" ")
+        Log.i(TAG, "候选：${head.ifEmpty { "（空）" }}${(candidates.size - CANDIDATE_LOG_LIMIT).takeIf { it > 0 }?.let { " 等 $it 个" } ?: ""}")
     }
 
     /** 重新取一张键盘位图贴上。Rust 那边没脏就会返回同一张，不会白画。 */
@@ -90,7 +110,7 @@ class QingjianImeService : InputMethodService() {
             Log.e(TAG, "键盘没画出来（渲染器没建起来，或者还没配过宽度）")
             return
         }
-        QingjianNative.toBitmap(bytes)?.let(view::setBitmap)
+        QingjianNative.toBitmap(bytes)?.let(view::setKeyboard)
     }
 
     /** 系统现在是深色吗。 */
@@ -114,5 +134,8 @@ class QingjianImeService : InputMethodService() {
 
         /** 引擎自检用的拼音。 */
         const val ENGINE_PROBE = "kaifa"
+
+        /** 候选日志最多打几个（M2 临时件，M4 删）。 */
+        const val CANDIDATE_LOG_LIMIT = 6
     }
 }

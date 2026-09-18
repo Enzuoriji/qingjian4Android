@@ -154,12 +154,12 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_probeTrace(
     }
 }
 
-/// 壳报告键盘的可用宽度（点）、屏幕密度、底部被系统占掉的高度、明暗，
-/// 返回键盘总共该有多高（点，含底部那一段）。
+/// 壳报告输入视图的宽度（点）、屏幕密度、底部被系统占掉的高度、明暗，
+/// 返回整块输入视图**总共该有多高**（点）：候选条 + 键盘 + 底部让开的那一段。
 ///
 /// 高度要回传：安卓按视图量出来的尺寸给输入法窗口大小，壳不知道高度就会把窗口撑满整屏。
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_app_qingjian_android_QingjianNative_configureKeyboard(
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_configure(
     _env: JNIEnv,
     _this: JObject,
     handle: jlong,
@@ -170,10 +170,30 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_configureKeyboar
 ) -> jfloat {
     match unsafe { from_handle(handle) } {
         Some(session) => catch_unwind(AssertUnwindSafe(|| {
-            session.configure_keyboard(width, density, bottom_inset, dark != 0)
+            session.configure(width, density, bottom_inset, dark != 0)
         }))
         .unwrap_or(0.0),
         None => 0.0,
+    }
+}
+
+/// 候选条的位图（8 字节头 + 预乘 RGBA）。没配过宽度或渲染器不可用时是空数组。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_barSurface(
+    env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jbyteArray {
+    let bytes = match unsafe { from_handle(handle) } {
+        Some(session) => {
+            catch_unwind(AssertUnwindSafe(|| session.bar_surface())).unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+
+    match env.byte_array_from_slice(&bytes) {
+        Ok(array) => array.into_raw(),
+        Err(_) => std::ptr::null_mut(),
     }
 }
 
