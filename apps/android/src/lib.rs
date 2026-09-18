@@ -7,6 +7,7 @@ mod action;
 mod bridge;
 mod error;
 mod keyboard;
+mod logging;
 mod session;
 mod surface;
 mod touch;

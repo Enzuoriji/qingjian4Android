@@ -22,3 +22,9 @@ jni = "0.21"
 
 [lints]
 workspace = true
+
+# 只有安卓用得上：日志写 logcat、订阅器只在设备上装。宿主机跑测试时不编这两个，
+# 免得为了 `cargo test` 白编一遍 tracing-subscriber。
+[target.'cfg(target_os = "android")'.dependencies]
+android_log-sys = "0.3.2"
+tracing-subscriber.workspace = true

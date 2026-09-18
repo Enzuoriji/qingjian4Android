@@ -224,6 +224,19 @@ JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `Qin
   视图高度按两张位图加起来的像素自己量，不去算点与像素的换算。
   底部被系统手势条占掉的高度从 `WindowInsets.systemGestureInsets` 取，交给渲染器让按键往上让、背景仍铺到底。
 - **候选条一页 5 个**（桌面 9 个）：360pt 宽的屏幕里一页 6 个时三字词会被截成「你…」，5 个才留得下格与格之间的缝。
+- **日志接到 logcat（2026-09-18）**：`tracing` 只是个门面，没人收就什么都不发——安卓这边**一直没装订阅器**，
+  所以 `qingjian-core` / `qingjian-render` 里那些 `info!` / `warn!` / `error!` 全被丢掉，出问题时 logcat 里只剩
+  Kotlin 那几句，Rust 这半边是瞎的。现在 `src/logging.rs` 把它接上：
+  - 标签与 Kotlin 的 `TAG` 同是 `Qingjian`，`adb logcat -s Qingjian` 两边都收得到；行首带 `INFO qingjian_android::…` 的是 Rust 的
+  - 级别映射成 logcat 的优先级（`make_writer_for` 拿得到事件的 `Metadata`），`error!` 能在 `Qingjian:E` 里筛出来
+  - `without_time` + 关掉 ansi：logcat 自己带时间戳
+  - 一条事件一个 writer，**攒到换行才发**——fmt 那一层一条事件要 `write` 好几次，来一次发一条会被拆成好几行 logcat；
+    超过 logcat 的单条上限就分段发，不让它截
+  - 级别写死：release 是 `INFO`、调试包是 `DEBUG`。安卓上没地方设 `RUST_LOG`
+  - 装的位置是 JNI 的 `open`、**在任何会打日志的调用之前**——建会话失败那几条最需要日志，装晚了正好错过；
+    用 `try_init`，重复调用是空操作
+  - `android_log-sys` 与 `tracing-subscriber` 都挂在 `[target.'cfg(target_os = "android")'.dependencies]`，
+    宿主机跑 `cargo test` 不编它们
 - `scripts/build.sh`：cargo ndk 编 .so 到 `jniLibs/` → llvm-strip → 打词库（`dict-convert --out-dir target/android`，不动仓库文件）→ gradle assemble；
   `--install` 顺带装 APK、推词库、`ime enable` + `ime set` 切过来。SDK / NDK / gradle / JDK 都能用环境变量覆盖，不设就自己找。
   词库按 `data/generated/dict.qj` → `data/generated/dict.tsv` → `assets/lexicon/dict.tsv`（9.3 万条）→ `assets/sample/dict.tsv`（148 条）依次退：

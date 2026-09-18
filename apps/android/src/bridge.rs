@@ -39,6 +39,10 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_open(
     locale: JString,
     bundle_dir: JString,
 ) -> jlong {
+    // 装日志。放这儿是图它一定早于任何会打日志的调用——**建会话失败的时候最需要日志**，
+    // 装晚了那几条错误信息就正好错过了。装第二次是空操作。
+    crate::logging::init();
+
     let Ok(path) = env.get_string(&dictionary_path) else {
         return 0;
     };
