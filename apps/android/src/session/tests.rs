@@ -760,20 +760,22 @@ fn the_panels_can_be_walked_all_the_way_around() {
         return;
     };
 
+    // 字母页**直接**进符号页（不必先绕数字页）
+    tap_key(&mut session, KeyId::Panel(Panel::Symbols));
+    tap_key(&mut session, KeyId::Literal('!'));
+    // 符号页的「返回」回字母页
+    tap_key(&mut session, KeyId::Panel(Panel::Letters));
+
     tap_key(&mut session, KeyId::Panel(Panel::Digits));
     tap_key(&mut session, KeyId::Literal('1'));
-
-    tap_key(&mut session, KeyId::Panel(Panel::Symbols));
-    tap_key(&mut session, KeyId::Literal('@'));
-
-    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+    // 数字页的「返回」也在「中」原来那个位置
     tap_key(&mut session, KeyId::Panel(Panel::Letters));
     tap_key(&mut session, KeyId::Letter('n'));
 
     assert_eq!(
         session.take_commit().as_deref(),
-        Some("1@"),
-        "数字页与符号页打出来的该一前一后都在"
+        Some("！1"),
+        "符号页与数字页打出来的该一前一后都在"
     );
     assert_eq!(
         preedit(&session).as_deref(),
@@ -789,7 +791,6 @@ fn a_symbol_comes_out_full_width_in_chinese_mode() {
         return;
     };
 
-    tap_key(&mut session, KeyId::Panel(Panel::Digits));
     tap_key(&mut session, KeyId::Panel(Panel::Symbols));
     tap_key(&mut session, KeyId::Literal('?'));
 

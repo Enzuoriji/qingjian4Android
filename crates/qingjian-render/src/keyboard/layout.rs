@@ -62,11 +62,13 @@ impl KeyboardLayout {
                 },
                 KeyRow {
                     keys: vec![
-                        Key::new(KeyId::Mode, 1.5),
-                        // 这一行原来 9 个单位宽，插进 123 之后把空格让出 1 个单位，
+                        // 字母页**直接进得了数字页与符号页**，不必先绕一层。
+                        // 这一行原先 9 个单位宽，插两个切页键之后把空格从 5 让到 3，
                         // **还是 9 个**——不然它会变成最宽的一行，把整块键盘的键都挤小
+                        Key::new(KeyId::Panel(Panel::Symbols), 1.0),
+                        Key::new(KeyId::Mode, 1.5),
                         Key::new(KeyId::Panel(Panel::Digits), 1.0),
-                        Key::new(KeyId::Space, 4.0),
+                        Key::new(KeyId::Space, 3.0),
                         Key::new(KeyId::Comma, 1.0),
                         Key::new(KeyId::Enter, 1.5),
                     ],
@@ -94,7 +96,8 @@ impl KeyboardLayout {
                     keys: [
                         vec![Key::new(KeyId::Literal('-'), 1.0)],
                         literals("456").keys,
-                        vec![Key::new(KeyId::Panel(Panel::Letters), 1.0)],
+                        // 这一格原来是「返回」，它挪到底下「中」的位置去了（那儿才是回退该在的地方）
+                        vec![Key::new(KeyId::Literal('@'), 1.0)],
                     ]
                     .concat(),
                 },
@@ -109,8 +112,8 @@ impl KeyboardLayout {
                 KeyRow {
                     keys: vec![
                         Key::new(KeyId::Literal('/'), 1.0),
-                        // 中 / 英 在 0 前面：这样 0 落在中间那一列，跟搜狗那张图一样
-                        Key::new(KeyId::Mode, 1.0),
+                        // 返回在 0 前面：这页放中 / 英是多余的（打字时用不上），回退才该在这儿
+                        Key::new(KeyId::Panel(Panel::Letters), 1.0),
                         Key::new(KeyId::Literal('0'), 1.0),
                         Key::new(KeyId::Space, 1.0),
                         Key::new(KeyId::Enter, 1.0),
@@ -130,7 +133,14 @@ impl KeyboardLayout {
                 KeyRow {
                     keys: [literals("[]{}").keys, vec![Key::new(KeyId::Backspace, 1.0)]].concat(),
                 },
-                literals("#%^&@"),
+                KeyRow {
+                    keys: [
+                        literals("#%^&").keys,
+                        // 这页的中 / 英有用，留着；@ 这格给「回字母页」
+                        vec![Key::new(KeyId::Panel(Panel::Letters), 1.0)],
+                    ]
+                    .concat(),
+                },
                 literals("_=!?."),
                 KeyRow {
                     keys: vec![
@@ -180,11 +190,11 @@ mod tests {
     use super::{KeyId, KeyboardLayout, Panel};
 
     #[test]
-    fn letters_layout_is_26_letters_plus_seven_function_keys() {
+    fn letters_layout_is_26_letters_plus_eight_function_keys() {
         let layout = KeyboardLayout::letters();
         let total: usize = layout.rows().iter().map(|row| row.keys.len()).sum();
-        // 26 字母 + Shift / 退格 / 中英 / 空格 / 逗号 / 回车 / 123（第 3、4 行共 7 个功能键）
-        assert_eq!(total, 26 + 7);
+        // 26 字母 + Shift / 退格 / 中英 / 空格 / 逗号 / 回车 / 123 / 符（第 3、4 行共 8 个功能键）
+        assert_eq!(total, 26 + 8);
         assert_eq!(layout.rows().len(), 4);
     }
 
@@ -233,12 +243,12 @@ mod tests {
         assert_eq!(texts[2][..3], ["*", "7", "8"]);
         assert_eq!(
             texts[3][..3],
-            ["/", "Mode", "0"],
-            "最后一行是 / 中 0：0 要落在中间那一列"
+            ["/", "Letters", "0"],
+            "最后一行是 / 返回 0：回退该在「中」原来那个位置"
         );
     }
 
-    /// 符号页该带的符号一个不少（键帽上是半角原字符，中文模式的全角由引擎转）。
+    /// 符号页该带的符号一个不少（键帽上是半角原字符，中文模式的全角由引擎转）。**没有 @**——那一格让给「回字母页」了。
     #[test]
     fn the_symbol_page_carries_the_symbols() {
         let layout = KeyboardLayout::symbols();
@@ -253,11 +263,11 @@ mod tests {
             .collect();
 
         for expected in [
-            '[', ']', '{', '}', '#', '%', '^', '&', '@', '_', '=', '!', '?', '.',
+            '[', ']', '{', '}', '#', '%', '^', '&', '_', '=', '!', '?', '.',
         ] {
             assert!(literals.contains(&expected), "符号页少了 {expected}");
         }
-        assert_eq!(literals.len(), 14, "符号页的符号数对不上：{literals:?}");
+        assert_eq!(literals.len(), 13, "符号页的符号数对不上：{literals:?}");
     }
 
     #[test]
