@@ -10,8 +10,13 @@ import java.nio.ByteBuffer
  * 类名与包名参与符号名（`Java_app_qingjian_android_QingjianNative_<方法>`），同样不能单独动。
  */
 object QingjianNative {
-    /** 打开会话，返回句柄；失败返回 0。`locale` 决定中日同形字取哪家字形。 */
-    external fun open(dictionaryPath: String, locale: String): Long
+    /**
+     * 打开会话，返回句柄；失败返回 0。
+     *
+     * `locale` 决定中日同形字取哪家字形；`emojiFontPath` 是随包 emoji 字体的路径，
+     * 空串表示用系统里那张（系统那张安卓 15 起画不出来，见 `assets/emoji/README.md`）。
+     */
+    external fun open(dictionaryPath: String, locale: String, emojiFontPath: String): Long
 
     /** 释放会话。 */
     external fun close(handle: Long)

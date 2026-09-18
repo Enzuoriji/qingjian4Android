@@ -5,7 +5,7 @@ mod tests;
 
 use std::path::Path;
 
-use qingjian_core::{Candidate, CandidateKind, Engine, MarkedKind};
+use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
 use qingjian_dictionary::Dictionary;
 use qingjian_render::{
     BarHitId, FontLibrary, Frame, InputMode, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme,
@@ -26,6 +26,12 @@ const PAGE_SIZE: usize = 5;
 
 /// 在候选条上横向划这么远（点）算翻页。
 const SWIPE_MIN: f32 = 40.0;
+
+/// 随包资源目录里的 emoji 字体名（`assets/emoji/README.md` 写了为什么要带它）。
+const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
+
+/// 随包资源目录里的 emoji 表（中文、英文各一张，加载时合成一张）。
+const EMOJI_TABLES: [&str; 2] = ["emoji-zh.tsv", "emoji-en.tsv"];
 
 /// 返回给 Kotlin 的位掩码：哪些面变了、有没有话要交给应用。跨语言只传数字。
 pub mod flags {
@@ -127,19 +133,39 @@ pub struct Session {
 }
 
 impl Session {
-    /// 打开词库、建好引擎与渲染器。`locale` 决定中日同形字取哪家字形（`zh-CN` / `ja`）。
-    pub fn open(dictionary_path: &Path, locale: &str) -> Result<Self, SessionError> {
+    /// 打开词库、建好引擎与渲染器。
+    ///
+    /// `locale` 决定中日同形字取哪家字形（`zh-CN` / `ja`）。`bundle` 是壳从 APK 里解出来的
+    /// 随包资源目录，里面有 emoji 字体与 emoji 表，有哪张用哪张；`None` 表示没有（用系统的 emoji 字体、
+    /// 不出 emoji 候选）。见 `assets/emoji/README.md`。
+    pub fn open(
+        dictionary_path: &Path,
+        locale: &str,
+        bundle: Option<&Path>,
+    ) -> Result<Self, SessionError> {
         let dictionary = Dictionary::from_path(dictionary_path)?;
-        let renderer = match FontLibrary::system(locale) {
+        let emoji_font = bundle
+            .map(|dir| dir.join(EMOJI_FONT))
+            .filter(|path| path.is_file());
+        let library = match emoji_font.as_deref() {
+            Some(path) => FontLibrary::system_with_emoji_fonts(locale, &[path.to_path_buf()]),
+            None => FontLibrary::system(locale),
+        };
+        let renderer = match library {
             Ok(library) => Some(Renderer::new(library)),
             Err(error) => {
                 tracing::error!(%error, locale, "字体库建不起来，自绘渲染器不可用");
                 None
             }
         };
+        let mut engine = Engine::new(dictionary);
+        if let Some(table) = bundle.and_then(load_emoji_tables) {
+            tracing::info!(words = table.len(), "emoji 表已加载");
+            engine = engine.with_emoji(table);
+        }
 
         Ok(Self {
-            engine: Engine::new(dictionary),
+            engine,
             renderer,
             width: 0.0,
             density: 1.0,
@@ -619,6 +645,27 @@ impl Session {
             self.refresh();
         }
     }
+}
+
+/// 把随包目录里的 emoji 表合成一张；一张都没有返回 `None`，坏了的记日志跳过。
+///
+/// 与 macOS 壳 `host/init.rs` 的 `load_emoji_tables` 同一套做法（中文表与英文表各配 emoji，合起来用）。
+fn load_emoji_tables(dir: &Path) -> Option<EmojiTable> {
+    let mut merged: Option<EmojiTable> = None;
+    for name in EMOJI_TABLES {
+        let path = dir.join(name);
+        if !path.is_file() {
+            continue;
+        }
+        match EmojiTable::from_path(&path) {
+            Ok(table) => match &mut merged {
+                Some(all) => all.merge(table),
+                None => merged = Some(table),
+            },
+            Err(error) => tracing::warn!(%error, name, "emoji 表加载失败，跳过"),
+        }
+    }
+    merged
 }
 
 /// 候选 → 渲染器的一行，`index` 是页内下标。

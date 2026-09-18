@@ -6,6 +6,7 @@
 use super::Session;
 use crate::action::{Act, Command};
 use crate::touch::MotionAction;
+use qingjian_core::CandidateKind;
 use qingjian_render::{BarHitId, KeyId};
 use std::path::PathBuf;
 
@@ -89,7 +90,7 @@ fn type_text(session: &mut Session, text: &str) {
 }
 
 fn ready() -> Option<Session> {
-    let mut session = Session::open(&dictionary()?, "zh-CN").ok()?;
+    let mut session = Session::open(&dictionary()?, "zh-CN", None).ok()?;
     session.configure(WIDTH, DENSITY, 0.0, false);
     // 两块面都画一次，命中矩形才存在
     session.keyboard_surface();
@@ -551,4 +552,36 @@ fn the_comma_key_alone_is_just_a_punctuation() {
     tap_key(&mut session, KeyId::Comma);
     assert_eq!(session.take_commit().as_deref(), Some("，"));
     assert!(session.take_commands().is_empty(), "标点不该走原样按键");
+}
+
+/// 随包资源目录，就是仓库的 `assets/emoji/`（emoji 字体与 emoji 表）。
+fn bundle() -> Option<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = root.join("assets/emoji");
+    dir.is_dir().then_some(dir)
+}
+
+#[test]
+fn the_bundled_emoji_table_puts_emoji_in_the_candidates() {
+    let (Some(dictionary), Some(bundle)) = (dictionary(), bundle()) else {
+        return;
+    };
+    let mut session = Session::open(&dictionary, "zh-CN", Some(&bundle)).expect("会话该能打开");
+    session.configure(WIDTH, DENSITY, 0.0, false);
+    session.keyboard_surface();
+    session.bar_surface();
+
+    type_text(&mut session, "nihao");
+
+    // emoji 可能排在后面几页，所以看整份候选而不是当前这一页
+    let emoji: Vec<&str> = session
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.kind == CandidateKind::Emoji)
+        .map(|candidate| candidate.text.as_str())
+        .collect();
+    assert!(
+        !emoji.is_empty(),
+        "带上随包的 emoji 表后该出 emoji 候选，实际一整份里一个都没有"
+    );
 }

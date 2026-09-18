@@ -27,13 +27,17 @@ unsafe fn from_handle<'a>(handle: jlong) -> Option<&'a mut Session> {
     Some(unsafe { &mut *(handle as *mut Session) })
 }
 
-/// 打开会话并返回句柄；失败返回 0。`locale` 决定中日同形字取哪家字形。
+/// 打开会话并返回句柄；失败返回 0。
+///
+/// `locale` 决定中日同形字取哪家字形；`bundle_dir` 是壳从 APK 里解出来的随包资源目录
+/// （emoji 字体与 emoji 表），空串表示没有——那时用系统 emoji 字体、也不出 emoji 候选。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_open(
     mut env: JNIEnv,
     _this: JObject,
     dictionary_path: JString,
     locale: JString,
+    bundle_dir: JString,
 ) -> jlong {
     let Ok(path) = env.get_string(&dictionary_path) else {
         return 0;
@@ -43,9 +47,16 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_open(
         .get_string(&locale)
         .map(String::from)
         .unwrap_or_else(|_| "zh-CN".to_owned());
+    let bundle_dir = env
+        .get_string(&bundle_dir)
+        .map(String::from)
+        .unwrap_or_default();
+    let bundle_dir = (!bundle_dir.is_empty()).then(|| PathBuf::from(bundle_dir));
 
     // panic 穿出 JNI 边界会直接把进程带走，这里拦一次
-    match catch_unwind(AssertUnwindSafe(|| Session::open(&path, &locale))) {
+    match catch_unwind(AssertUnwindSafe(|| {
+        Session::open(&path, &locale, bundle_dir.as_deref())
+    })) {
         Ok(Ok(session)) => Box::into_raw(Box::new(session)) as jlong,
         _ => 0,
     }

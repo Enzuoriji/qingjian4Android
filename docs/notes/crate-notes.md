@@ -106,14 +106,20 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 拼音行为空时也照样占着位置，否则每敲一键都会把上面的应用内容顶一下。下排每格宽度均分（触摸面积一样大）、格间留一条缝，
 词太长就截断补省略号；`×` / `‹` / `›` 与每个候选的位置一并返回，供命中测试。
 
-**彩色 emoji 在安卓上是空白**（2026-09-18 查清，尚未修）：swash 只读 COLR **v0** 的基字形 / 图层记录
-（`swash/src/scale/color.rs` 的 `layers()`），而安卓 15 起自带的 `NotoColorEmoji.ttf` 是**纯 COLR v1、v0 记录为 0**，
-于是三条路全落空：`ColorOutline` 读不到图层 → `ColorBitmap` 没 CBDT/CBLC → 退到矢量轮廓，
-可 COLR 字形的基字形**本身没有轮廓**（可见部分在图层里），最后得到一张 0×0 的空图。
-Windows 的 `Segoe UI Emoji` 同样是 v1 却能画，是因为它额外保留了 3365 条 v0 记录。
-`examples/emoji_probe.rs` 是查这件事的工具：`cargo run -p qingjian-render --example emoji_probe -- <字体文件>` 打印
-每个字形的 content / 尺寸 / 数据量，安卓字体是 `Mask 0×0`、Windows 字体是 `Color N×N`，一眼可比。
-影响面：安卓壳目前没加载 emoji 表（`assets/emoji/*.tsv`），所以**现在根本不出 emoji 候选**，这个坑是埋着的。
+**彩色 emoji 与系统字体**（2026-09-18）：swash 只读 COLR **v0** 的基字形 / 图层记录（`swash/src/scale/color.rs` 的 `layers()`），
+而安卓 15 起自带的 `NotoColorEmoji.ttf` 是**纯 COLR v1、v0 记录为 0**，三条路于是全落空：`ColorOutline` 读不到图层 →
+`ColorBitmap` 没 CBDT/CBLC → 退到矢量轮廓，可 COLR 字形的基字形**本身没有轮廓**（可见部分在图层里），
+最后得到一张 0×0 的空图。Windows 的 `Segoe UI Emoji` 同样是 v1 却能画，是因为它额外保留了 3365 条 v0 记录。
+**修法是随包带一张位图格式（CBDT/CBLC）的旧版 NotoColorEmoji**，渲染器走彩色位图那条路：
+`FontLibrary::system_with_emoji_fonts` 拿壳给的路径**顶替**系统那几张（不能追加——两边字族同名 `Noto Color Emoji`，
+都在库里按哪张说不清）。字体在 `assets/emoji/`，来源、许可、升级注意都写在那里的 README。
+`examples/emoji_probe.rs` 是查这类问题的工具：`cargo run -p qingjian-render --example emoji_probe -- <字体文件>`
+打印每个字形的 content / 尺寸 / 数据量——画得出来是 `Color N×N`，画不出来是 `Mask 0×0`，一眼可比。
+`fonts/mod.rs` 的 `bundled_emoji_font_rasterizes_in_color` 把「随包那张必须画得出彩色」钉成回归测试。
+
+安卓壳那边：随包的 emoji 字体与 emoji 表打在 APK 的 assets 里（`app/build.gradle.kts` 把仓库的 `assets/emoji/`
+整个挂进去），启动时解到 `filesDir/bundle/`（用版本标记文件记着解过没有，10 MB 不必每次拷），
+`Session::open` 的 `bundle` 参数收这个目录——有字体就顶替系统的，有 emoji 表就 `Engine::with_emoji` 接上。
 
 安卓的字体加载在 `fonts/android.rs`（`#[cfg(target_os = "android")]`）：硬编码 `/system/fonts` 清单 + `read_dir` 兜底，**另带一份 `Fallback`**——
 cosmic-text 在安卓上的平台回退表是空的，不自己给的话 `NotoSansCJK-Regular.ttc` 这个字族集合里的中文会落进日文字形，照抄它的 `han_unification` 按脚本选面。
