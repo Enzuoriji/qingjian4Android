@@ -320,7 +320,12 @@ impl Session {
 
     /// 一次触摸（坐标是整块输入视图的）。返回 [`flags`] 的位掩码。
     ///
-    /// 按钮语义：按下记目标、滑出这段距离就取消、抬起时必须还落在按下那个目标上才算数。
+    /// 按钮语义，**要松**：快敲的时候手指本来就会挪几个像素，判定一紧就会把整下敲击当成滑动取消掉
+    /// （真机上「点快了掉字母」就是这么来的）。所以：
+    ///
+    /// - 手指还落在按下那个键上，就一直算按着；滑到别的键或键之间的缝上才取消
+    /// - 抬起时只要还在那个键上、或者只挪了 [TOUCH_SLOP] 那么点距离，都算数
+    ///
     /// 从候选条起手横向划得够远则翻页（往左划是下一页，与翻书一个方向）。
     pub fn touch(&mut self, action: MotionAction, x: f32, y: f32) -> i32 {
         let hit = self.hit(x, y);
@@ -332,16 +337,25 @@ impl Session {
                 self.set_pressed(hit);
             }
             MotionAction::Move => {
-                let moved = (x - self.pressed_at.0).abs() > TOUCH_SLOP
-                    || (y - self.pressed_at.1).abs() > TOUCH_SLOP;
-                if moved {
+                // 键与候选条判得不一样：
+                // 键很大（三十多点宽），手指抖一抖不该掉字，所以「还在这个键上」就继续算按着；
+                // 候选格也宽，但横向拖是翻页手势，只按「挪没挪出触摸阈值」判，
+                // 否则拖一下会被当成点了那个候选。
+                let keep = match self.pressed {
+                    Some(Hit::Key(key)) => hit == Some(Hit::Key(key)),
+                    Some(Hit::Bar(_)) => self.within_slop(x, y),
+                    None => false,
+                };
+                if keep {
+                    self.set_pressed(hit);
+                } else {
                     self.pressed = None;
+                    self.set_pressed(None);
                 }
-                self.set_pressed(if moved { None } else { hit });
             }
             MotionAction::Up => {
-                let fired = match (self.pressed, hit) {
-                    (Some(down), Some(up)) if down == up => Some(up),
+                let fired = match self.pressed {
+                    Some(down) if hit == Some(down) || self.within_slop(x, y) => Some(down),
                     _ => None,
                 };
                 let swiped = fired.is_none() && self.pressed_in_bar;
@@ -404,6 +418,18 @@ impl Session {
     /// 划多远算翻页（像素）。
     fn swipe_min(&self) -> f32 {
         SWIPE_MIN * self.density
+    }
+
+    /// 手指离按下那点这么近（像素）就算没挪窝。**要按密度换算**：安卓自己的触摸阈值是 8 dp，
+    /// 直接拿 8 像素当阈值的话，密度 2.75 的机器上只有 2.9 个点，快敲必然被误判成滑动。
+    fn touch_slop(&self) -> f32 {
+        TOUCH_SLOP * self.density
+    }
+
+    /// 抬起那点离按下那点还在阈值之内吗。
+    fn within_slop(&self, x: f32, y: f32) -> bool {
+        let slop = self.touch_slop();
+        (x - self.pressed_at.0).abs() <= slop && (y - self.pressed_at.1).abs() <= slop
     }
 
     /// 触摸落到了哪一块。

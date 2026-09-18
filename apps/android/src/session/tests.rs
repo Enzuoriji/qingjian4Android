@@ -382,15 +382,33 @@ fn a_small_drag_on_the_bar_does_not_page() {
     };
     type_text(&mut session, "shi");
     let (x, y) = (WIDTH * DENSITY / 2.0, session.bar_height() * DENSITY / 2.0);
+    let first_page: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
+    // 拖的距离要挑在「点击容差」与「翻页阈值」之间：这里 60 像素，
+    // 大于触摸阈值（8 点 × 2.75 ≈ 22 像素）算滑动，远小于翻页阈值（40 点 ≈ 110 像素）
+    let drag = 60.0;
 
     session.touch(MotionAction::Down, x, y);
-    session.touch(MotionAction::Move, x - 20.0, y);
-    session.touch(MotionAction::Up, x - 20.0, y);
+    session.touch(MotionAction::Move, x - drag, y);
+    session.touch(MotionAction::Up, x - drag, y);
 
+    assert_eq!(session.take_commit(), None, "拖了就不该当成点了候选");
     assert!(
-        session.frame.footer.as_deref().unwrap().starts_with("1/"),
-        "只挪一点点该还停在第一页，实际 {:?}",
+        session
+            .frame
+            .footer
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("1/"),
+        "也没划够远，该还停在第一页，实际 {:?}",
         session.frame.footer
+    );
+    assert_eq!(
+        drawn(&session)
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect::<Vec<_>>(),
+        first_page,
+        "候选不该变"
     );
 }
 
@@ -583,5 +601,99 @@ fn the_bundled_emoji_table_puts_emoji_in_the_candidates() {
     assert!(
         !emoji.is_empty(),
         "带上随包的 emoji 表后该出 emoji 候选，实际一整份里一个都没有"
+    );
+}
+
+/// 某个键的命中矩形（**整块输入视图的像素**：y 要加上候选条那一段）。
+fn key_rect(session: &Session, id: KeyId) -> (f32, f32, f32, f32) {
+    let id = match id {
+        KeyId::Letter(c) => KeyId::Letter(c.to_ascii_uppercase()),
+        other => other,
+    };
+    let keyboard = session.keyboard.as_ref().expect("键盘还没画过");
+    let key = keyboard
+        .keys
+        .iter()
+        .find(|key| key.id == id)
+        .unwrap_or_else(|| panic!("键盘上没有 {id:?}"));
+    let bar_pixels = session.bar_height() * session.density;
+    (key.x, bar_pixels + key.y, key.width, key.height)
+}
+
+/// 按下 → 挪一点点 → 抬起，全程都在同一个键上。
+fn tap_with_drift(session: &mut Session, id: KeyId, drift: f32) {
+    let (x, y) = key_centre(session, id);
+    session.touch(MotionAction::Down, x, y);
+    session.touch(MotionAction::Move, x + drift, y);
+    session.touch(MotionAction::Up, x + drift, y);
+    session.bar_surface();
+    session.keyboard_surface();
+}
+
+#[test]
+fn a_fast_tap_that_wobbles_a_few_pixels_still_counts() {
+    // 真机上「点快了掉字母」就是这条：快敲时手指会挪几个像素，
+    // 判定一紧就把整下敲击当成滑动取消掉了
+    for drift in [1.0, 3.0, 6.0, 10.0, 20.0] {
+        let Some(mut session) = ready() else {
+            return;
+        };
+        tap_with_drift(&mut session, KeyId::Letter('n'), drift);
+        assert_eq!(
+            preedit(&session).as_deref(),
+            Some("n"),
+            "手指挪 {drift} 像素仍在同一个键上，这一下该算数"
+        );
+    }
+}
+
+#[test]
+fn lifting_a_hair_past_the_key_edge_still_counts() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y, width, _) = key_rect(&session, KeyId::Letter('a'));
+    // 按在 a 的右边缘里侧，抬起时手指已经越过边缘落进键之间的缝——但只挪了十来像素，
+    // 仍在触摸阈值内，这一下该算在 a 头上（安卓的键盘就是这么判的）
+    session.touch(MotionAction::Down, x + width - 2.0, y + 10.0);
+    session.touch(MotionAction::Up, x + width + 8.0, y + 10.0);
+    session.bar_surface();
+    session.keyboard_surface();
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("a"),
+        "越过边缘一点点该还算在按下的那个键上"
+    );
+}
+
+#[test]
+fn sliding_over_to_another_key_cancels() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (ax, ay) = key_centre(&session, KeyId::Letter('a'));
+    let (bx, by) = key_centre(&session, KeyId::Letter('s'));
+    session.touch(MotionAction::Down, ax, ay);
+    session.touch(MotionAction::Move, bx, by);
+    session.touch(MotionAction::Up, bx, by);
+    session.bar_surface();
+    session.keyboard_surface();
+    assert!(
+        session.frame.preedit.is_none(),
+        "手指滑到隔壁键上该整下作废，实际出了 {:?}",
+        preedit(&session)
+    );
+}
+
+#[test]
+fn the_touch_threshold_scales_with_density() {
+    let Some(session) = ready() else {
+        return;
+    };
+    // 8 点 × 2.75 ≈ 22 像素。要是忘了乘密度就只剩 8 像素，快敲必然误判
+    assert!(
+        (session.touch_slop() - 8.0 * DENSITY).abs() < 0.01,
+        "触摸阈值该按密度换算，实际 {}",
+        session.touch_slop()
     );
 }
