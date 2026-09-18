@@ -6,8 +6,10 @@
 
 mod key;
 mod layout;
+mod panel;
 mod state;
 
 pub use key::{Key, KeyId, KeyStyle};
 pub use layout::{KeyRow, KeyboardLayout};
+pub use panel::Panel;
 pub use state::{InputMode, KeyboardState, ShiftState};

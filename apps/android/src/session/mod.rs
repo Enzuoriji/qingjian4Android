@@ -11,8 +11,8 @@ use std::path::Path;
 use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
 use qingjian_dictionary::Dictionary;
 use qingjian_render::{
-    BarHitId, FontLibrary, Frame, InputMode, Preedit, PreeditSegment, PreeditStyle, RenderedBar,
-    Renderer, Row, ShiftState, Theme,
+    BarHitId, FontLibrary, Frame, InputMode, KeyboardLayout, Panel, Preedit, PreeditSegment,
+    PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme,
 };
 
 use crate::action::{self, Act, Command};
@@ -86,6 +86,9 @@ pub struct Session {
 
     /// 中还是英。同样两边都要：键盘按键帽画字，引擎按它决定往哪条路走。
     mode: InputMode,
+
+    /// 键盘现在在哪一页。切页只换布局，键盘本身不高不矮。
+    panel: Panel,
 
     /// 拼音行。没在组句时为 `None`。
     preedit: Option<Preedit>,
@@ -182,6 +185,7 @@ impl Session {
             keyboard: Some(Keyboard::new()),
             shift: ShiftState::default(),
             mode: InputMode::default(),
+            panel: Panel::Letters,
             preedit: None,
             candidates: Vec::new(),
             page: 0,
@@ -477,6 +481,15 @@ impl Session {
                     _ => ShiftState::Off,
                 };
                 self.mark_keyboard_dirty();
+            }
+            Act::SwitchPanel(panel) => {
+                if panel != self.panel {
+                    self.panel = panel;
+                    // 换布局要连命中矩形一起换——那两个是渲染时一起出来的
+                    if let Some(keyboard) = self.keyboard.as_mut() {
+                        keyboard.set_layout(KeyboardLayout::of(panel));
+                    }
+                }
             }
             Act::ToggleMode => {
                 self.mode = match self.mode {

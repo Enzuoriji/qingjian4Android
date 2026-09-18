@@ -13,7 +13,7 @@ pub use rendered::RenderedKeyboard;
 use super::{Rendered, Renderer};
 use crate::canvas::Canvas;
 use crate::error::RenderError;
-use crate::keyboard::{InputMode, Key, KeyId, KeyboardLayout, KeyboardState, ShiftState};
+use crate::keyboard::{InputMode, Key, KeyId, KeyboardLayout, KeyboardState, Panel, ShiftState};
 use crate::text::TextStyle;
 use crate::theme::KeyboardTheme;
 
@@ -150,5 +150,13 @@ fn label(key: &Key, state: &KeyboardState) -> String {
         KeyId::Enter => "回车".to_owned(),
         KeyId::Space => String::new(),
         KeyId::Shift | KeyId::Backspace => String::new(),
+        // 半角原字符照画：中文模式下它会变成全角，画死成全角在英文模式下就骗人了
+        KeyId::Literal(c) => c.to_string(),
+        // 写的是**要去哪一页**
+        KeyId::Panel(panel) => match panel {
+            Panel::Letters => "返回".to_owned(),
+            Panel::Digits => "123".to_owned(),
+            Panel::Symbols => "符".to_owned(),
+        },
     }
 }

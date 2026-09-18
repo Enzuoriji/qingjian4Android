@@ -1,5 +1,7 @@
 //! 键盘上的一个按键：它是什么、占多宽、长什么样。
 
+use super::panel::Panel;
+
 /// 按键的身份。
 ///
 /// 渲染器**只认身份，不知道按下去该干什么**——把 `KeyId` 翻成「喂给引擎」「上屏」「清空」
@@ -26,6 +28,15 @@ pub enum KeyId {
 
     /// 回车：上屏拼音原文。
     Enter,
+
+    /// 打一个字符：数字、符号、标点都是它。
+    ///
+    /// 存的是**半角原字符**，全角与否交给引擎按设置转（`qingjian-core` 的标点表）——
+    /// 键帽也照这个画，这样英文模式下不会画着全角却打出半角。
+    Literal(char),
+
+    /// 切到另一页。标签写的是**要去哪一页**，不是现在在哪页。
+    Panel(Panel),
 }
 
 /// 按键的样式。只影响配色，不影响行为。
@@ -63,9 +74,12 @@ impl Key {
     /// 这个键按哪种样子画。
     pub const fn style(&self) -> KeyStyle {
         match self.id {
-            KeyId::Letter(_) => KeyStyle::Letter,
+            // 数字与符号跟字母一样是「内容键」，白的
+            KeyId::Letter(_) | KeyId::Literal(_) => KeyStyle::Letter,
             KeyId::Space | KeyId::Enter => KeyStyle::Primary,
-            KeyId::Shift | KeyId::Backspace | KeyId::Mode | KeyId::Comma => KeyStyle::Function,
+            KeyId::Shift | KeyId::Backspace | KeyId::Mode | KeyId::Comma | KeyId::Panel(_) => {
+                KeyStyle::Function
+            }
         }
     }
 }

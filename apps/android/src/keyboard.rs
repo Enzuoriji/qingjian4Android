@@ -129,6 +129,15 @@ impl Keyboard {
         self.dirty = true;
     }
 
+    /// 换一套布局（切页）。换了就得重画，连命中矩形一起换——那两个是一起出来的。
+    pub fn set_layout(&mut self, layout: KeyboardLayout) {
+        self.layout = layout;
+        // 页换了，旧页上按着的手指对新页没有意义
+        self.presses.clear();
+        self.pressed = None;
+        self.dirty = true;
+    }
+
     /// 键盘脏了没有——`Session` 据此决定要不要让壳重取位图。
     pub fn dirty(&self) -> bool {
         self.dirty

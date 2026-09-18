@@ -4,6 +4,17 @@
 //! 得到半键错位，不用单独记缩进量。一个单位多宽由 [`KeyboardLayout::unit_width`] 取最挤的那一行定。
 
 use super::key::{Key, KeyId};
+use super::panel::Panel;
+
+/// 一行按键，一个字符一个键——字母页与数字 / 符号页的一半都是这么来的。
+fn literals(chars: &str) -> KeyRow {
+    KeyRow {
+        keys: chars
+            .chars()
+            .map(|c| Key::new(KeyId::Literal(c), 1.0))
+            .collect(),
+    }
+}
 
 /// 一行按键。
 #[derive(Debug, Clone)]
@@ -25,10 +36,10 @@ pub struct KeyboardLayout {
 }
 
 impl KeyboardLayout {
-    /// 26 键全键盘。
+    /// 字母页：26 键全键盘。
     ///
-    /// 本轮不含 `123` / 符号面板（那两块还没做，摆个按下去没反应的键反而误导），
-    /// 也不含 `'`（隔音符号，字母排不下，留给符号面板那一轮）。见 `docs/design/keyboard.md`。
+    /// 最下一行左边多了个 `123`（去数字页），空格的宽度是从它那儿让出来的，这一行还是 9 个单位宽。
+    /// 不含 `'`（隔音符号）：字母排不下，它现在住在符号页。见 `docs/design/keyboard.md`。
     pub fn letters() -> Self {
         let row = |letters: &str| KeyRow {
             keys: letters
@@ -52,12 +63,93 @@ impl KeyboardLayout {
                 KeyRow {
                     keys: vec![
                         Key::new(KeyId::Mode, 1.5),
-                        Key::new(KeyId::Space, 5.0),
+                        // 这一行原来 9 个单位宽，插进 123 之后把空格让出 1 个单位，
+                        // **还是 9 个**——不然它会变成最宽的一行，把整块键盘的键都挤小
+                        Key::new(KeyId::Panel(Panel::Digits), 1.0),
+                        Key::new(KeyId::Space, 4.0),
                         Key::new(KeyId::Comma, 1.0),
                         Key::new(KeyId::Enter, 1.5),
                     ],
                 },
             ],
+        }
+    }
+
+    /// 数字页。四行五列，**按键排成计算器那样**（1-2-3 / 4-5-6 / 7-8-9，0 在下面），
+    /// 左边一竖条是四个运算符（照搜狗那个面板的样子）。
+    ///
+    /// 每行都是 5 个单位，所以这一页的键**比字母页宽一倍**——一列一个数字，好按。
+    pub fn digits() -> Self {
+        Self {
+            rows: vec![
+                KeyRow {
+                    keys: [
+                        vec![Key::new(KeyId::Literal('+'), 1.0)],
+                        literals("123").keys,
+                        vec![Key::new(KeyId::Backspace, 1.0)],
+                    ]
+                    .concat(),
+                },
+                KeyRow {
+                    keys: [
+                        vec![Key::new(KeyId::Literal('-'), 1.0)],
+                        literals("456").keys,
+                        vec![Key::new(KeyId::Panel(Panel::Letters), 1.0)],
+                    ]
+                    .concat(),
+                },
+                KeyRow {
+                    keys: [
+                        vec![Key::new(KeyId::Literal('*'), 1.0)],
+                        literals("789").keys,
+                        vec![Key::new(KeyId::Panel(Panel::Symbols), 1.0)],
+                    ]
+                    .concat(),
+                },
+                KeyRow {
+                    keys: vec![
+                        Key::new(KeyId::Literal('/'), 1.0),
+                        Key::new(KeyId::Literal('0'), 1.0),
+                        Key::new(KeyId::Mode, 1.0),
+                        Key::new(KeyId::Space, 1.0),
+                        Key::new(KeyId::Enter, 1.0),
+                    ],
+                },
+            ],
+        }
+    }
+
+    /// 符号页。也是四行五列，跟数字页一样的宽度。
+    ///
+    /// 键帽画的是**半角原字符**：中文模式下引擎会转成全角（`？`→`？`），英文模式下原样打出去。
+    /// 画成固定的全角就会在英文模式下骗人。
+    pub fn symbols() -> Self {
+        Self {
+            rows: vec![
+                KeyRow {
+                    keys: [literals("[]{}").keys, vec![Key::new(KeyId::Backspace, 1.0)]].concat(),
+                },
+                literals("#%^&@"),
+                literals("_=!?."),
+                KeyRow {
+                    keys: vec![
+                        Key::new(KeyId::Mode, 1.0),
+                        Key::new(KeyId::Panel(Panel::Digits), 1.0),
+                        Key::new(KeyId::Space, 1.0),
+                        Key::new(KeyId::Comma, 1.0),
+                        Key::new(KeyId::Enter, 1.0),
+                    ],
+                },
+            ],
+        }
+    }
+
+    /// 某一页的布局。
+    pub fn of(panel: Panel) -> Self {
+        match panel {
+            Panel::Letters => Self::letters(),
+            Panel::Digits => Self::digits(),
+            Panel::Symbols => Self::symbols(),
         }
     }
 
@@ -84,15 +176,83 @@ impl KeyboardLayout {
 
 #[cfg(test)]
 mod tests {
-    use super::KeyboardLayout;
+    use super::{KeyId, KeyboardLayout, Panel};
 
     #[test]
-    fn letters_layout_is_26_letters_plus_eight_function_keys() {
+    fn letters_layout_is_26_letters_plus_seven_function_keys() {
         let layout = KeyboardLayout::letters();
         let total: usize = layout.rows().iter().map(|row| row.keys.len()).sum();
-        // 26 字母 + Shift / 退格 / 中英 / 空格 / 逗号 / 回车 / …（第 3、4 行共 6 个功能键）
-        assert_eq!(total, 26 + 6);
+        // 26 字母 + Shift / 退格 / 中英 / 空格 / 逗号 / 回车 / 123（第 3、4 行共 7 个功能键）
+        assert_eq!(total, 26 + 7);
         assert_eq!(layout.rows().len(), 4);
+    }
+
+    /// 每一页都得是四行——**键盘高度是定死的**，页与页行数不一样就会把上面的应用顶一下。
+    #[test]
+    fn every_panel_is_four_rows_of_five_units() {
+        for panel in [Panel::Letters, Panel::Digits, Panel::Symbols] {
+            let layout = KeyboardLayout::of(panel);
+            assert_eq!(layout.rows().len(), 4, "{panel:?} 该是四行");
+            if panel == Panel::Letters {
+                continue;
+            }
+            for (index, row) in layout.rows().iter().enumerate() {
+                assert_eq!(
+                    row.weight(),
+                    5.0,
+                    "{panel:?} 第 {} 行不是 5 个单位宽",
+                    index + 1
+                );
+            }
+        }
+    }
+
+    /// 数字页照计算器那样排：1-2-3 在最上面一行，0 在最下，左边一竖条是运算符。
+    #[test]
+    fn digits_are_laid_out_like_a_calculator() {
+        let layout = KeyboardLayout::digits();
+        let texts: Vec<Vec<String>> = layout
+            .rows()
+            .iter()
+            .map(|row| {
+                row.keys
+                    .iter()
+                    .map(|key| match key.id {
+                        KeyId::Literal(c) => c.to_string(),
+                        KeyId::Panel(panel) => format!("{panel:?}"),
+                        other => format!("{other:?}"),
+                    })
+                    .collect()
+            })
+            .collect();
+
+        assert_eq!(texts[0][..3], ["+", "1", "2"], "第一行该是 + 与 1 2 3");
+        assert_eq!(texts[0][4], "Backspace");
+        assert_eq!(texts[1][..3], ["-", "4", "5"]);
+        assert_eq!(texts[2][..3], ["*", "7", "8"]);
+        assert_eq!(texts[3][..2], ["/", "0"], "最后一行头两个是运算符与 0");
+    }
+
+    /// 符号页该带的符号一个不少（键帽上是半角原字符，中文模式的全角由引擎转）。
+    #[test]
+    fn the_symbol_page_carries_the_symbols() {
+        let layout = KeyboardLayout::symbols();
+        let literals: Vec<char> = layout
+            .rows()
+            .iter()
+            .flat_map(|row| row.keys.iter())
+            .filter_map(|key| match key.id {
+                KeyId::Literal(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+
+        for expected in [
+            '[', ']', '{', '}', '#', '%', '^', '&', '@', '_', '=', '!', '?', '.',
+        ] {
+            assert!(literals.contains(&expected), "符号页少了 {expected}");
+        }
+        assert_eq!(literals.len(), 14, "符号页的符号数对不上：{literals:?}");
     }
 
     #[test]

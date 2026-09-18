@@ -25,6 +25,9 @@ pub fn on_key(key: KeyId) -> Act {
         KeyId::Mode => Act::ToggleMode,
         // 键盘上画的是全角「，」，这里给引擎的是半角原字符，转不转由它按设置定
         KeyId::Comma => Act::Punctuate(','),
+        // 数字与符号一样：键帽上是原字符，全角与否交给引擎
+        KeyId::Literal(c) => Act::Punctuate(c),
+        KeyId::Panel(panel) => Act::SwitchPanel(panel),
     }
 }
 
@@ -41,7 +44,7 @@ pub fn on_bar(id: BarHitId) -> Act {
 #[cfg(test)]
 mod tests {
     use super::{Act, on_bar, on_key};
-    use qingjian_render::{BarHitId, KeyId};
+    use qingjian_render::{BarHitId, KeyId, Panel};
 
     #[test]
     fn letters_go_to_the_engine() {
@@ -64,6 +67,25 @@ mod tests {
     fn the_comma_key_hands_the_engine_the_half_width_character() {
         // 键帽上画的是「，」，但引擎拿到的该是半角 —— 全角与否是它的判断
         assert_eq!(on_key(KeyId::Comma), Act::Punctuate(','));
+    }
+
+    #[test]
+    fn literals_go_through_the_punctuation_path() {
+        // 数字与符号都走这条路：全角与否是引擎按设置定的，这边只报原字符
+        assert_eq!(on_key(KeyId::Literal('7')), Act::Punctuate('7'));
+        assert_eq!(on_key(KeyId::Literal('?')), Act::Punctuate('?'));
+    }
+
+    #[test]
+    fn panel_keys_switch_panels() {
+        assert_eq!(
+            on_key(KeyId::Panel(Panel::Digits)),
+            Act::SwitchPanel(Panel::Digits)
+        );
+        assert_eq!(
+            on_key(KeyId::Panel(Panel::Letters)),
+            Act::SwitchPanel(Panel::Letters)
+        );
     }
 
     #[test]

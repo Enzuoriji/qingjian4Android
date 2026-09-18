@@ -7,7 +7,7 @@ use super::Session;
 use crate::action::{Act, Command};
 use crate::touch::MotionAction;
 use qingjian_core::CandidateKind;
-use qingjian_render::{BarHitId, KeyId};
+use qingjian_render::{BarHitId, KeyId, Panel};
 use std::path::PathBuf;
 
 /// 单指测试用的 pointer id。多点触控的用例自己给别的编号。
@@ -747,5 +747,95 @@ fn a_slide_from_one_finger_does_not_cancel_another() {
         preedit(&session).as_deref(),
         Some("n"),
         "一根手指滑走，不该把另一根已经按下的字母也带走"
+    );
+}
+
+/// 三页走一圈：字母 →数字 →符号 →数字 →字母，每页上的键都点得着。
+///
+/// `tap_key` 的点位是从**当前渲染出来的命中矩形**里取的，找不到那个键就 panic——
+/// 所以「点着了」本身就是「这一页真的换过去了」的证据。
+#[test]
+fn the_panels_can_be_walked_all_the_way_around() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+    tap_key(&mut session, KeyId::Literal('1'));
+
+    tap_key(&mut session, KeyId::Panel(Panel::Symbols));
+    tap_key(&mut session, KeyId::Literal('@'));
+
+    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+    tap_key(&mut session, KeyId::Panel(Panel::Letters));
+    tap_key(&mut session, KeyId::Letter('n'));
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("1@"),
+        "数字页与符号页打出来的该一前一后都在"
+    );
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("n"),
+        "回到字母页还能接着打拼音"
+    );
+}
+
+/// 符号在中文模式下出全角——引擎那张表转的，壳这边只报半角原字符。
+#[test]
+fn a_symbol_comes_out_full_width_in_chinese_mode() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+    tap_key(&mut session, KeyId::Panel(Panel::Symbols));
+    tap_key(&mut session, KeyId::Literal('?'));
+
+    assert_eq!(session.take_commit().as_deref(), Some("？"));
+}
+
+/// 数字保持半角；数字后面那个点也保持半角（引擎的规矩）。
+#[test]
+fn digits_and_a_trailing_dot_stay_half_width() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+    tap_key(&mut session, KeyId::Literal('3'));
+    // 小数点住在符号页
+    tap_key(&mut session, KeyId::Panel(Panel::Symbols));
+    tap_key(&mut session, KeyId::Literal('.'));
+    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+    tap_key(&mut session, KeyId::Literal('1'));
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("3.1"),
+        "数字后面那个点该保持半角，中文模式下也不转成句号"
+    );
+}
+
+/// 组句时敲数字：先把高亮候选上屏，再打数字——跟敲逗号一个规矩。
+#[test]
+fn a_digit_while_composing_commits_the_word_first() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let first = drawn(&session)
+        .first()
+        .map(|text| (*text).to_owned())
+        .expect("该有候选");
+
+    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+    tap_key(&mut session, KeyId::Literal('1'));
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some(format!("{first}1").as_str()),
+        "该先上屏「{first}」再打数字"
     );
 }
