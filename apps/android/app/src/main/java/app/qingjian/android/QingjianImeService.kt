@@ -4,6 +4,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
@@ -100,6 +101,9 @@ class QingjianImeService : InputMethodService() {
         configure(view)
         view.onConfigure = { configure(view) }
         view.onTouch = { action, x, y ->
+            // 打出慢帧：这一整套（引擎查询 + 画两张位图 + 过 JNI + 传成 Bitmap）都在
+            // 触摸回调里同步做，一次超过一帧的时间打字就会跟不上手感。慢了就报出来。
+            val started = SystemClock.elapsedRealtime()
             val flags = QingjianNative.touch(handle, action, x, y)
             // 先上屏再镜像拼音：上屏会把组字区替换掉，剩下的拼音要紧跟着补回去
             if (flags and QingjianNative.FLAG_COMMIT != 0) {
@@ -113,6 +117,10 @@ class QingjianImeService : InputMethodService() {
             }
             if (flags and QingjianNative.FLAG_KEYBOARD != 0) {
                 refreshKeyboard(view)
+            }
+            val elapsed = SystemClock.elapsedRealtime() - started
+            if (elapsed >= SLOW_TOUCH_MS) {
+                Log.w(TAG, "这一下花了 ${elapsed}ms，打字会跟不上手感")
             }
         }
         return view
@@ -218,5 +226,8 @@ class QingjianImeService : InputMethodService() {
 
         /** emoji 那几个文件解到私有目录时用的子目录名。 */
         const val BUNDLE_DIR = "emoji"
+
+        /** 一次触摸超过这么多毫秒就报一声（约一帧）；打字手感的分水岭。 */
+        const val SLOW_TOUCH_MS = 16L
     }
 }

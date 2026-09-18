@@ -26,6 +26,12 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // 正式的签名密钥还没有，先拿调试密钥签：能装、能测，但**不能拿去分发**。
+            // 要发分发版得自己生成 keystore 换掉这一行。
+            //
+            // 为什么需要它：release 构建的 Rust 是开了优化的，键盘一次渲染 debug 要 19.7ms、
+            // release 只要 1.26ms（桌面 CPU 上量过），打字手感完全两回事。
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

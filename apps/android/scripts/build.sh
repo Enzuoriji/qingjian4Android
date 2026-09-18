@@ -24,8 +24,11 @@
 # 注意这一步只影响 jniLibs 占的磁盘和打包耗时，**不影响 APK 大小**——AGP 打包时自己还会 strip 一遍。
 # 实测（debug、两个 ABI）：APK 44 MB，进包的 .so 是 13.7 MB（arm64-v8a）+ 16.0 MB（x86_64），未压缩存贮。
 #
-# --install 会自动 `ime enable` + `ime set` 切到青简，不用手点系统设置。release APK 目前没配签名，
-# 打出来是 unsigned，装不上——要发分发版得先加 signingConfig。
+# --install 会自动 `ime enable` + `ime set` 切到青简，不用手点系统设置。
+#
+# 用 --release：调试包快得多。debug 的 Rust 没优化，键盘一次渲染要 19.7ms，release 只要 1.26ms
+# （桌面 CPU 上量的），而每敲一下要重画两次键盘——真机上打字跟不跟得上手感就看这个。
+# release 目前用调试密钥签（见 app/build.gradle.kts），能装能测，但不能拿去分发。
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -178,7 +181,7 @@ echo "== 打 APK（$PROFILE）=="
 if [[ "$PROFILE" == "debug" ]]; then
   APK="$HERE/app/build/outputs/apk/debug/app-debug.apk"
 else
-  APK="$HERE/app/build/outputs/apk/release/app-release-unsigned.apk"
+  APK="$HERE/app/build/outputs/apk/release/app-release.apk"
 fi
 [[ -f "$APK" ]] || { echo "没找到打出来的 APK：$APK" >&2; exit 1; }
 echo "  $APK  ($(du -m "$APK" | cut -f1) MB)"
