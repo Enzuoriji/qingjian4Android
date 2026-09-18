@@ -839,3 +839,51 @@ fn a_digit_while_composing_commits_the_word_first() {
         "该先上屏「{first}」再打数字"
     );
 }
+
+/// 换应用（`clear`）之后键盘回到字母页——键盘收起来再弹出来该从字母页开始。
+///
+/// 判法是「点得着 / 点不着」：`tap_key` 的点位从**当前渲染出来的命中矩形**里取，找不到就 panic。
+#[test]
+fn switching_apps_puts_the_keyboard_back_on_the_letters_page() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+    tap_key(&mut session, KeyId::Literal('1'));
+    assert_eq!(session.take_commit().as_deref(), Some("1"), "先在数字页");
+
+    // 换应用：壳在 onFinishInput 里调它，再照回来的掩码重画键盘（这里是同一套动作）
+    let flags = session.clear();
+    assert_eq!(flags & 2, 2, "掩码里该带 FLAG_KEYBOARD，壳据此重画");
+    session.keyboard_surface();
+
+    tap_key(&mut session, KeyId::Letter('n'));
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("n"),
+        "回到字母页，字母键点得着"
+    );
+}
+
+/// 候选条上那个 ×（`Act::Clear`）只清拼音，**不动页**——跟换应用不是一回事。
+#[test]
+fn the_clear_button_does_not_change_the_panel() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    // 候选条上那个 × 只在**有拼音**时才存在，先打一段拼音；切页不动拼音
+    type_text(&mut session, "nihao");
+    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+
+    tap_bar(&mut session, BarHitId::Clear);
+    session.keyboard_surface();
+
+    tap_key(&mut session, KeyId::Literal('8'));
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("8"),
+        "还在数字页，数字键还点得着"
+    );
+}

@@ -21,8 +21,13 @@ object QingjianNative {
     /** 释放会话。 */
     external fun close(handle: Long)
 
-    /** 清空缓冲区。换应用时调，免得在 A 应用敲的拼音跑到 B 应用里。 */
-    external fun clear(handle: Long)
+    /**
+     * 清空缓冲区。换应用时调，免得在 A 应用敲的拼音跑到 B 应用里。
+     *
+     * 返回与 [touch] 同一种位掩码：它顺带把键盘复位回字母页，**那时键盘位图得重画**，
+     * 壳照这个掩码走同一套收尾。
+     */
+    external fun clear(handle: Long): Int
 
     /**
      * 告诉 Rust 输入视图有多宽（点）、屏幕密度、底部被系统占掉多高、是不是深色。

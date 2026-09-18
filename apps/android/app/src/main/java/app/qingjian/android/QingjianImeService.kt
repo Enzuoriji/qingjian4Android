@@ -25,6 +25,9 @@ class QingjianImeService : InputMethodService() {
     /** Rust 侧的会话句柄，0 表示没打开。 */
     private var handle = 0L
 
+    /** 输入视图。`onFinishInput` 里也要用它重画，所以记一份。 */
+    private var inputView: QingjianSurfaceView? = null
+
     override fun onCreate() {
         super.onCreate()
 
@@ -96,6 +99,7 @@ class QingjianImeService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         val view = QingjianSurfaceView(this)
+        inputView = view
         // 直接按屏幕宽度配一次，不等视图量出来——视图的初始高度是 0，安卓不会给 0 高的视图
         // 发尺寸变化回调，等它就成了死锁。宽度变了（转屏）时再走 onConfigure。
         configure(view)
@@ -160,7 +164,13 @@ class QingjianImeService : InputMethodService() {
     override fun onFinishInput() {
         super.onFinishInput()
         if (handle == 0L) return
-        QingjianNative.clear(handle)
+        // 清空顺带把键盘复位回字母页，掩码里会带 FLAG_KEYBOARD——照同一套收尾重画一遍，
+        // 不然键盘收起来再弹出来还停着上一页的键
+        val flags = QingjianNative.clear(handle)
+        inputView?.let { view ->
+            if (flags and QingjianNative.FLAG_BAR != 0) refreshBar(view)
+            if (flags and QingjianNative.FLAG_KEYBOARD != 0) refreshKeyboard(view)
+        }
         mirrorPreedit()
     }
 

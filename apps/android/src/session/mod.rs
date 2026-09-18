@@ -200,9 +200,28 @@ impl Session {
     }
 
     /// 清空缓冲区。换应用时壳调它，免得在 A 应用敲的拼音跑到 B 应用里。
-    pub fn clear(&mut self) {
+    /// 顺带把键盘**复位回字母页**：键盘收起来再弹出来该从字母页开始（跟主流一致），
+    /// 而不是上次停在数字页这次还停在那儿。这里正是那个时机——候选条上那个 ×（`Act::Clear`）
+    /// 只清拼音、不动页，两者不是一回事。
+    /// 返回 [`flags`] 的位掩码，跟 [`Self::touch`] 一样——**复位页之后键盘位图得重画**，
+    /// 壳照那个掩码走同一套收尾（不然屏幕上还停着上一页的键）。
+    pub fn clear(&mut self) -> i32 {
         self.engine.clear();
+        self.set_panel(Panel::Letters);
         self.recompose();
+        self.mask()
+    }
+
+    /// 换一页：记下来，并把新布局交给键盘前台（命中矩形跟着一起换）。
+    fn set_panel(&mut self, panel: Panel) {
+        if panel == self.panel {
+            return;
+        }
+        self.panel = panel;
+        // 换布局要连命中矩形一起换——那两个是渲染时一起出来的
+        if let Some(keyboard) = self.keyboard.as_mut() {
+            keyboard.set_layout(KeyboardLayout::of(panel));
+        }
     }
 
     /// 壳报告输入视图的宽度（点）、屏幕密度、底部被系统占掉的高度、明暗，
@@ -482,15 +501,7 @@ impl Session {
                 };
                 self.mark_keyboard_dirty();
             }
-            Act::SwitchPanel(panel) => {
-                if panel != self.panel {
-                    self.panel = panel;
-                    // 换布局要连命中矩形一起换——那两个是渲染时一起出来的
-                    if let Some(keyboard) = self.keyboard.as_mut() {
-                        keyboard.set_layout(KeyboardLayout::of(panel));
-                    }
-                }
-            }
+            Act::SwitchPanel(panel) => self.set_panel(panel),
             Act::ToggleMode => {
                 self.mode = match self.mode {
                     InputMode::Chinese => InputMode::English,

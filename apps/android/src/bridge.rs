@@ -88,9 +88,10 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_clear(
     _env: JNIEnv,
     _this: JObject,
     handle: jlong,
-) {
-    if let Some(session) = unsafe { from_handle(handle) } {
-        session.clear();
+) -> jint {
+    match unsafe { from_handle(handle) } {
+        Some(session) => catch_unwind(AssertUnwindSafe(|| session.clear())).unwrap_or(0),
+        None => 0,
     }
 }
 
