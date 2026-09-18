@@ -191,7 +191,17 @@ JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `Qin
   **不要用 `setPixels(int[])`**，那条路径假定非预乘。
 - **命中测试在 Rust 里**：`Session::touch` 返回位掩码（`flags::BAR` / `KEYBOARD` / `COMMIT` / `PREEDIT`）告诉壳哪些面要重取，位图只在该面脏时重画。
   渲染器只回「按了哪个键」，「按了键干什么」（喂引擎、上屏）留在壳里。
-  **触摸坐标不分块**：候选条与键盘共用一个 y 轴（候选条在上），按 y 分派在 `Session::hit` 里做，所以显示面必须画在**同一个 View** 上，不能用两个子视图去拼。
+  **触摸坐标不分块**：候选条与键盘共用一个 y 轴（候选条在上），按下时按 y 分派（`Session::touch` 转给键盘、`Session::touch_bar` 管候选条），
+  所以显示面必须画在**同一个 View** 上，不能用两个子视图去拼。
+  **一根手指归谁，由按下时落在哪半边定**，之后移动与抬起都送回同一家——手指可能已经划到另一半边上了，
+  按当前坐标重新分派会让这一下凭空消失。两边各自记自己那批 pointer，不认识的不理，所以 `Session` 不必再记一份归属。
+- **键盘单独一层（`src/keyboard.rs`，2026-09-18）**：布局、位图、命中、按下状态机都在 `Keyboard` 里，
+  `Session` 只用 `set_metrics` / `surface` / `touch` / `mark_dirty` / `dirty` / `height` 跟它打交道，
+  Shift 与中 / 英在画的时候借给它——**这两项引擎也要用**（决定大小写、走哪条路），所以存在会话里，键盘自己只记「哪个键看着是按下的」。
+  这样换键盘实现只动这一个文件：将来若改用安卓原生控件拼键盘，`Session::keyboard` 置 `None`、位图那条路自然断掉。
+  **多指那套状态机也跟着分成两份**（`keyboard/presses` 与 `Session::pressed`），两边的判定**不一样**：
+  键「还落在同一个键上」就一直算按着（键大，抖几像素不该掉字），候选条「挪出触摸阈值」才算没挪窝（横向拖是翻页手势）；
+  共用的 `within_slop` 在 `src/touch.rs`，阈值那点事只留一个版本。
 - **按键语义在 `src/action/`**：渲染器报的 `KeyId` / `BarHitId` 先翻成 `Act`（纯翻译，不看状态、能单独测），
   再由 `Session::apply` 按引擎状态执行——退格有拼音就删字母、没拼音就把退格交给应用；空格有候选就上屏、没有就当空格打出去。
 - **交给应用的东西分两类**：上屏文本走 `commitText`（`takeCommit`），删字与回车走原样按键 `sendKeyEvent`（`takeCommands`）——

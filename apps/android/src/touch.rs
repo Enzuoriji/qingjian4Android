@@ -51,6 +51,14 @@ impl MotionAction {
 /// 密度 2.75 的机器上 8 像素只有 2.9 点，快敲时手指挪几个像素就会被误判成滑动，整下敲击丢掉。
 pub const TOUCH_SLOP: f32 = 8.0;
 
+/// `(x, y)` 离按下那点 `at` 还在阈值 `slop` 之内吗。
+///
+/// 键与候选条都用它判「这一下算不算按着了」，所以放在这儿而不是各写一份——
+/// 阈值那点事（见 [`TOUCH_SLOP`]）踩过一次坑，不该有第二个版本。
+pub fn within_slop(at: (f32, f32), slop: f32, x: f32, y: f32) -> bool {
+    (x - at.0).abs() <= slop && (y - at.1).abs() <= slop
+}
+
 #[cfg(test)]
 mod tests {
     use super::MotionAction;

@@ -1,4 +1,7 @@
 //! 一次输入法会话：持有 [`Engine`] 与自绘渲染器，把 Kotlin 侧的调用翻译成它们的方法。
+//!
+//! 这里只管**引擎与候选条**。键盘的画法、命中与按下状态在 [`Keyboard`] 里，
+//! 触摸进来按 y 分给两边（见 [`Session::touch`]）——换掉键盘那半边不影响这一层。
 
 #[cfg(test)]
 mod tests;
@@ -8,15 +11,15 @@ use std::path::Path;
 use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
 use qingjian_dictionary::Dictionary;
 use qingjian_render::{
-    BarHitId, FontLibrary, Frame, InputMode, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme,
-    Preedit, PreeditSegment, PreeditStyle, RenderedBar, RenderedKeyboard, Renderer, Row,
-    ShiftState, Theme,
+    BarHitId, FontLibrary, Frame, InputMode, Preedit, PreeditSegment, PreeditStyle, RenderedBar,
+    Renderer, Row, ShiftState, Theme,
 };
 
 use crate::action::{self, Act, Command};
 use crate::error::SessionError;
+use crate::keyboard::Keyboard;
 use crate::surface;
-use crate::touch::{MotionAction, TOUCH_SLOP};
+use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 
 /// 候选条一页画几个。
 ///
@@ -48,17 +51,6 @@ pub mod flags {
     pub const PREEDIT: i32 = 8;
 }
 
-/// 触摸落在了哪一块上：键盘的键，还是候选条上的某个目标。
-///
-/// 两块面的位图各自独立，但**触摸坐标是整块输入视图的**（候选条在上、键盘在下），
-/// 命中测试由 [`Session`] 统一按 y 分派——壳不需要知道两块面各自在哪。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Hit {
-    Key(KeyId),
-
-    Bar(BarHitId),
-}
-
 /// 安卓壳持有的会话状态。
 ///
 /// Android 一个输入法进程只服务当前前台应用，所以这里跟 macOS 一样是进程级单例，
@@ -85,17 +77,15 @@ pub struct Session {
     /// 深色主题。
     dark: bool,
 
-    /// 键盘布局，建一次就够。
-    layout: KeyboardLayout,
+    /// 键盘那台前台。`None` 表示键盘不由这里画（将来改用安卓原生控件时就是它），
+    /// 位图那条路随之断掉。
+    keyboard: Option<Keyboard>,
 
-    /// 键盘此刻的样子。
-    state: KeyboardState,
+    /// Shift 在哪一档。跟着键盘走，但**引擎也要用**（英文模式决定字母大小写），所以存在会话里。
+    shift: ShiftState,
 
-    /// 画好待用的键盘。命中矩形就在它里面，触摸时直接用，不必重画。
-    keyboard: Option<RenderedKeyboard>,
-
-    /// 键盘脏了没有——`keyboard_surface` 被调用时才真重画。
-    keyboard_dirty: bool,
+    /// 中还是英。同样两边都要：键盘按键帽画字，引擎按它决定往哪条路走。
+    mode: InputMode,
 
     /// 拼音行。没在组句时为 `None`。
     preedit: Option<Preedit>,
@@ -124,27 +114,24 @@ pub struct Session {
     /// 攒着要原样交给应用的按键。壳用 `take_commands` 取走。
     pending_commands: Vec<Command>,
 
-    /// 此刻按着的手指们，**按根记**。
+    /// 此刻按着的、**起手落在候选条上**的手指们，按根记。
     ///
-    /// 快打时两根拇指的接触时间会重叠，只留一个「当前按下的键」的话，
-    /// 后按下的那根会把前一根挤掉，两根的字母一起丢——真机上报的「点快了掉字母」就是它。
-    pressed: Vec<Pressed>,
+    /// 键盘那半边的手指记在 [`Keyboard`] 自己手里，两边各记各的：一根手指属于谁，
+    /// 由按下时落在哪半边决定，之后一直归它。这样抬起时不会因为手指划到了别处而丢掉这一下。
+    pressed: Vec<BarPress>,
 }
 
-/// 一根按着的手指。
+/// 一根按在候选条上的手指。
 #[derive(Debug, Clone, Copy)]
-struct Pressed {
+struct BarPress {
     /// 安卓给的 pointer id。
     pointer: i32,
 
-    /// 按下时命中的目标。
-    hit: Option<Hit>,
+    /// 按下时命中的目标。落在候选之间的缝上时为 `None`。
+    hit: Option<BarHitId>,
 
-    /// 按下时的坐标。抬起时要靠它判断手指还在不在同一个目标上、是不是在划。
+    /// 按下时的坐标。抬起时要靠它判断手指还在不在同一个目标上、划了多远。
     at: (f32, f32),
-
-    /// 这一按是不是落在候选条上（划动翻页只认从候选条起手的）。
-    in_bar: bool,
 
     /// 手指已经滑开了，这一下不再算「点击」。
     ///
@@ -192,10 +179,9 @@ impl Session {
             density: 1.0,
             bottom_inset: 0.0,
             dark: false,
-            layout: KeyboardLayout::letters(),
-            state: KeyboardState::default(),
-            keyboard: None,
-            keyboard_dirty: true,
+            keyboard: Some(Keyboard::new()),
+            shift: ShiftState::default(),
+            mode: InputMode::default(),
             preedit: None,
             candidates: Vec::new(),
             page: 0,
@@ -232,10 +218,17 @@ impl Session {
             self.density = density;
             self.bottom_inset = bottom_inset;
             self.dark = dark;
-            self.keyboard_dirty = true;
             self.bar_dirty = true;
         }
-        self.bar_height() + self.keyboard_theme().height + self.bottom_inset
+        if let Some(keyboard) = self.keyboard.as_mut() {
+            keyboard.set_metrics(width, density, bottom_inset, dark);
+        }
+        self.bar_height() + self.keyboard_height() + self.bottom_inset
+    }
+
+    /// 键盘占多高（点）。键盘不由这里画时是 0——那种情况下高度由壳自己算。
+    fn keyboard_height(&self) -> f32 {
+        self.keyboard.as_ref().map_or(0.0, Keyboard::height)
     }
 
     /// 候选条该有多高（点）。固定值，与有没有候选无关。
@@ -245,7 +238,7 @@ impl Session {
 
     /// 现在是英文模式吗。
     fn english(&self) -> bool {
-        self.state.mode == InputMode::English
+        self.mode == InputMode::English
     }
 
     /// 当前该用的候选窗主题。
@@ -257,12 +250,10 @@ impl Session {
         }
     }
 
-    /// 当前该用的键盘主题。
-    fn keyboard_theme(&self) -> KeyboardTheme {
-        if self.dark {
-            KeyboardTheme::dark()
-        } else {
-            KeyboardTheme::light()
+    /// 叫键盘重画（Shift 与中 / 英切换改的是键帽长相）。
+    fn mark_keyboard_dirty(&mut self) {
+        if let Some(keyboard) = self.keyboard.as_mut() {
+            keyboard.mark_dirty();
         }
     }
 
@@ -290,29 +281,13 @@ impl Session {
             .map_or_else(Vec::new, |bar| surface::encode(&bar.rendered.pixmap))
     }
 
-    /// 键盘的位图（8 字节头 + 预乘 RGBA）。没配过宽度或渲染器不可用时返回空。
+    /// 键盘的位图（8 字节头 + 预乘 RGBA）。没配过宽度、渲染器不可用、或者键盘不由这里画时返回空。
     pub fn keyboard_surface(&mut self) -> Vec<u8> {
-        if self.width <= 0.0 {
-            return Vec::new();
+        let (shift, mode) = (self.shift, self.mode);
+        match self.keyboard.as_mut() {
+            Some(keyboard) => keyboard.surface(self.renderer.as_mut(), shift, mode),
+            None => Vec::new(),
         }
-        if self.keyboard_dirty || self.keyboard.is_none() {
-            let theme = self.keyboard_theme();
-            let (scale, inset) = (self.density, self.bottom_inset);
-            let rendered = self.renderer.as_mut().and_then(|renderer| {
-                renderer
-                    .render_keyboard(&self.layout, &self.state, self.width, inset, &theme, scale)
-                    .ok()
-            });
-            if rendered.is_none() {
-                return Vec::new();
-            }
-            self.keyboard = rendered;
-            self.keyboard_dirty = false;
-        }
-
-        self.keyboard.as_ref().map_or_else(Vec::new, |keyboard| {
-            surface::encode(&keyboard.rendered.pixmap)
-        })
     }
 
     /// 该镜像给应用的拼音行，取走并清掉脏标记。
@@ -339,102 +314,85 @@ impl Session {
 
     /// 一次触摸（坐标是整块输入视图的）。`pointer` 是安卓给的 pointer id。返回 [`flags`] 的位掩码。
     ///
-    /// 按钮语义，**要松**：快敲的时候手指本来就会挪几个像素，判定一紧就会把整下敲击当成滑动取消掉。所以
+    /// 按 y 分给两边：候选条在上、键盘在下。**一根手指归谁，由按下时落在哪半边定**，
+    /// 之后移动与抬起都送回同一家——手指可能已经划到另一半边上了，按当前坐标重新分派
+    /// 会让这一下凭空消失。两边各自记自己那批 pointer，不认识的不理，所以这里不必再记一份归属。
     ///
-    /// - 手指还落在按下那个键上，就一直算按着；滑到别的键或键之间的缝上才取消
-    /// - 抬起时只要还在那个键上、或者只挪了 [`TOUCH_SLOP`] 那么点距离，都算数
-    ///
-    /// 每一根手指各记各的（[`Pressed`]）：两根拇指快速交替时接触时间会重叠，
-    /// 只留一个「当前按下的键」会让后按下的那根把前一根挤掉，两根的字母一起丢。
-    ///
-    /// 从候选条起手横向划得够远则翻页（往左划是下一页，与翻书一个方向）。
+    /// 键盘那边的按钮语义（**要松**：手指抖几像素不该掉字）在 [`Keyboard::touch`] 里，
+    /// 候选条这边见 [`Self::touch_bar`]。
     pub fn touch(&mut self, action: MotionAction, pointer: i32, x: f32, y: f32) -> i32 {
-        let hit = self.hit(x, y);
+        let bar_pixels = self.bar_pixels();
+        let fired = self
+            .keyboard
+            .as_mut()
+            .and_then(|keyboard| keyboard.touch(action, pointer, x, y - bar_pixels));
+        if let Some(key) = fired {
+            self.apply(action::on_key(key));
+        }
+        self.touch_bar(action, pointer, x, y);
+        self.mask()
+    }
+
+    /// 候选条那半边：按下记一笔、滑出去算取消、抬起时判是点了候选还是划着翻页。
+    ///
+    /// 判法与键盘不同：候选格横向拖是翻页手势，所以只按「挪没挪出触摸阈值」判，
+    /// 不按「还在不在原来那一格上」判——否则拖一下会被当成点了那个候选。
+    /// 从候选条起手横向划得够远则翻页（往左划是下一页，与翻书一个方向）。
+    fn touch_bar(&mut self, action: MotionAction, pointer: i32, x: f32, y: f32) {
         match action {
             MotionAction::Down | MotionAction::PointerDown => {
+                // 落在键盘那头，不归这里管
+                if y >= self.bar_pixels() {
+                    return;
+                }
+                let hit = self.bar.as_ref().and_then(|bar| bar.hit(x, y));
                 self.pressed.retain(|held| held.pointer != pointer);
-                self.pressed.push(Pressed {
+                self.pressed.push(BarPress {
                     pointer,
                     hit,
                     at: (x, y),
-                    in_bar: y < self.bar_pixels(),
                     sliding: false,
                 });
-                self.sync_pressed();
             }
             MotionAction::Move => {
-                // 键与候选条判得不一样：
-                // 键很大（三十多点宽），手指抖一抖不该掉字，所以「还在这个键上」就继续算按着；
-                // 候选格也宽，但横向拖是翻页手势，只按「挪没挪出触摸阈值」判，
-                // 否则拖一下会被当成点了那个候选。
                 let slop = self.touch_slop();
-                if let Some(held) = self.pressed.iter_mut().find(|held| held.pointer == pointer) {
-                    let keep = match held.hit {
-                        Some(Hit::Key(key)) => hit == Some(Hit::Key(key)),
-                        Some(Hit::Bar(_)) => Self::within_slop(held.at, slop, x, y),
-                        None => false,
-                    };
-                    if !keep {
-                        held.sliding = true;
-                    }
+                if let Some(held) = self.pressed.iter_mut().find(|held| held.pointer == pointer)
+                    && !within_slop(held.at, slop, x, y)
+                {
+                    held.sliding = true;
                 }
-                self.sync_pressed();
             }
             MotionAction::Up | MotionAction::PointerUp => {
                 let index = self.pressed.iter().position(|held| held.pointer == pointer);
-                let ended = index.map(|index| self.pressed.remove(index));
-                self.sync_pressed();
-                let Some(ended) = ended else {
-                    return self.mask();
+                let Some(ended) = index.map(|index| self.pressed.remove(index)) else {
+                    return;
                 };
+                let hit = self.bar.as_ref().and_then(|bar| bar.hit(x, y));
                 let fired = match ended.hit {
-                    Some(down)
+                    Some(id)
                         if !ended.sliding
-                            && (hit == Some(down)
-                                || Self::within_slop(ended.at, self.touch_slop(), x, y)) =>
+                            && (hit == Some(id)
+                                || within_slop(ended.at, self.touch_slop(), x, y)) =>
                     {
-                        Some(down)
+                        Some(id)
                     }
                     _ => None,
                 };
-                if let Some(target) = fired {
-                    self.act(target);
-                } else if ended.in_bar && (x - ended.at.0).abs() > self.swipe_min() {
+                if let Some(id) = fired {
+                    self.apply(action::on_bar(id));
+                } else if (x - ended.at.0).abs() > self.swipe_min() {
                     // 往左划是下一页，与翻书一个方向
                     self.apply(Act::Page(if x < ended.at.0 { 1 } else { -1 }));
                 }
             }
-            MotionAction::Cancel => {
-                self.pressed.clear();
-                self.sync_pressed();
-            }
-        }
-        self.mask()
-    }
-
-    /// 把「有没有键按着」同步给键盘，只影响键帽的颜色。
-    ///
-    /// 多根手指同时按着时取**最后按下**的那根——键帽只画得出一个按下态，
-    /// 而这已经够用：反馈要的是「我这一下碰到了」，不是同时高亮好几格。
-    fn sync_pressed(&mut self) {
-        let key = self
-            .pressed
-            .iter()
-            .rev()
-            .find_map(|held| match (held.sliding, held.hit) {
-                (false, Some(Hit::Key(key))) => Some(key),
-                _ => None,
-            });
-        if self.state.pressed != key {
-            self.state.pressed = key;
-            self.keyboard_dirty = true;
+            MotionAction::Cancel => self.pressed.clear(),
         }
     }
 
     /// 这一轮下来哪些面要重取、有没有话要交给应用。
     fn mask(&self) -> i32 {
         let mut mask = 0;
-        if self.keyboard_dirty {
+        if self.keyboard.as_ref().is_some_and(Keyboard::dirty) {
             mask |= flags::KEYBOARD;
         }
         if self.bar_dirty {
@@ -463,38 +421,6 @@ impl Session {
     /// 直接拿 8 像素当阈值的话，密度 2.75 的机器上只有 2.9 个点，快敲必然被误判成滑动。
     fn touch_slop(&self) -> f32 {
         TOUCH_SLOP * self.density
-    }
-
-    /// `(x, y)` 离按下那点 `at` 还在阈值 `slop` 之内吗。
-    fn within_slop(at: (f32, f32), slop: f32, x: f32, y: f32) -> bool {
-        (x - at.0).abs() <= slop && (y - at.1).abs() <= slop
-    }
-
-    /// 触摸落到了哪一块。
-    ///
-    /// 候选条在上、键盘在下，两块面共用一条 y 轴：落在候选条那一段的交给它，
-    /// 剩下的减掉候选条高度再交给键盘。
-    fn hit(&self, x: f32, y: f32) -> Option<Hit> {
-        let bar_pixels = self.bar_pixels();
-        if y < bar_pixels {
-            return self
-                .bar
-                .as_ref()
-                .and_then(|bar| bar.hit(x, y))
-                .map(Hit::Bar);
-        }
-        self.keyboard
-            .as_ref()
-            .and_then(|keyboard| keyboard.hit(x, y - bar_pixels))
-            .map(Hit::Key)
-    }
-
-    /// 碰到了某个目标：先翻成动作，再执行。
-    fn act(&mut self, target: Hit) {
-        match target {
-            Hit::Key(key) => self.apply(action::on_key(key)),
-            Hit::Bar(id) => self.apply(action::on_bar(id)),
-        }
     }
 
     /// 执行一个动作。引擎在什么状态决定同一动作的不同走法，都写在这里。
@@ -546,22 +472,22 @@ impl Session {
             Act::Page(step) => self.turn_page(step),
             Act::ToggleShift => {
                 // 安卓上的习惯是单击锁定、再击解锁（桌面才是按住）
-                self.state.shift = match self.state.shift {
+                self.shift = match self.shift {
                     ShiftState::Off => ShiftState::Locked,
                     _ => ShiftState::Off,
                 };
-                self.keyboard_dirty = true;
+                self.mark_keyboard_dirty();
             }
             Act::ToggleMode => {
-                self.state.mode = match self.state.mode {
+                self.mode = match self.mode {
                     InputMode::Chinese => InputMode::English,
                     InputMode::English => InputMode::Chinese,
                 };
                 // 切换时把没上屏的拼音丢掉：留着的话，英文模式下那串字母会按英文词算候选
                 self.engine.clear();
                 self.engine
-                    .set_english_mode(self.state.mode == InputMode::English);
-                self.keyboard_dirty = true;
+                    .set_english_mode(self.mode == InputMode::English);
+                self.mark_keyboard_dirty();
                 self.recompose();
             }
             Act::Punctuate(c) => self.punctuate(c),
@@ -608,7 +534,7 @@ impl Session {
     /// 所以给不了候选——这也是别的壳关掉英文候选时走的那条路。要接候选得先把英文词表生成出来。
     fn type_letter(&mut self, c: char) {
         if self.english() {
-            let c = if self.state.shift.is_upper() {
+            let c = if self.shift.is_upper() {
                 c.to_ascii_uppercase()
             } else {
                 c.to_ascii_lowercase()

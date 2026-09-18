@@ -33,28 +33,9 @@ fn dictionary() -> Option<PathBuf> {
 }
 
 /// 某个键中心的坐标（**整块输入视图的像素**，与壳传进来的一致）。
-///
-/// 布局里的字母键存的是大写（画的时候才按 Shift 转小写），所以这里先转过去比。
 fn key_centre(session: &Session, id: KeyId) -> (f32, f32) {
-    let id = match id {
-        KeyId::Letter(c) => KeyId::Letter(c.to_ascii_uppercase()),
-        other => other,
-    };
-    let keyboard = session
-        .keyboard
-        .as_ref()
-        .expect("键盘还没画过，没有命中矩形");
-    let key = keyboard
-        .keys
-        .iter()
-        .find(|key| key.id == id)
-        .unwrap_or_else(|| panic!("键盘上没有 {id:?}"));
-    // y 从候选条底下开始——壳传进来的就是整块输入视图的坐标
-    let bar_pixels = session.bar_height() * session.density;
-    (
-        key.x + key.width / 2.0,
-        bar_pixels + key.y + key.height / 2.0,
-    )
+    let (x, y, width, height) = key_rect(session, id);
+    (x + width / 2.0, y + height / 2.0)
 }
 
 /// 候选条上某一块的中心。候选条就在视图顶部，所以 y 不用再加偏移。
@@ -608,16 +589,18 @@ fn the_bundled_emoji_table_puts_emoji_in_the_candidates() {
 }
 
 /// 某个键的命中矩形（**整块输入视图的像素**：y 要加上候选条那一段）。
+///
+/// 布局里的字母键存的是大写（画的时候才按 Shift 转小写），所以这里先转过去比。
 fn key_rect(session: &Session, id: KeyId) -> (f32, f32, f32, f32) {
     let id = match id {
         KeyId::Letter(c) => KeyId::Letter(c.to_ascii_uppercase()),
         other => other,
     };
-    let keyboard = session.keyboard.as_ref().expect("键盘还没画过");
-    let key = keyboard
-        .keys
-        .iter()
-        .find(|key| key.id == id)
+    let key = session
+        .keyboard
+        .as_ref()
+        .expect("键盘还没画过，没有命中矩形")
+        .key_rect(id)
         .unwrap_or_else(|| panic!("键盘上没有 {id:?}"));
     let bar_pixels = session.bar_height() * session.density;
     (key.x, bar_pixels + key.y, key.width, key.height)
