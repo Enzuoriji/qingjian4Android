@@ -887,3 +887,31 @@ fn the_clear_button_does_not_change_the_panel() {
         "还在数字页，数字键还点得着"
     );
 }
+
+/// 键盘收起来再弹出来（`onStartInputView` → `reset_panel`）回字母页，**但拼音不动**。
+///
+/// 跟 `clear`（换应用）分开就是这个道理：收起键盘没有结束输入，拼音该留着。
+#[test]
+fn showing_the_keyboard_again_goes_back_to_letters_without_dropping_the_pinyin() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+
+    let flags = session.reset_panel();
+    assert_eq!(flags & 2, 2, "掩码里该带 FLAG_KEYBOARD，壳据此重画");
+    session.keyboard_surface();
+
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("ni'hao"),
+        "收起键盘不该丢掉拼音"
+    );
+    tap_key(&mut session, KeyId::Letter('n'));
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("ni'hao'n"),
+        "回到字母页接着打（n 起了新音节，引擎自己补 '）"
+    );
+}

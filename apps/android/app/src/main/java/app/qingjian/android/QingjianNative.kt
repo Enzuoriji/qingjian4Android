@@ -47,6 +47,9 @@ object QingjianNative {
     /** 键盘的位图（8 字节头 + 预乘 RGBA）。没配过宽度时是空数组。 */
     external fun keyboardSurface(handle: Long): ByteArray?
 
+    /** 键盘又要弹出来了：把页复位回字母页，返回与 [touch] 同一种位掩码。 */
+    external fun resetPanel(handle: Long): Int
+
     /**
      * 一次触摸，返回 [FLAG_BAR] 那样的位掩码，告诉壳哪些面要重取。
      *

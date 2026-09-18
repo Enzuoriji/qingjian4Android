@@ -158,6 +158,19 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_keyboardSurface(
     }
 }
 
+/// 键盘又要弹出来了：把页复位回字母页，返回 [`crate::session::flags`] 的位掩码。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_resetPanel(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jint {
+    match unsafe { from_handle(handle) } {
+        Some(session) => catch_unwind(AssertUnwindSafe(|| session.reset_panel())).unwrap_or(0),
+        None => 0,
+    }
+}
+
 /// 一次触摸，返回 [`crate::session::flags`] 的位掩码。
 ///
 /// `pointer` 是安卓给的 pointer id，`x` / `y` 是**那根手指**的坐标——多点触控要按根分开算，

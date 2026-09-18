@@ -212,6 +212,15 @@ impl Session {
         self.mask()
     }
 
+    /// 键盘又要弹出来了：把页复位回字母页，返回 [`flags`] 的位掩码。
+    ///
+    /// 跟 [`Self::clear`] **分开**：换应用要连拼音一起丢掉，而 BACK 收起键盘再弹出来**不该动拼音**
+    /// ——安卓那时根本没结束输入（`onFinishInput` 不触发），只是窗口藏了。
+    pub fn reset_panel(&mut self) -> i32 {
+        self.set_panel(Panel::Letters);
+        self.mask()
+    }
+
     /// 换一页：记下来，并把新布局交给键盘前台（命中矩形跟着一起换）。
     fn set_panel(&mut self, panel: Panel) {
         if panel == self.panel {

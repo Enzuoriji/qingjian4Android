@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import java.io.File
 import java.io.IOException
 import java.util.Locale
@@ -161,6 +162,22 @@ class QingjianImeService : InputMethodService() {
     }
 
     /** 换应用时把没上屏的拼音丢掉，免得在 A 应用敲的拼音跑到 B 应用里。 */
+    /**
+     * 键盘每次弹出来都**回字母页**：收起来再弹出来不该还停在数字页。
+     *
+     * 挂这儿而不是 `onFinishInput`：BACK 收起键盘时安卓**不结束输入**（`onFinishInput` 不触发），
+     * 只有这个回调一定到。**不动拼音**——那会儿用户只是把键盘收了。
+     */
+    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInputView(info, restarting)
+        if (handle == 0L) return
+        val flags = QingjianNative.resetPanel(handle)
+        inputView?.let { view ->
+            if (flags and QingjianNative.FLAG_BAR != 0) refreshBar(view)
+            if (flags and QingjianNative.FLAG_KEYBOARD != 0) refreshKeyboard(view)
+        }
+    }
+
     override fun onFinishInput() {
         super.onFinishInput()
         if (handle == 0L) return
