@@ -106,6 +106,15 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 拼音行为空时也照样占着位置，否则每敲一键都会把上面的应用内容顶一下。下排每格宽度均分（触摸面积一样大）、格间留一条缝，
 词太长就截断补省略号；`×` / `‹` / `›` 与每个候选的位置一并返回，供命中测试。
 
+**彩色 emoji 在安卓上是空白**（2026-09-18 查清，尚未修）：swash 只读 COLR **v0** 的基字形 / 图层记录
+（`swash/src/scale/color.rs` 的 `layers()`），而安卓 15 起自带的 `NotoColorEmoji.ttf` 是**纯 COLR v1、v0 记录为 0**，
+于是三条路全落空：`ColorOutline` 读不到图层 → `ColorBitmap` 没 CBDT/CBLC → 退到矢量轮廓，
+可 COLR 字形的基字形**本身没有轮廓**（可见部分在图层里），最后得到一张 0×0 的空图。
+Windows 的 `Segoe UI Emoji` 同样是 v1 却能画，是因为它额外保留了 3365 条 v0 记录。
+`examples/emoji_probe.rs` 是查这件事的工具：`cargo run -p qingjian-render --example emoji_probe -- <字体文件>` 打印
+每个字形的 content / 尺寸 / 数据量，安卓字体是 `Mask 0×0`、Windows 字体是 `Color N×N`，一眼可比。
+影响面：安卓壳目前没加载 emoji 表（`assets/emoji/*.tsv`），所以**现在根本不出 emoji 候选**，这个坑是埋着的。
+
 安卓的字体加载在 `fonts/android.rs`（`#[cfg(target_os = "android")]`）：硬编码 `/system/fonts` 清单 + `read_dir` 兜底，**另带一份 `Fallback`**——
 cosmic-text 在安卓上的平台回退表是空的，不自己给的话 `NotoSansCJK-Regular.ttc` 这个字族集合里的中文会落进日文字形，照抄它的 `han_unification` 按脚本选面。
 
