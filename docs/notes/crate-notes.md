@@ -98,6 +98,12 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 （过渡期退路，偏好设置「候选窗口」页可选）；`[general] font` 是候选窗字族名（空为系统字体，`bitmap/font_files.rs` 用 CoreText 按字族名找文件只加载那几个，没装就回系统字体；
 设置页 `preferences/font_picker/` 是搜索框 + 列表）。设计与验收见 `docs/design/rendering.md`。
 
+软键盘走同一条路：布局数据在 `keyboard/`（`KeyboardLayout` 按「单位宽」算几何，每行居中，第 2 行自然得到半键错位，不写死坐标）、绘制在 `renderer/keyboard/`、
+主题在 `theme/keyboard.rs`；`render_keyboard` 与 `render_status` 一样，出位图的同时把**每个键的命中矩形**一并返回。设计与取舍见 `docs/design/keyboard.md`。
+
+安卓的字体加载在 `fonts/android.rs`（`#[cfg(target_os = "android")]`）：硬编码 `/system/fonts` 清单 + `read_dir` 兜底，**另带一份 `Fallback`**——
+cosmic-text 在安卓上的平台回退表是空的，不自己给的话 `NotoSansCJK-Regular.ttc` 这个字族集合里的中文会落进日文字形，照抄它的 `han_unification` 按脚本选面。
+
 ## apps/cli
 
 测试工具，`cargo run -p qingjian-cli -- kaifa`。
@@ -148,6 +154,26 @@ TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解
 
 词库导入（设置「词库」页）走 `qingjian-dictionary::import` 转成 `.qj`（空词库拒绝），多选批量、成功的从 `[dictionaries] disabled` 摘掉、页面显示每个文件的结果；
 Server 每次轮询比对用户 `dicts\` 的路径 / mtime / 长度快照，配置没变也重载新增、同名更新与移除；配置解析失败时词库沿用上次有效的开关（#36）。
+
+## apps/android
+
+安卓输入法壳（`InputMethodService`），跟别的壳一样只做两件事：把触摸翻译成 Core 的输入、把渲染器出的位图贴到输入法窗口。
+JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `QingjianNative.kt` 一一对应（类名与包名参与符号名），**改一边必须同时改另一边**。
+设计与取舍见 `docs/design/keyboard.md`。
+
+- **位图过 JNI**：`surface::encode` 出「8 字节头（宽高，各 u32 大端）+ 预乘 RGBA」，Kotlin 侧 `Bitmap.createBitmap(w, h, ARGB_8888)` + `copyPixelsFromBuffer` 原样吃下——
+  `ARGB_8888` 的**内存布局**就是预乘 RGBA（`ARGB` 只是 `getPixel` 那套打包的说法），既不换通道也不重新预乘。这条已在本机与设备上用探针实测确认过，别靠记忆。
+  **不要用 `setPixels(int[])`**，那条路径假定非预乘。
+- **命中测试在 Rust 里**：`Session::touch` 返回位掩码（`flags::BAR` / `KEYBOARD` / `COMMIT` / `PREEDIT`）告诉壳哪些面要重取，位图只在该面脏时重画。
+  渲染器只回「按了哪个键」，「按了键干什么」（喂引擎、上屏）留在壳里。
+- **窗口高度要 Rust 告知**：`configureKeyboard` 把键盘高度回传给壳，壳拿它 `onMeasure`；不说的话输入法窗口会被撑满整屏。
+  视图初始高度是 0，而**安卓不给 0 高的视图发尺寸变化回调**，所以配置按屏幕宽度做、不等 `onSizeChanged`，等它就是死锁。
+  底部被系统手势条占掉的高度从 `WindowInsets.systemGestureInsets` 取，交给渲染器让按键往上让、背景仍铺到底。
+- `scripts/build.sh`：cargo ndk 编 .so 到 `jniLibs/` → llvm-strip → 打词库（`dict-convert --out-dir target/android`，不动仓库文件）→ gradle assemble；
+  `--install` 顺带装 APK、推词库、`ime enable` + `ime set` 切过来。SDK / NDK / gradle / JDK 都能用环境变量覆盖，不设就自己找。
+- **Git Bash 的坑**：`adb push` 的 `/data/...` 会被 MSYS 自动转成 `C:/Program Files/Git/data/...`，设备路径一律加 `MSYS_NO_PATHCONV=1`，本机路径给 adb 前用 `cygpath -w` 转过去。
+- 模拟器配方：Android 16 / x86_64，**稳定版 37.1.11**（Canary 37.2.9 起不来，带 `metadata` 分区 bug）+ 首次 `-wipe-data`。两个都得有，只做一个照样起不来。
+  回归先在模拟器上做（无窗口、可 `adb exec-out screencap` 截图），真机只做最后确认——模拟器是 x86_64、真机是 arm64，两边都要编。
 
 ## assets
 
