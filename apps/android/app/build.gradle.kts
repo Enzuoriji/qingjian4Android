@@ -36,4 +36,8 @@ android {
 
     // .so 由 cargo ndk 编好放在 src/main/jniLibs/，Gradle 直接打进去，不再接构建任务。
     sourceSets["main"].jniLibs.srcDir("src/main/jniLibs")
+
+    // emoji 字体与 emoji 表放在仓库的 assets/emoji/（来源与许可见那里的 README），整个目录挂进来跟着 APK 走。
+    // 系统自带的那张 emoji 字体在安卓 15 起换成了渲染器画不出的格式，所以随包带一张。
+    sourceSets["main"].assets.srcDir("../../../assets/emoji")
 }

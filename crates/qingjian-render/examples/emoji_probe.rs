@@ -22,7 +22,9 @@ fn main() {
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(16.0, 19.0));
     let attrs = Attrs::new().family(cosmic_text::Family::SansSerif);
 
-    for size in [7.0_f32, 12.0, 16.0, 20.0, 32.0, 64.0, 96.0, 109.0, 128.0, 137.0, 160.0] {
+    for size in [
+        7.0_f32, 12.0, 16.0, 20.0, 32.0, 64.0, 96.0, 109.0, 128.0, 137.0, 160.0,
+    ] {
         buffer.set_metrics(Metrics::new(size, size * 1.2));
         buffer.set_size(None, None);
         buffer.set_text(&text, &attrs, Shaping::Advanced, None);
