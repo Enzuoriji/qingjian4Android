@@ -124,12 +124,33 @@ pub struct Session {
     /// 攒着要原样交给应用的按键。壳用 `take_commands` 取走。
     pending_commands: Vec<Command>,
 
-    /// 按下时命中的目标与坐标。抬起时要靠它们判断手指还在不在同一个目标上、是不是在划。
-    pressed: Option<Hit>,
-    pressed_at: (f32, f32),
+    /// 此刻按着的手指们，**按根记**。
+    ///
+    /// 快打时两根拇指的接触时间会重叠，只留一个「当前按下的键」的话，
+    /// 后按下的那根会把前一根挤掉，两根的字母一起丢——真机上报的「点快了掉字母」就是它。
+    pressed: Vec<Pressed>,
+}
+
+/// 一根按着的手指。
+#[derive(Debug, Clone, Copy)]
+struct Pressed {
+    /// 安卓给的 pointer id。
+    pointer: i32,
+
+    /// 按下时命中的目标。
+    hit: Option<Hit>,
+
+    /// 按下时的坐标。抬起时要靠它判断手指还在不在同一个目标上、是不是在划。
+    at: (f32, f32),
 
     /// 这一按是不是落在候选条上（划动翻页只认从候选条起手的）。
-    pressed_in_bar: bool,
+    in_bar: bool,
+
+    /// 手指已经滑开了，这一下不再算「点击」。
+    ///
+    /// **不能直接把记录删掉**——删了抬起时就不知道刚才从哪儿按的、划了多远，
+    /// 翻页手势也就跟着没了。留个标记，抬起时按「不是点击」处理，还够判是不是在划。
+    sliding: bool,
 }
 
 impl Session {
@@ -184,9 +205,7 @@ impl Session {
             preedit_dirty: true,
             pending_commit: None,
             pending_commands: Vec::new(),
-            pressed: None,
-            pressed_at: (0.0, 0.0),
-            pressed_in_bar: false,
+            pressed: Vec::new(),
         })
     }
 
@@ -318,64 +337,98 @@ impl Session {
         self.pending_commands.drain(..).map(Command::code).collect()
     }
 
-    /// 一次触摸（坐标是整块输入视图的）。返回 [`flags`] 的位掩码。
+    /// 一次触摸（坐标是整块输入视图的）。`pointer` 是安卓给的 pointer id。返回 [`flags`] 的位掩码。
     ///
-    /// 按钮语义，**要松**：快敲的时候手指本来就会挪几个像素，判定一紧就会把整下敲击当成滑动取消掉
-    /// （真机上「点快了掉字母」就是这么来的）。所以：
+    /// 按钮语义，**要松**：快敲的时候手指本来就会挪几个像素，判定一紧就会把整下敲击当成滑动取消掉。所以
     ///
     /// - 手指还落在按下那个键上，就一直算按着；滑到别的键或键之间的缝上才取消
-    /// - 抬起时只要还在那个键上、或者只挪了 [TOUCH_SLOP] 那么点距离，都算数
+    /// - 抬起时只要还在那个键上、或者只挪了 [`TOUCH_SLOP`] 那么点距离，都算数
+    ///
+    /// 每一根手指各记各的（[`Pressed`]）：两根拇指快速交替时接触时间会重叠，
+    /// 只留一个「当前按下的键」会让后按下的那根把前一根挤掉，两根的字母一起丢。
     ///
     /// 从候选条起手横向划得够远则翻页（往左划是下一页，与翻书一个方向）。
-    pub fn touch(&mut self, action: MotionAction, x: f32, y: f32) -> i32 {
+    pub fn touch(&mut self, action: MotionAction, pointer: i32, x: f32, y: f32) -> i32 {
         let hit = self.hit(x, y);
         match action {
-            MotionAction::Down => {
-                self.pressed = hit;
-                self.pressed_at = (x, y);
-                self.pressed_in_bar = y < self.bar_pixels();
-                self.set_pressed(hit);
+            MotionAction::Down | MotionAction::PointerDown => {
+                self.pressed.retain(|held| held.pointer != pointer);
+                self.pressed.push(Pressed {
+                    pointer,
+                    hit,
+                    at: (x, y),
+                    in_bar: y < self.bar_pixels(),
+                    sliding: false,
+                });
+                self.sync_pressed();
             }
             MotionAction::Move => {
                 // 键与候选条判得不一样：
                 // 键很大（三十多点宽），手指抖一抖不该掉字，所以「还在这个键上」就继续算按着；
                 // 候选格也宽，但横向拖是翻页手势，只按「挪没挪出触摸阈值」判，
                 // 否则拖一下会被当成点了那个候选。
-                let keep = match self.pressed {
-                    Some(Hit::Key(key)) => hit == Some(Hit::Key(key)),
-                    Some(Hit::Bar(_)) => self.within_slop(x, y),
-                    None => false,
-                };
-                if keep {
-                    self.set_pressed(hit);
-                } else {
-                    self.pressed = None;
-                    self.set_pressed(None);
+                let slop = self.touch_slop();
+                if let Some(held) = self.pressed.iter_mut().find(|held| held.pointer == pointer) {
+                    let keep = match held.hit {
+                        Some(Hit::Key(key)) => hit == Some(Hit::Key(key)),
+                        Some(Hit::Bar(_)) => Self::within_slop(held.at, slop, x, y),
+                        None => false,
+                    };
+                    if !keep {
+                        held.sliding = true;
+                    }
                 }
+                self.sync_pressed();
             }
-            MotionAction::Up => {
-                let fired = match self.pressed {
-                    Some(down) if hit == Some(down) || self.within_slop(x, y) => Some(down),
+            MotionAction::Up | MotionAction::PointerUp => {
+                let index = self.pressed.iter().position(|held| held.pointer == pointer);
+                let ended = index.map(|index| self.pressed.remove(index));
+                self.sync_pressed();
+                let Some(ended) = ended else {
+                    return self.mask();
+                };
+                let fired = match ended.hit {
+                    Some(down)
+                        if !ended.sliding
+                            && (hit == Some(down)
+                                || Self::within_slop(ended.at, self.touch_slop(), x, y)) =>
+                    {
+                        Some(down)
+                    }
                     _ => None,
                 };
-                let swiped = fired.is_none() && self.pressed_in_bar;
-                let delta = x - self.pressed_at.0;
-                self.pressed = None;
-                self.pressed_in_bar = false;
-                self.set_pressed(None);
                 if let Some(target) = fired {
                     self.act(target);
-                } else if swiped && delta.abs() > self.swipe_min() {
-                    self.apply(Act::Page(if delta < 0.0 { 1 } else { -1 }));
+                } else if ended.in_bar && (x - ended.at.0).abs() > self.swipe_min() {
+                    // 往左划是下一页，与翻书一个方向
+                    self.apply(Act::Page(if x < ended.at.0 { 1 } else { -1 }));
                 }
             }
             MotionAction::Cancel => {
-                self.pressed = None;
-                self.pressed_in_bar = false;
-                self.set_pressed(None);
+                self.pressed.clear();
+                self.sync_pressed();
             }
         }
         self.mask()
+    }
+
+    /// 把「有没有键按着」同步给键盘，只影响键帽的颜色。
+    ///
+    /// 多根手指同时按着时取**最后按下**的那根——键帽只画得出一个按下态，
+    /// 而这已经够用：反馈要的是「我这一下碰到了」，不是同时高亮好几格。
+    fn sync_pressed(&mut self) {
+        let key = self
+            .pressed
+            .iter()
+            .rev()
+            .find_map(|held| match (held.sliding, held.hit) {
+                (false, Some(Hit::Key(key))) => Some(key),
+                _ => None,
+            });
+        if self.state.pressed != key {
+            self.state.pressed = key;
+            self.keyboard_dirty = true;
+        }
     }
 
     /// 这一轮下来哪些面要重取、有没有话要交给应用。
@@ -396,20 +449,6 @@ impl Session {
         mask
     }
 
-    /// 改按下态，变了才标脏——省掉没必要的重画。
-    ///
-    /// 候选条上的按下态这一轮不画，所以只有键会传下去。
-    fn set_pressed(&mut self, hit: Option<Hit>) {
-        let key = match hit {
-            Some(Hit::Key(key)) => Some(key),
-            _ => None,
-        };
-        if self.state.pressed != key {
-            self.state.pressed = key;
-            self.keyboard_dirty = true;
-        }
-    }
-
     /// 候选条在整块输入视图里占的高度（像素）。键盘接在它下面。
     fn bar_pixels(&self) -> f32 {
         self.bar_height() * self.density
@@ -426,10 +465,9 @@ impl Session {
         TOUCH_SLOP * self.density
     }
 
-    /// 抬起那点离按下那点还在阈值之内吗。
-    fn within_slop(&self, x: f32, y: f32) -> bool {
-        let slop = self.touch_slop();
-        (x - self.pressed_at.0).abs() <= slop && (y - self.pressed_at.1).abs() <= slop
+    /// `(x, y)` 离按下那点 `at` 还在阈值 `slop` 之内吗。
+    fn within_slop(at: (f32, f32), slop: f32, x: f32, y: f32) -> bool {
+        (x - at.0).abs() <= slop && (y - at.1).abs() <= slop
     }
 
     /// 触摸落到了哪一块。

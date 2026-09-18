@@ -45,9 +45,10 @@ object QingjianNative {
     /**
      * 一次触摸，返回 [FLAG_BAR] 那样的位掩码，告诉壳哪些面要重取。
      *
-     * 坐标是**整块输入视图**的：候选条在上、键盘在下，Rust 那边按 y 分派。
+     * `pointer` 是安卓给的 pointer id，`x` / `y` 是**那根手指**的坐标，且坐标是整块输入视图的
+     * （候选条在上、键盘在下，Rust 那边按 y 分派）。多点触控要按根分开算，别传 `event.x`。
      */
-    external fun touch(handle: Long, action: Int, x: Float, y: Float): Int
+    external fun touch(handle: Long, action: Int, pointer: Int, x: Float, y: Float): Int
 
     /**
      * 该镜像给应用的拼音行（取走并清掉脏标记）。

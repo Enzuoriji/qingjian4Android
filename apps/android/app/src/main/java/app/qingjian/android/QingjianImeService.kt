@@ -100,11 +100,11 @@ class QingjianImeService : InputMethodService() {
         // 发尺寸变化回调，等它就成了死锁。宽度变了（转屏）时再走 onConfigure。
         configure(view)
         view.onConfigure = { configure(view) }
-        view.onTouch = { action, x, y ->
+        view.onTouch = { action, pointer, x, y ->
             // 打出慢帧：这一整套（引擎查询 + 画两张位图 + 过 JNI + 传成 Bitmap）都在
             // 触摸回调里同步做，一次超过一帧的时间打字就会跟不上手感。慢了就报出来。
             val started = SystemClock.elapsedRealtime()
-            val flags = QingjianNative.touch(handle, action, x, y)
+            val flags = QingjianNative.touch(handle, action, pointer, x, y)
             // 先上屏再镜像拼音：上屏会把组字区替换掉，剩下的拼音要紧跟着补回去
             if (flags and QingjianNative.FLAG_COMMIT != 0) {
                 deliver()

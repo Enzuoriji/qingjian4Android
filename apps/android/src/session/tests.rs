@@ -10,6 +10,9 @@ use qingjian_core::CandidateKind;
 use qingjian_render::{BarHitId, KeyId};
 use std::path::PathBuf;
 
+/// 单指测试用的 pointer id。多点触控的用例自己给别的编号。
+const POINTER: i32 = 0;
+
 /// 验收用的屏幕宽（点）与密度，按一台常见手机竖屏。
 const WIDTH: f32 = 360.0;
 const DENSITY: f32 = 2.75;
@@ -67,8 +70,8 @@ fn bar_centre(session: &Session, id: BarHitId) -> (f32, f32) {
 
 /// 在 `(x, y)` 上按下再抬起。位图取一次，命中矩形跟上最新的候选（与壳的行为一致）。
 fn tap_at(session: &mut Session, x: f32, y: f32) {
-    session.touch(MotionAction::Down, x, y);
-    session.touch(MotionAction::Up, x, y);
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Up, POINTER, x, y);
     session.bar_surface();
     session.keyboard_surface();
 }
@@ -364,9 +367,9 @@ fn swiping_left_on_the_bar_pages_forward() {
     type_text(&mut session, "shi");
     let (x, y) = (WIDTH * DENSITY / 2.0, session.bar_height() * DENSITY / 2.0);
 
-    session.touch(MotionAction::Down, x, y);
-    session.touch(MotionAction::Move, x - 120.0, y);
-    session.touch(MotionAction::Up, x - 120.0, y);
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - 120.0, y);
+    session.touch(MotionAction::Up, POINTER, x - 120.0, y);
 
     assert!(
         session.frame.footer.as_deref().unwrap().starts_with("2/"),
@@ -387,9 +390,9 @@ fn a_small_drag_on_the_bar_does_not_page() {
     // 大于触摸阈值（8 点 × 2.75 ≈ 22 像素）算滑动，远小于翻页阈值（40 点 ≈ 110 像素）
     let drag = 60.0;
 
-    session.touch(MotionAction::Down, x, y);
-    session.touch(MotionAction::Move, x - drag, y);
-    session.touch(MotionAction::Up, x - drag, y);
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - drag, y);
+    session.touch(MotionAction::Up, POINTER, x - drag, y);
 
     assert_eq!(session.take_commit(), None, "拖了就不该当成点了候选");
     assert!(
@@ -420,9 +423,9 @@ fn a_drag_on_the_keyboard_does_not_page() {
     type_text(&mut session, "shi");
     let (x, y) = key_centre(&session, KeyId::Letter('a'));
 
-    session.touch(MotionAction::Down, x, y);
-    session.touch(MotionAction::Move, x - 120.0, y);
-    session.touch(MotionAction::Up, x - 120.0, y);
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - 120.0, y);
+    session.touch(MotionAction::Up, POINTER, x - 120.0, y);
 
     assert_eq!(
         preedit(&session).as_deref(),
@@ -623,9 +626,9 @@ fn key_rect(session: &Session, id: KeyId) -> (f32, f32, f32, f32) {
 /// 按下 → 挪一点点 → 抬起，全程都在同一个键上。
 fn tap_with_drift(session: &mut Session, id: KeyId, drift: f32) {
     let (x, y) = key_centre(session, id);
-    session.touch(MotionAction::Down, x, y);
-    session.touch(MotionAction::Move, x + drift, y);
-    session.touch(MotionAction::Up, x + drift, y);
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x + drift, y);
+    session.touch(MotionAction::Up, POINTER, x + drift, y);
     session.bar_surface();
     session.keyboard_surface();
 }
@@ -655,8 +658,8 @@ fn lifting_a_hair_past_the_key_edge_still_counts() {
     let (x, y, width, _) = key_rect(&session, KeyId::Letter('a'));
     // 按在 a 的右边缘里侧，抬起时手指已经越过边缘落进键之间的缝——但只挪了十来像素，
     // 仍在触摸阈值内，这一下该算在 a 头上（安卓的键盘就是这么判的）
-    session.touch(MotionAction::Down, x + width - 2.0, y + 10.0);
-    session.touch(MotionAction::Up, x + width + 8.0, y + 10.0);
+    session.touch(MotionAction::Down, POINTER, x + width - 2.0, y + 10.0);
+    session.touch(MotionAction::Up, POINTER, x + width + 8.0, y + 10.0);
     session.bar_surface();
     session.keyboard_surface();
     assert_eq!(
@@ -673,9 +676,9 @@ fn sliding_over_to_another_key_cancels() {
     };
     let (ax, ay) = key_centre(&session, KeyId::Letter('a'));
     let (bx, by) = key_centre(&session, KeyId::Letter('s'));
-    session.touch(MotionAction::Down, ax, ay);
-    session.touch(MotionAction::Move, bx, by);
-    session.touch(MotionAction::Up, bx, by);
+    session.touch(MotionAction::Down, POINTER, ax, ay);
+    session.touch(MotionAction::Move, POINTER, bx, by);
+    session.touch(MotionAction::Up, POINTER, bx, by);
     session.bar_surface();
     session.keyboard_surface();
     assert!(
@@ -695,5 +698,71 @@ fn the_touch_threshold_scales_with_density() {
         (session.touch_slop() - 8.0 * DENSITY).abs() < 0.01,
         "触摸阈值该按密度换算，实际 {}",
         session.touch_slop()
+    );
+}
+
+#[test]
+fn two_fingers_overlapping_do_not_eat_each_other() {
+    // 快打时两根拇指的接触时间会重叠，安卓这时发的是 POINTER_DOWN / POINTER_UP（各指一根手指），
+    // 不是 DOWN / UP。之前把这两个当成取消，一重叠就是两根的字母一起丢——
+    // 真机上「点快了有很多字母会略过」主要就是它。
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (nx, ny) = key_centre(&session, KeyId::Letter('n'));
+    let (ix, iy) = key_centre(&session, KeyId::Letter('i'));
+
+    session.touch(MotionAction::Down, 0, nx, ny); // 拇指 A 按 n
+    session.touch(MotionAction::PointerDown, 1, ix, iy); // 拇指 B 在 A 抬起前按 i
+    session.touch(MotionAction::PointerUp, 0, nx, ny); // A 抬起
+    session.touch(MotionAction::Up, 1, ix, iy); // B 抬起
+
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("ni"),
+        "两根手指叠着敲，两个字母都该出来"
+    );
+}
+
+#[test]
+fn overlapping_fingers_keep_their_own_letter_when_lifted_in_the_other_order() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (nx, ny) = key_centre(&session, KeyId::Letter('n'));
+    let (ax, ay) = key_centre(&session, KeyId::Letter('a'));
+
+    session.touch(MotionAction::Down, 0, nx, ny);
+    session.touch(MotionAction::PointerDown, 1, ax, ay);
+    session.touch(MotionAction::PointerUp, 1, ax, ay); // 后按下的先抬
+    session.touch(MotionAction::Up, 0, nx, ny);
+
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("an"),
+        "按下的先后与抬起的先后不一致时，也各出各的字母"
+    );
+}
+
+#[test]
+fn a_slide_from_one_finger_does_not_cancel_another() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (nx, ny) = key_centre(&session, KeyId::Letter('n'));
+    let (ax, ay) = key_centre(&session, KeyId::Letter('a'));
+    let (sx, sy) = key_centre(&session, KeyId::Letter('s'));
+
+    session.touch(MotionAction::Down, 0, nx, ny);
+    session.touch(MotionAction::PointerDown, 1, ax, ay);
+    // 第二根手指滑到别处（这一下自己作废），但不该影响第一根
+    session.touch(MotionAction::Move, 1, sx, sy);
+    session.touch(MotionAction::PointerUp, 1, sx, sy);
+    session.touch(MotionAction::Up, 0, nx, ny);
+
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("n"),
+        "一根手指滑走，不该把另一根已经按下的字母也带走"
     );
 }

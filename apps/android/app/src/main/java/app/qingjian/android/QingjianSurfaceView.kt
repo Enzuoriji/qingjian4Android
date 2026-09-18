@@ -36,8 +36,8 @@ class QingjianSurfaceView(context: Context) : View(context) {
     val bottomInsetPoints: Float
         get() = bottomInset / resources.displayMetrics.density
 
-    /** 触摸回调 `(actionMasked, x, y)`，坐标是整块输入视图的。 */
-    var onTouch: ((Int, Float, Float) -> Unit)? = null
+    /** 触摸回调 `(actionMasked, pointerId, x, y)`，坐标是整块输入视图的、且是**那根手指**的。 */
+    var onTouch: ((Int, Int, Float, Float) -> Unit)? = null
 
     /** 尺寸变化时回调，用来让服务重新告诉 Rust 该画多宽（转屏等）。 */
     var onConfigure: (() -> Unit)? = null
@@ -84,7 +84,16 @@ class QingjianSurfaceView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        onTouch?.invoke(event.actionMasked, event.x, event.y)
+        // 按**那根手指**报，不是按 event.x：`event.x` 永远取第 0 根手指的坐标，
+        // 而 POINTER_DOWN / POINTER_UP 指的是另一根。两只拇指快速交替时接触时间会重叠，
+        // 混着报会让两根手指互相吃掉对方（真机上「点快了掉字母」）。
+        val index = event.actionIndex
+        onTouch?.invoke(
+            event.actionMasked,
+            event.getPointerId(index),
+            event.getX(index),
+            event.getY(index),
+        )
         if (event.actionMasked == MotionEvent.ACTION_UP) {
             performClick()
         }

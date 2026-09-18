@@ -154,18 +154,22 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_keyboardSurface(
 }
 
 /// 一次触摸，返回 [`crate::session::flags`] 的位掩码。
+///
+/// `pointer` 是安卓给的 pointer id，`x` / `y` 是**那根手指**的坐标——多点触控要按根分开算，
+/// 传 `event.x`（永远是第 0 根）会让两根手指互相吃掉对方。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_touch(
     _env: JNIEnv,
     _this: JObject,
     handle: jlong,
     action: jint,
+    pointer: jint,
     x: jfloat,
     y: jfloat,
 ) -> jint {
     match unsafe { from_handle(handle) } {
         Some(session) => catch_unwind(AssertUnwindSafe(|| {
-            session.touch(MotionAction::from_motion(action), x, y)
+            session.touch(MotionAction::from_motion(action), pointer, x, y)
         }))
         .unwrap_or(0),
         None => 0,
