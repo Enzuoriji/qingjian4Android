@@ -15,4 +15,11 @@ if [[ -n "$staged_rs" ]]; then
 fi
 
 cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings
+
+# clippy 全 workspace 会把 macOS 那个壳（IMK）也算进来，而它的 objc2 只在 Apple 平台能编——
+# Linux / Windows 上本地跑不过。CI 里就是靠 --exclude 绕开的（三个 job 各编各的），这里照做。
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  cargo clippy --workspace --all-targets -- -D warnings
+else
+  cargo clippy --workspace --exclude qingjian-macos --all-targets -- -D warnings
+fi

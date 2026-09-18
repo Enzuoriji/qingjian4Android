@@ -23,8 +23,10 @@ pub enum CliError {
     #[error("learning language must be en, ja or es, got {0:?}")]
     Language(String),
 
+    /// **装箱**：`ConfigError` 一百多字节，不箱的话整个 `CliError` 都那么大，
+    /// 每个返回它的 `Result` 都跟着变胖（clippy 的 `result_large_err` 会在 `-D warnings` 下拦下来）。
     #[error(transparent)]
-    Config(#[from] ConfigError),
+    Config(Box<ConfigError>),
 
     #[error(transparent)]
     Predict(#[from] PredictError),
@@ -43,4 +45,10 @@ pub enum CliError {
 
     #[error(transparent)]
     Tune(#[from] crate::tuning::TuneError),
+}
+
+impl From<ConfigError> for CliError {
+    fn from(error: ConfigError) -> Self {
+        Self::Config(Box::new(error))
+    }
 }
