@@ -7,9 +7,12 @@ use std::time::Instant;
 
 use clap::Parser;
 use qingjian_render::{
-    FontLibrary, Frame, Layout, Preedit, PreeditSegment, PreeditStyle, Renderer, Row, Shadow,
-    StatusCell, Theme, Tone,
+    FontLibrary, Frame, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Layout, Preedit,
+    PreeditSegment, PreeditStyle, Renderer, Row, Shadow, ShiftState, StatusCell, Theme, Tone,
 };
+
+/// 预览键盘用的宽度（点）——按一台常见手机的竖屏宽。
+const KEYBOARD_WIDTH: f32 = 360.0;
 
 #[derive(Parser)]
 struct Args {
@@ -132,6 +135,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             status.cell_edges,
             path.display()
         );
+    }
+
+    // 软键盘：常态与「Shift 锁定 + 正按着 A」两种状态，明暗两套主题
+    let keyboard_layout = KeyboardLayout::letters();
+    for (theme_name, keyboard_theme) in [
+        ("light", KeyboardTheme::light()),
+        ("dark", KeyboardTheme::dark()),
+    ] {
+        for (state_name, state) in [
+            ("idle", KeyboardState::default()),
+            (
+                "shift-a",
+                KeyboardState {
+                    shift: ShiftState::Locked,
+                    pressed: Some(KeyId::Letter('A')),
+                    ..KeyboardState::default()
+                },
+            ),
+        ] {
+            let started = Instant::now();
+            let rendered = renderer.render_keyboard(
+                &keyboard_layout,
+                &state,
+                KEYBOARD_WIDTH,
+                0.0,
+                &keyboard_theme,
+                args.scale,
+            )?;
+            let elapsed = started.elapsed();
+            let path = args
+                .out
+                .join(format!("keyboard-{state_name}-{theme_name}.png"));
+            rendered.rendered.pixmap.save_png(&path)?;
+            let (w, h) = rendered.rendered.content_size_points();
+            println!(
+                "{:<28} {:>4.0}×{:<4.0}pt  {:>8.2?}  {} 个键  {}",
+                format!("keyboard-{state_name}-{theme_name}"),
+                w,
+                h,
+                elapsed,
+                rendered.keys.len(),
+                path.display()
+            );
+        }
     }
 
     for probe in [

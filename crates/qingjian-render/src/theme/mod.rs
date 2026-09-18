@@ -3,9 +3,11 @@
 //! 视觉层级（产品决定）：候选词最深，译文稍浅，词性最浅，序号弱化。数值对齐 macOS 壳的 AppKit 实现。
 
 mod font_spec;
+mod keyboard;
 mod palette;
 
 pub use font_spec::FontSpec;
+pub use keyboard::KeyboardTheme;
 pub use palette::Palette;
 
 #[derive(Debug, Clone, PartialEq)]

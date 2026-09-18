@@ -3,6 +3,8 @@
 //! 文件走 fontdb 的 mmap 加载，只解析名字表与 cmap，Apple Color Emoji 那种 190 MB 的文件也只在用到字形时才读页。
 //! 中日同形字按 locale 回退（cosmic-text 的平台回退表：zh-CN → PingFang SC，ja → Hiragino Sans）。
 
+#[cfg(target_os = "android")]
+mod android;
 #[cfg(target_os = "windows")]
 pub mod directwrite;
 #[cfg(target_os = "linux")]
@@ -26,10 +28,22 @@ pub use ui_font::UiFont;
 
 #[cfg(target_os = "windows")]
 use self::windows as platform;
+#[cfg(target_os = "android")]
+use android as platform;
 #[cfg(target_os = "linux")]
 use linux as platform;
 #[cfg(target_os = "macos")]
 use macos as platform;
+
+/// 交给 cosmic-text 的回退表。安卓自带一份：cosmic-text 在该平台上给的是空表，
+/// 中日同形字会落到 `NotoSansCJK-Regular.ttc` 的第一个面（日文字形）。见 `android.rs`。
+///
+/// 用 `use` 而不是 `type`：构造器的参数收的是 `impl Fallback`（值），
+/// 单元结构体的 `use` 别名会把类型与构造函数一起带进来，`type` 别名则只有类型。
+#[cfg(target_os = "android")]
+use android::AndroidFallback as PlatformFallback;
+#[cfg(not(target_os = "android"))]
+use cosmic_text::PlatformFallback;
 
 pub struct FontLibrary {
     /// 已加载的字体。
@@ -118,10 +132,13 @@ impl FontLibrary {
     }
 
     /// 交给 cosmic-text。
+    ///
+    /// 走的 `_and_fallback` 那个构造器，回退表由 [`PlatformFallback`] 按平台挑；
+    /// `new_with_locale_and_db` 内部也是转发给它、只是永远用 cosmic-text 的平台表。
     pub(crate) fn into_font_system(self) -> FontSystem {
         let mut db = self.db;
         db.set_sans_serif_family(self.ui_family);
-        FontSystem::new_with_locale_and_db(self.locale, db)
+        FontSystem::new_with_locale_and_db_and_fallback(self.locale, db, PlatformFallback)
     }
 }
 

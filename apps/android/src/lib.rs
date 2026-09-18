@@ -5,7 +5,10 @@
 
 mod bridge;
 mod error;
+mod probe;
 mod session;
+mod surface;
+mod touch;
 
 pub use error::SessionError;
 pub use session::Session;

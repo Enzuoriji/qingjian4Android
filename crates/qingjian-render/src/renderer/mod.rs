@@ -5,6 +5,7 @@
 mod columns;
 mod horizontal;
 mod item;
+mod keyboard;
 mod rendered;
 mod status;
 mod top_line;
@@ -21,6 +22,7 @@ use crate::shadow::Shadow;
 use crate::text::{TextPainter, TextSize, TextStyle};
 use crate::theme::{FontSpec, Theme};
 
+pub use keyboard::RenderedKeyboard;
 pub use rendered::Rendered;
 pub use status::{RenderedStatus, StatusCell};
 

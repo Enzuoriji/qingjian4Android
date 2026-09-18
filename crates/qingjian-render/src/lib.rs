@@ -13,6 +13,7 @@ mod error;
 mod fonts;
 mod frame;
 mod gear;
+mod keyboard;
 mod layout;
 mod renderer;
 mod shadow;
@@ -26,10 +27,13 @@ pub use error::RenderError;
 pub use fonts::directwrite as system_fonts;
 pub use fonts::{FontLibrary, UiFont};
 pub use frame::{Frame, Preedit, PreeditSegment, PreeditStyle, Row, Tone};
+pub use keyboard::{
+    InputMode, Key, KeyId, KeyRow, KeyStyle, KeyboardLayout, KeyboardState, ShiftState,
+};
 pub use layout::Layout;
-pub use renderer::{Rendered, RenderedStatus, Renderer, StatusCell};
+pub use renderer::{Rendered, RenderedKeyboard, RenderedStatus, Renderer, StatusCell};
 pub use shadow::Shadow;
-pub use theme::{FontSpec, Palette, Theme};
+pub use theme::{FontSpec, KeyboardTheme, Palette, Theme};
 
 /// 让 `tiny_skia::Pixmap` 的使用方不用再单独依赖 tiny-skia。
 pub use tiny_skia::Pixmap;

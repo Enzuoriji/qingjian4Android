@@ -72,6 +72,10 @@ tokio = { version = "1.53.1", features = ["rt", "time"] }
 tiny-skia = "0.12.0"
 # 不开 fontconfig：不扫系统字体库，字体文件由渲染器按平台清单自己加载
 cosmic-text = { version = "0.19.0", default-features = false, features = ["std", "swash"] }
+# 安卓要自己实现 cosmic-text 的 Fallback（它在安卓上落进空表），那份 trait 的
+# `script_fallback` 收 `unicode_script::Script`，所以要把这个类型拿到手。
+# 版本必须与 cosmic-text 依赖的那份一致（同一个 crate 实例），否则类型对不上。
+unicode-script = "0.5"
 png = "0.18.1"
 
 # macOS 平台层

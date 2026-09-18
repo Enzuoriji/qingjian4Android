@@ -1,24 +1,22 @@
 package app.qingjian.android
 
+import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
 import android.util.Log
+import android.view.MotionEvent
 import android.view.View
-import android.widget.LinearLayout
-import android.widget.TextView
 import java.io.File
+import java.util.Locale
 
 /**
  * 青简的输入法服务。
  *
- * 现在是 Phase 1 的形态：不接按键，启动时自己喂一段拼音再把候选显示出来，
- * 用来验证 Rust 引擎在安卓上真的能加载词库、查出候选。接了软键盘之后这段自检要去掉。
+ * 现在是 M1 的形态：视图贴的是**键盘**的位图，触摸原样转给 Rust 做命中测试，
+ * 命中哪个键只打日志——还没接引擎。接引擎在 M3。
  */
 class QingjianImeService : InputMethodService() {
     /** Rust 侧的会话句柄，0 表示没打开。 */
     private var handle = 0L
-
-    /** 显示自检结果的文本视图。 */
-    private var output: TextView? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -29,53 +27,76 @@ class QingjianImeService : InputMethodService() {
             return
         }
 
-        handle = QingjianNative.open(dictionary.absolutePath)
+        handle = QingjianNative.open(dictionary.absolutePath, Locale.getDefault().toLanguageTag())
         if (handle == 0L) {
             Log.e(TAG, "会话打开失败")
-        } else {
-            Log.i(TAG, "会话已打开，词库 ${dictionary.length() / 1024} KB")
+            return
         }
+        Log.i(TAG, "会话已打开，词库 ${dictionary.length() / 1024} KB")
+        checkEngine()
     }
 
     override fun onCreateInputView(): View {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(32, 32, 32, 32)
+        val view = QingjianSurfaceView(this)
+        // 直接按屏幕宽度配一次，不等视图量出来——视图的初始高度是 0，安卓不会给 0 高的视图
+        // 发尺寸变化回调，等它就成了死锁。宽度变了（转屏）时再走 onConfigure。
+        configure(view)
+        view.onConfigure = { configure(view) }
+        view.onTouch = { action, x, y ->
+            val flags = QingjianNative.touch(handle, action, x, y)
+            if (flags and QingjianNative.FLAG_KEYBOARD != 0) {
+                refreshKeyboard(view)
+            }
+            if (action == MotionEvent.ACTION_UP) {
+                val hit = QingjianNative.lastTouched(handle)
+                if (hit.isNotEmpty()) {
+                    Log.i(TAG, "按了 $hit")
+                }
+            }
         }
-
-        output = TextView(this).apply {
-            textSize = 16f
-            layout.addView(this)
-        }
-
-        return layout
+        return view
     }
 
-    override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
-        super.onStartInputView(info, restarting)
-        selfTest()
+    /** 按当前屏幕宽度告诉 Rust 该画多宽，并把键盘高度要回来设给视图。 */
+    private fun configure(view: QingjianSurfaceView) {
+        if (handle == 0L) return
+        val metrics = resources.displayMetrics
+        val widthPoints = metrics.widthPixels / metrics.density
+        val height = QingjianNative.configureKeyboard(
+            handle,
+            widthPoints,
+            metrics.density,
+            view.bottomInsetPoints,
+            isDark(),
+        )
+        view.setContentHeightPoints(height)
+        refreshKeyboard(view)
     }
 
-    /** 自己喂一段拼音，把候选显示出来——Phase 1 验证的就是这条链路。 */
-    private fun selfTest() {
-        if (handle == 0L) {
-            show("引擎没打开，看日志")
-            return
-        }
-
+    /** 引擎还活着吗——敲一段拼音看有没有候选。渲染器出问题时靠它区分「引擎坏了」还是「画不出来」。 */
+    private fun checkEngine() {
         QingjianNative.clear(handle)
-        for (letter in PROBE) {
+        for (letter in ENGINE_PROBE) {
             QingjianNative.push(handle, letter)
         }
-
-        val candidates = QingjianNative.candidates(handle)
-        Log.i(TAG, "$PROBE 的候选：$candidates")
-        show("$PROBE →\n$candidates")
+        Log.i(TAG, "$ENGINE_PROBE 的候选：${QingjianNative.candidates(handle).replace('\n', ' ')}")
     }
 
-    private fun show(text: String) {
-        output?.text = text
+    /** 重新取一张键盘位图贴上。Rust 那边没脏就会返回同一张，不会白画。 */
+    private fun refreshKeyboard(view: QingjianSurfaceView) {
+        if (handle == 0L) return
+        val bytes = QingjianNative.keyboardSurface(handle)
+        if (bytes == null || bytes.isEmpty()) {
+            Log.e(TAG, "键盘没画出来（渲染器没建起来，或者还没配过宽度）")
+            return
+        }
+        QingjianNative.toBitmap(bytes)?.let(view::setBitmap)
     }
+
+    /** 系统现在是深色吗。 */
+    private fun isDark(): Boolean =
+        (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
 
     override fun onDestroy() {
         if (handle != 0L) {
@@ -91,7 +112,7 @@ class QingjianImeService : InputMethodService() {
         /** 随包词库的文件名，放在应用私有目录。 */
         const val DICTIONARY = "dict.qj"
 
-        /** 自检用的拼音。 */
-        const val PROBE = "kaifa"
+        /** 引擎自检用的拼音。 */
+        const val ENGINE_PROBE = "kaifa"
     }
 }
