@@ -14,7 +14,10 @@
 #
 # 词库：data/generated/dict.qj 优先；没有就用 data/generated/dict.tsv 现打；再退回基础词库
 # assets/lexicon/dict.tsv（9.3 万条，够翻页）；最后才是随包的样例（148 条，只够验通路）。
-# 打出来的 .qj 落在 target/android/，不动仓库里的文件（`--out-dir` 是顶层参数，要写在子命令前面）。
+# 打出来的 .qj 落在 target/android/（不动仓库里的文件），再拷一份进 APK 的 assets——
+# 词库跟着包走，装完就能用，不需要 adb 往应用私有目录里推。
+#
+# APK 是自包含的：词库、emoji 字体、emoji 表都在 assets 里，首次唤起输入法时自己解到私有目录。
 #
 # .so 编完会 llvm-strip 掉调试信息（38 MB → 8 MB），为的是别让 jniLibs 白占 60 MB、gradle 打包也快些。
 # 用 `--strip-debug` 而不是 `--strip-all`，留着符号表，Rust panic 的调用栈还能看。
@@ -162,6 +165,12 @@ else
   exit 1
 fi
 
+# 词库打进 APK 的 assets，跟着包走。放在这里而不是 assets/emoji 那种「源就在仓库里」的位置，
+# 是因为词库是现打的产品数据，仓库里没有、也不该有。
+DICT_ASSET="$HERE/app/src/main/assets/dict.qj"
+mkdir -p "$(dirname "$DICT_ASSET")"
+cp "$DICT_OUT" "$DICT_ASSET"
+
 # 打 APK
 echo "== 打 APK（$PROFILE）=="
 ( cd "$HERE" && "$GRADLE" --quiet "assemble${PROFILE^}" )
@@ -179,11 +188,8 @@ if [[ "$INSTALL" -eq 1 ]]; then
   ADB="$ANDROID_HOME/platform-tools/adb"
   echo "== 装到设备 =="
   "$ADB" install -r "$(winpath "$APK")"
-  # 设备上的路径要挡住 Git Bash 的自动转换，否则 /data/... 会被改成 C:/Program Files/Git/data/...
-  MSYS_NO_PATHCONV=1 "$ADB" push "$(winpath "$DICT_OUT")" /data/local/tmp/qingjian-dict.qj
-  "$ADB" shell run-as "$PKG" mkdir -p files
-  MSYS_NO_PATHCONV=1 "$ADB" shell run-as "$PKG" cp /data/local/tmp/qingjian-dict.qj files/dict.qj
   "$ADB" shell ime enable "$IME"
   "$ADB" shell ime set "$IME"
-  echo "  词库与输入法就绪，键盘里已经切到青简"
+  echo "  输入法就绪，键盘里已经切到青简"
+  echo "  （词库与 emoji 字体都在 APK 里，首次唤起时自己解到应用私有目录，不用 adb 推）"
 fi

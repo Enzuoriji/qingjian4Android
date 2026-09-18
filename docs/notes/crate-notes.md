@@ -117,9 +117,14 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 打印每个字形的 content / 尺寸 / 数据量——画得出来是 `Color N×N`，画不出来是 `Mask 0×0`，一眼可比。
 `fonts/mod.rs` 的 `bundled_emoji_font_rasterizes_in_color` 把「随包那张必须画得出彩色」钉成回归测试。
 
-安卓壳那边：随包的 emoji 字体与 emoji 表打在 APK 的 assets 里（`app/build.gradle.kts` 把仓库的 `assets/emoji/`
-整个挂进去），启动时解到 `filesDir/bundle/`（用版本标记文件记着解过没有，10 MB 不必每次拷），
-`Session::open` 的 `bundle` 参数收这个目录——有字体就顶替系统的，有 emoji 表就 `Engine::with_emoji` 接上。
+**APK 是自包含的**（2026-09-18）：词库与 emoji 那几张都打在 assets 里，输入法首次唤起时自己解到应用私有目录，
+**不需要 adb 往 `filesDir` 里推**——这样 APK 单独装到手机上就能用。机制在 `QingjianImeService`：
+
+- emoji 字体与 emoji 表来自仓库的 `assets/emoji/`（`app/build.gradle.kts` 把那个目录整个挂成 assets），
+  词库由 `scripts/build.sh` 现打进 `app/src/main/assets/dict.qj`（打进仓库的那份在 `.gitignore` 里）
+- 解出来的位置：词库 `filesDir/dict.qj`，emoji 那几个在 `filesDir/emoji/`（`Session::open` 的 `bundle` 参数收这个目录）
+- 要不要重解，看标记文件里记的 **APK 安装时间**（`PackageInfo.lastUpdateTime`）——升级一次自动重解一遍，
+  不用维护版本号常量；字体 10 MB，不这么记每次启动都要白拷
 
 安卓的字体加载在 `fonts/android.rs`（`#[cfg(target_os = "android")]`）：硬编码 `/system/fonts` 清单 + `read_dir` 兜底，**另带一份 `Fallback`**——
 cosmic-text 在安卓上的平台回退表是空的，不自己给的话 `NotoSansCJK-Regular.ttc` 这个字族集合里的中文会落进日文字形，照抄它的 `han_unification` 按脚本选面。

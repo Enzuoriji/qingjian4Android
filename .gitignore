@@ -15,6 +15,7 @@
 
 # 引擎的安卓产物，用 cargo ndk 现编（见 apps/android/app/build.gradle.kts），37 MB × 2 不进仓库
 /apps/android/app/src/main/jniLibs/**/*.so
+/apps/android/app/src/main/assets/dict.qj
 
 # IDE 与崩溃转储
 .idea
