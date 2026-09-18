@@ -60,8 +60,27 @@ object QingjianNative {
      */
     external fun touch(handle: Long, action: Int, x: Float, y: Float): Int
 
-    /** 最近一次按下又抬起碰到的目标的调试名称（M2 临时件）。 */
+    /**
+     * 该镜像给应用的拼音行（取走并清掉脏标记）。
+     *
+     * 空串表示没在组句，壳应当 `finishComposingText()`。
+     */
+    external fun takePreedit(handle: Long): String
+
+    /** 取走要上屏的文本（并清掉）；这次没有返回 null。 */
+    external fun takeCommit(handle: Long): String?
+
+    /** 取走要原样交给应用的按键编号（并清掉）；这次没有返回空数组。编号见 [COMMAND_BACKSPACE]。 */
+    external fun takeCommands(handle: Long): IntArray?
+
+    /** 最近一次按下又抬起碰到的目标的调试名称（M3 临时件）。 */
     external fun lastTouched(handle: Long): String
+
+    /** [takeCommands] 里的编号：删应用里的一个字符。 */
+    const val COMMAND_BACKSPACE = 1
+
+    /** [takeCommands] 里的编号：回车。 */
+    const val COMMAND_ENTER = 2
 
     /** 候选条变了。 */
     const val FLAG_BAR = 1

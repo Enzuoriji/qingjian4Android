@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use jni::JNIEnv;
 use jni::objects::{JObject, JString};
-use jni::sys::{jboolean, jbyteArray, jchar, jfloat, jint, jlong, jstring};
+use jni::sys::{jboolean, jbyteArray, jchar, jfloat, jint, jintArray, jlong, jstring};
 
 use crate::session::Session;
 use crate::touch::MotionAction;
@@ -236,7 +236,73 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_touch(
     }
 }
 
-/// 最近一次按下又抬起的键的调试名称（M1 临时件，接上引擎后删）。
+/// 该镜像给应用的拼音行（取走并清掉脏标记）。空串表示没在组句，壳应当 `finishComposingText`。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_takePreedit(
+    env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jstring {
+    let text = match unsafe { from_handle(handle) } {
+        Some(session) => {
+            catch_unwind(AssertUnwindSafe(|| session.take_preedit())).unwrap_or_default()
+        }
+        None => String::new(),
+    };
+
+    match env.new_string(text) {
+        Ok(value) => value.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// 取走要上屏的文本（并清掉）；这次没有就返回 null。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_takeCommit(
+    env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jstring {
+    let text = match unsafe { from_handle(handle) } {
+        Some(session) => {
+            catch_unwind(AssertUnwindSafe(|| session.take_commit())).unwrap_or_default()
+        }
+        None => None,
+    };
+    let Some(text) = text else {
+        return std::ptr::null_mut();
+    };
+
+    match env.new_string(text) {
+        Ok(value) => value.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// 取走要原样交给应用的按键编号（并清掉）；这次没有就返回空数组。编号见 [`crate::action::Command::code`]。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_takeCommands(
+    env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jintArray {
+    let codes = match unsafe { from_handle(handle) } {
+        Some(session) => {
+            catch_unwind(AssertUnwindSafe(|| session.take_commands())).unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+
+    let Ok(array) = env.new_int_array(codes.len() as i32) else {
+        return std::ptr::null_mut();
+    };
+    if !codes.is_empty() && env.set_int_array_region(&array, 0, &codes).is_err() {
+        return std::ptr::null_mut();
+    }
+    array.into_raw()
+}
+
+/// 最近一次按下又抬起碰到的东西的调试名称（M3 临时件，M4 删）。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_lastTouched(
     env: JNIEnv,

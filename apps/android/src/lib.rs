@@ -3,6 +3,7 @@
 //! Kotlin 侧只经过 [`bridge`] 里那几个函数跟这里打交道。候选窗由 `qingjian-render`
 //! 出位图、Kotlin 只贴图；这里不碰任何窗口。
 
+mod action;
 mod bridge;
 mod error;
 mod probe;
