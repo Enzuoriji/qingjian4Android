@@ -511,7 +511,11 @@ mod tests {
         assert_eq!(config.general.log_level, LogLevel::Info);
         assert_eq!(config.shortcut.mode.expression, 'i');
         assert_eq!(config.shortcut.mode.question, 'u');
+        // 翻译键的缺省修饰键按平台定：macOS 是 ⌥，别的平台是 Ctrl
+        #[cfg(target_os = "macos")]
         assert_eq!(config.shortcut.translation, Modifiers::OPTION);
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(config.shortcut.translation, Modifiers::CONTROL);
     }
 
     #[test]
