@@ -109,8 +109,9 @@ impl KeyboardLayout {
                 KeyRow {
                     keys: vec![
                         Key::new(KeyId::Literal('/'), 1.0),
-                        Key::new(KeyId::Literal('0'), 1.0),
+                        // 中 / 英 在 0 前面：这样 0 落在中间那一列，跟搜狗那张图一样
                         Key::new(KeyId::Mode, 1.0),
+                        Key::new(KeyId::Literal('0'), 1.0),
                         Key::new(KeyId::Space, 1.0),
                         Key::new(KeyId::Enter, 1.0),
                     ],
@@ -121,7 +122,7 @@ impl KeyboardLayout {
 
     /// 符号页。也是四行五列，跟数字页一样的宽度。
     ///
-    /// 键帽画的是**半角原字符**：中文模式下引擎会转成全角（`？`→`？`），英文模式下原样打出去。
+    /// 键帽画的是**半角原字符**：中文模式下引擎会转成全角（`?`→`？`），英文模式下原样打出去。
     /// 画成固定的全角就会在英文模式下骗人。
     pub fn symbols() -> Self {
         Self {
@@ -230,7 +231,11 @@ mod tests {
         assert_eq!(texts[0][4], "Backspace");
         assert_eq!(texts[1][..3], ["-", "4", "5"]);
         assert_eq!(texts[2][..3], ["*", "7", "8"]);
-        assert_eq!(texts[3][..2], ["/", "0"], "最后一行头两个是运算符与 0");
+        assert_eq!(
+            texts[3][..3],
+            ["/", "Mode", "0"],
+            "最后一行是 / 中 0：0 要落在中间那一列"
+        );
     }
 
     /// 符号页该带的符号一个不少（键帽上是半角原字符，中文模式的全角由引擎转）。
