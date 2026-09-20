@@ -97,6 +97,7 @@ impl Renderer {
         width: f32,
         theme: &Theme,
         scale: f32,
+        scroll: f32,
     ) -> Result<RenderedBar, RenderError> {
         let m = Metrics { theme, scale };
         let content_width = (width * scale).round().max(1.0);
@@ -126,7 +127,7 @@ impl Renderer {
             top: top_band.bottom(),
             height: m.px(candidate_row_height(theme)),
         };
-        self.draw_bar_rows(&mut canvas, frame, &m, content_width, rows_band, &mut hits);
+        self.draw_bar_rows(&mut canvas, frame, &m, rows_band, &mut hits, scroll);
 
         Ok(RenderedBar {
             rendered: Rendered {
@@ -224,37 +225,38 @@ impl Renderer {
         left - m.px(BUTTON_GAP)
     }
 
-    /// 下排候选：**每格宽度按内容分**，装得下的词一律不截断。
+    /// 下排候选：**一条能横着滚的带子**。
+    ///
+    /// 每格宽度**按内容定**（低于 [`MIN_CELL_WIDTH`] 才抬到那个底线，触摸目标不能太小），
+    /// 所以多长的词都装得下、一格都不会被截。一格一格从左往右铺，起点是
+    /// `左边距 − scroll`——`scroll` 就是这条带子被拖出去多远，**跟手平移**。
+    /// 画到带子外面自然被位图裁掉（画布就这么宽），命中矩形照铺，抬手时会落在正确的格上。
     ///
     /// 早先每格等宽（触摸面积一样大），但格宽被「一页几个」除死：360 点宽的屏上一页 5 个，
     /// 一格 60.8 点，而四个汉字要 64 点——于是**逢四字词必截**（用户报的「超过三个字就省略」）。
-    ///
-    /// 现在每格先拿一份**底线宽度**（触摸目标不能太小），剩下的宽度按**各自超出底线多少**分：
-    /// 长的多分、短的不浪费。一页里的词全装得下时，一格都不会被截。
-    /// 思路与 flexbox 的 `minWidth` + `flexGrow` 是一回事，参考项目 fcitx5-android 的候选条
-    /// 就是 `FlexboxLayoutManager` 这么排的。
+    /// 参考项目 fcitx5-android 的候选条用 `FlexboxLayoutManager`，条目按自然宽度排，
+    /// 也是这个路子（它不滚，满 `maxSpanCount` 就收，多的进展开面板）。
     fn draw_bar_rows(
         &mut self,
         canvas: &mut Canvas,
         frame: &Frame,
         m: &Metrics,
-        content_width: f32,
         band: Band,
         hits: &mut Vec<BarHit>,
+        scroll: f32,
     ) {
         if frame.rows.is_empty() {
             return;
         }
-        let padding = m.padding();
         let gap = m.column_gap();
-        let widths = self.bar_cell_widths(frame, m, content_width);
-        let mut left = padding;
+        let widths = self.bar_cell_widths(frame, m);
+        let mut left = m.padding() - scroll;
         for (i, (row, width)) in frame.rows.iter().zip(&widths).enumerate() {
             if Some(i) == frame.highlighted {
                 self.fill_highlight(canvas, m, left, band.top, *width, band.height);
             }
             self.draw_bar_row(canvas, m, row, (left, *width), band);
-            // 命中区只覆盖这一格，格子之间的缝不归任何候选（与键盘一致）
+            // 命中区跟着这一格一起走；画到位图外面的那几格照样报，反正手指落不到那儿
             hits.push(BarHit {
                 id: BarHitId::Candidate(i),
                 x: left,
@@ -266,44 +268,20 @@ impl Renderer {
         }
     }
 
-    /// 下排候选每格多宽（点）。算法见 [`Self::draw_bar_rows`] 的说明。
+    /// 下排候选每格多宽（点）：**这个词自然需要多宽就给多宽**，低于底线才抬到
+    /// [`MIN_CELL_WIDTH`]（单字候选的自然宽度只有二十来点，没这条底线就成了点不着的针）。
     ///
-    /// 输出保证：各格加上缝与左右边距**正好铺满一行**；有富余时每格不低于
-    /// [`MIN_CELL_WIDTH`]；富余不够时按「超出底线多少」的比例分——**长词先吃饱**，
-    /// 短词本来就不需要那么宽。
-    fn bar_cell_widths(&mut self, frame: &Frame, m: &Metrics, content_width: f32) -> Vec<f32> {
-        let count = frame.rows.len();
-        let padding = m.padding();
-        let gap = m.column_gap();
-        let available = (content_width - padding * 2.0 - gap * (count - 1) as f32).max(0.0);
+    /// 不再「把一行铺满」：带子是能滚的，铺满就没有滚的余地了。
+    fn bar_cell_widths(&mut self, frame: &Frame, m: &Metrics) -> Vec<f32> {
         let floor = m.px(MIN_CELL_WIDTH);
-        // 连底线都摆不下（屏窄、一页又挤）——只能等分，那就只能截了
-        if floor * count as f32 >= available {
-            return vec![(available / count as f32).max(1.0); count];
-        }
-        // 每格「自然需要」的宽度：词本身（云端词还有那朵云）＋两边留白
-        let natural: Vec<f32> = frame
+        frame
             .rows
             .iter()
             .map(|row| {
                 let text = self.measure(&row.text, &m.text_style()).width;
                 let cloud = if row.cloud { m.cloud_width() } else { 0.0 };
-                text + cloud + m.px(CELL_PADDING) * 2.0
-            })
-            .collect();
-
-        let extra = available - floor * count as f32;
-        let over: Vec<f32> = natural.iter().map(|need| (need - floor).max(0.0)).collect();
-        let total: f32 = over.iter().sum();
-        over.iter()
-            .map(|over| {
-                // 大家都够短（没有谁超出底线）时平分余量，不然长的按超出量分
-                let share = if total > 0.0 {
-                    extra * over / total
-                } else {
-                    extra / count as f32
-                };
-                (floor + share).max(1.0)
+                let natural = text + cloud + m.px(CELL_PADDING) * 2.0;
+                natural.max(floor).max(1.0)
             })
             .collect()
     }
@@ -482,10 +460,10 @@ mod tests {
         let theme = Theme::light();
         // 有拼音但一个候选都没有（`ni'h` 这种还拼不成音节的）也是一个高度
         let bare = renderer
-            .render_bar(&frame(0), WIDTH, &theme, SCALE)
+            .render_bar(&frame(0), WIDTH, &theme, SCALE, 0.0)
             .unwrap();
         let full = renderer
-            .render_bar(&frame(6), WIDTH, &theme, SCALE)
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0)
             .unwrap();
         assert_eq!(
             bare.rendered.content_height, full.rendered.content_height,
@@ -517,36 +495,29 @@ mod tests {
         assert!(Renderer::bar_height(&theme, true) > 0.0, "组句时该有高度");
     }
 
-    /// 下排候选：格与格之间留一条缝，整排**正好铺满**（左右各一个 padding）。
+    /// 下排候选：从左边距起，一格一格往右铺，格与格之间留一条缝。
     ///
-    /// **不再断言「每格一样宽」**——2026-09-20 起格宽按内容分（见 `draw_bar_rows`），
-    /// 长的词占得宽。这条只管「排得开、缝对、铺满」。
+    /// **不再断言「铺满一行」**——2026-09-21 起这是一条**能滚的带子**，宽度是内容定的，
+    /// 铺满就没有滚的余地了（原先等宽时确实铺满，那是为了触摸面积一样大）。
+    /// 带子跟手不平移由 `scrolling_shifts_the_strip` 盯着。
     #[test]
-    fn candidate_slots_leave_a_gap_and_fill_the_row() {
+    fn candidate_slots_start_at_the_padding_and_leave_a_gap() {
         let Some(mut renderer) = renderer() else {
             return;
         };
         let theme = Theme::light();
         let out = renderer
-            .render_bar(&frame(6), WIDTH, &theme, SCALE)
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0)
             .unwrap();
         let slots = candidates(&out);
         assert_eq!(slots.len(), 6);
 
         let padding = theme.padding * SCALE;
         let gap = theme.column_gap * SCALE;
-        let first = slots.first().unwrap();
-        let last = slots.last().unwrap();
-        let right = out.rendered.content_width as f32 - padding;
         assert!(
-            (first.x - padding).abs() < 0.01,
-            "左边距该正好一个 padding，实际 {}",
-            first.x
-        );
-        assert!(
-            (last.x + last.width - right).abs() < 0.01,
-            "右边距该正好一个 padding，实际 {}",
-            right - (last.x + last.width)
+            (slots.first().unwrap().x - padding).abs() < 0.01,
+            "没滚动时第一格该从左边距起，实际 {}",
+            slots.first().unwrap().x
         );
         for pair in slots.windows(2) {
             assert!(pair[0].x < pair[1].x, "格子要按从左到右排");
@@ -555,6 +526,34 @@ mod tests {
                 (space - gap).abs() < 0.01,
                 "格与格之间要正好留一条 {gap}，实际 {space}"
             );
+        }
+    }
+
+    /// **给多少 scroll，整条带子就左移多少**——「跟手滚」就是这么来的。
+    #[test]
+    fn scrolling_shifts_the_strip() {
+        let Some(mut renderer) = renderer() else {
+            return;
+        };
+        let theme = Theme::light();
+        let scroll = 40.0;
+        let rest = renderer
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0)
+            .unwrap();
+        let scrolled = renderer
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, scroll)
+            .unwrap();
+
+        let (rest, scrolled) = (candidates(&rest), candidates(&scrolled));
+        assert_eq!(rest.len(), scrolled.len());
+        for (a, b) in rest.iter().zip(&scrolled) {
+            assert!(
+                (a.x - b.x - scroll).abs() < 0.01,
+                "每格都该整体左移 {scroll}：{} → {}",
+                a.x,
+                b.x
+            );
+            assert!((a.width - b.width).abs() < 0.01, "滚动不该改宽度");
         }
     }
 
@@ -589,7 +588,9 @@ mod tests {
             sentence: None,
             status: None,
         };
-        let out = renderer.render_bar(&mixed, WIDTH, &theme, SCALE).unwrap();
+        let out = renderer
+            .render_bar(&mixed, WIDTH, &theme, SCALE, 0.0)
+            .unwrap();
         let slots = candidates(&out);
 
         let long = "你好你好";
@@ -624,7 +625,7 @@ mod tests {
             status: None,
         };
         let out = renderer
-            .render_bar(&all_short, WIDTH, &theme, SCALE)
+            .render_bar(&all_short, WIDTH, &theme, SCALE, 0.0)
             .unwrap();
 
         let floor = MIN_CELL_WIDTH * SCALE;
@@ -643,7 +644,7 @@ mod tests {
             return;
         };
         let out = renderer
-            .render_bar(&frame(6), WIDTH, &Theme::light(), SCALE)
+            .render_bar(&frame(6), WIDTH, &Theme::light(), SCALE, 0.0)
             .unwrap();
         let third = button(&out, BarHitId::Candidate(2));
         let inside = (third.x + third.width / 2.0, third.y + third.height / 2.0);
@@ -663,7 +664,7 @@ mod tests {
             return;
         };
         let out = renderer
-            .render_bar(&frame(6), WIDTH, &Theme::light(), SCALE)
+            .render_bar(&frame(6), WIDTH, &Theme::light(), SCALE, 0.0)
             .unwrap();
         let clear = button(&out, BarHitId::Clear);
         let prev = button(&out, BarHitId::PagePrev);

@@ -21,25 +21,14 @@ use crate::keyboard::{Fired, Keyboard};
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 
-/// 候选条一页画几个——**按这次打了几个音节定**（2026-09-20 改，原先写死 5）。
+/// 候选条**一次铺多长**（个）——滚动就是把这一条拖来拖去。
 ///
-/// 打的音越多，候选越长、一格越占地方：一个音多半是单字，两三个音是常用词，
-/// 四个音往上基本是成语或整句。所以页大小跟着音数**往回收**，音少时反而多给一两个。
-/// （桌面一页 9 个；手机上还要留得下格与格之间的缝，一个音最多也就 6 个。）
+/// 2026-09-21 起候选条是一条能滚的带子，所以这个数**不是「看得见几个」**（那是宽度自己定的），
+/// 而是「一次铺几个」。比一屏多好几倍，拖起来才有得看；铺太多则每次重画都要多量几十个字。
 ///
-/// **这么做还有个便宜**：音数在整段组句里是不变的，页大小因此是个定值——
-/// 「第几页从第几条起」仍然是一个乘法（`page * 页大小`），翻页与页码都不用改。
-/// 换成「按宽度能塞几个塞几个」就没这个便宜了：那得把**全部候选**都量一遍才知道页数，
-/// 每次按键量上百条，几十毫秒就出去了。
-///
-/// 数大数小是手感常数，只能靠真机调。
-fn page_size_for(syllables: usize) -> usize {
-    match syllables {
-        0 | 1 => 6,
-        2 | 3 => 5,
-        _ => 4,
-    }
-}
+/// 顺带把 2026-09-20 那条「一页画几个按打了几个音节定」取代掉了：那条管的是**可见几个**，
+/// 而滚动之后可见几个由每格宽度自己决定——**短的多露几个、长的少露几个，不必再拿音节数去猜**。
+const WINDOW: usize = 24;
 
 /// 随包资源目录里的 emoji 字体名（`assets/emoji/README.md` 写了为什么要带它）。
 const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
@@ -113,11 +102,17 @@ pub struct Session {
     /// 当前页，从 0 起。
     page: usize,
 
-    /// 高亮在**本页第几个**（页内下标，从 0 起）。
+    /// 高亮在**本页第几个**（页内下标，从 0 起）。不动它时是本页第一个，空格上屏的就是它。
     ///
-    /// 手指在候选条上横滑时跟着走（见 [`Self::slide_highlight`]）；不动它时是本页第一个，
-    /// 空格上屏的就是它。组句一变（[`Self::recompose`]）回到 0。
+    /// 高亮**不跟着滚动走**：候选条是一条能横滚的带子，拖动只是看，选还得点一下
+    /// （或者空格上屏本页第一个）。
     highlight: usize,
+
+    /// 候选条那条带子被拖出去多远（像素，正数 = 往后滚）。
+    ///
+    /// 跟着手指走，滚过一页就翻页（见 [`Self::scroll_by`]）。组句一变、
+    /// 或者按 `‹` `›` 翻页，都回到 0（从头看起）。
+    scroll: f32,
 
     /// 当前该画的候选条那一帧。缓冲变化或翻页时由 [`Self::refresh`] 重建。
     frame: Frame,
@@ -162,11 +157,9 @@ struct BarPress {
     /// 翻页手势也就跟着没了。留个标记，抬起时按「不是点击」处理，还够判是不是在划。
     sliding: bool,
 
-    /// 手指**划出了候选条**（往上顶出屏幕、往下溜进键盘都算）——这一下作废。
-    ///
-    /// 「横滑到某格、松手就选它」这套手势需要一条退路：不然只想翻看不想选的人一松手就上屏了。
-    /// 拖出去就是那条退路，与键盘上「滑出键外作废」同一个规矩。
-    outside: bool,
+    /// 上一次报上来的横坐标。横滚要的是**位移增量**（这一下比上一下挪了多少），
+    /// 不是「离按下那点多远」——跟手滚就得一次一次地加。
+    last: f32,
 }
 
 impl Session {
@@ -217,6 +210,7 @@ impl Session {
             candidates: Vec::new(),
             page: 0,
             highlight: 0,
+            scroll: 0.0,
             frame: Frame::default(),
             bar: None,
             bar_dirty: true,
@@ -356,9 +350,10 @@ impl Session {
         }
         if self.bar_dirty || self.bar.is_none() {
             let theme = self.theme();
+            let scroll = self.scroll;
             let rendered = self.renderer.as_mut().and_then(|renderer| {
                 renderer
-                    .render_bar(&self.frame, self.width, &theme, self.density)
+                    .render_bar(&self.frame, self.width, &theme, self.density, scroll)
                     .ok()
             });
             if rendered.is_none() {
@@ -520,11 +515,9 @@ impl Session {
     /// 候选条那半边。**三条路，按手指怎么动分**：
     ///
     /// - **点击**：按下再抬起、没怎么挪 → 上屏点的那个（与键盘一样的按钮语义）
-    /// - **横滑选词**：按住横着滑，**高亮跟着手指走**（[`Self::slide_highlight`]），
-    ///   松手把高亮那个上屏。这是「滑动选词」——不用抬手再点，也不会整页跳
-    /// - **拖出去**：手指划出候选条（往上顶出屏幕、往下溜进键盘）→ **这一下作废**。
-    ///   留这条路是因为前一条会「松手就上屏」：只想翻看不想选的人得有地方退。
-    ///   想只看不选还有一条正路——右端的 `‹` `›` 按钮，按它不选词
+    /// - **横滑**：候选条是一条**能滚的带子**，按住横着拖它就跟着手指平移
+    ///   （见 [`Self::scroll_by`]）——滚过一页自动翻页。**拖动只是看，不上屏**：
+    ///   想选还得点一下，或者空格上屏本页第一个
     ///
     /// 判法与键盘不同：候选格横向拖是手势，所以只按「挪没挪出触摸阈值」判，
     /// 不按「还在不在原来那一格上」判——否则拖一下会被当成点了那个候选。
@@ -541,12 +534,11 @@ impl Session {
                     pointer,
                     hit,
                     at: (x, y),
+                    last: x,
                     sliding: false,
-                    outside: false,
                 });
             }
             MotionAction::Move => {
-                let outside = y < 0.0 || y >= self.bar_pixels();
                 let slop = self.touch_slop();
                 let Some(held) = self.pressed.iter_mut().find(|held| held.pointer == pointer)
                 else {
@@ -555,26 +547,22 @@ impl Session {
                 if !within_slop(held.at, slop, x, y) {
                     held.sliding = true;
                 }
-                held.outside |= outside;
-                if held.outside {
-                    // 划出去了，这一下已经作废——别再跟着改高亮
-                    return;
+                // 手指往左移 = 带子往左滚（看后面的候选）。**只认这一下的位移增量**，
+                // 所以是跟手的：手指走多少、带子走多少。
+                let step = held.last - x;
+                held.last = x;
+                if held.sliding && step != 0.0 {
+                    self.scroll_by(step);
                 }
-                self.slide_highlight(x);
             }
             MotionAction::Up | MotionAction::PointerUp => {
                 let index = self.pressed.iter().position(|held| held.pointer == pointer);
                 let Some(ended) = index.map(|index| self.pressed.remove(index)) else {
                     return;
                 };
-                if ended.outside {
-                    // 拖出候选条 = 这一下不要了（见 `BarPress::outside`）
-                    return;
-                }
+                // 拖过就只是滚了一下，**不上屏**——选词还得点一下（或空格上屏本页第一个）。
+                // 要「滚到哪儿就选哪个」的话，一路翻看过去就没法全身而退了。
                 if ended.sliding {
-                    // **横滑选词**：手指停在哪个候选上就上屏哪个。
-                    // 高亮在拖动当中已经跟着手指走过了，这里只是兑现它。
-                    self.apply(Act::CommitHighlighted);
                     return;
                 }
                 // 没怎么挪 = 点击：抬起时还在按下那个目标上（或只挪了触摸阈值那么点）才算数
@@ -759,10 +747,11 @@ impl Session {
         self.recompose();
     }
 
-    /// 缓冲变了：重查候选，回到第一页、高亮也回到第一个。
+    /// 缓冲变了：重查候选，回到第一页、高亮也回到第一个、带子从头看起。
     fn recompose(&mut self) {
         self.page = 0;
         self.highlight = 0;
+        self.scroll = 0.0;
         self.candidates.clear();
         self.preedit = None;
         if !self.engine.composition().is_empty() {
@@ -795,19 +784,9 @@ impl Session {
         self.bar_dirty = true;
     }
 
-    /// 这一页画几个候选——见 [`page_size_for`]。
+    /// 这一条铺几个候选——见 [`WINDOW`]。
     fn page_size(&self) -> usize {
-        page_size_for(self.syllables())
-    }
-
-    /// 这次打了几个音节：拼音行按 `'` 分出来的段数。
-    ///
-    /// 引擎在音节之间插 `'`（`ni'hao` 是两段），所以数段数就是数音节。
-    /// 没在组句时是 0——那会儿候选条整个收着，这个数用不上。
-    fn syllables(&self) -> usize {
-        self.preedit
-            .as_ref()
-            .map_or(0, |preedit| preedit.text().split('\'').count())
+        WINDOW
     }
 
     /// 本页画哪几个候选、页码是几。这一轮不画译文，所以不调 `engine.annotate()`。
@@ -878,47 +857,62 @@ impl Session {
             } else {
                 0
             };
+            self.scroll = 0.0;
             self.refresh();
         }
     }
 
-    /// 手指横滑到 `x` 处，**高亮跟过去**——这就是「滑动选词」。
+    /// 候选条那条带子横滚 `step` 像素（正数 = 往后滚，看后面的候选）。
     ///
-    /// 落在哪一格上就高亮哪一格；滑过这一页的头尾就翻页接着走（见 [`Self::turn_page`]）。
-    /// `x` 只跟横向位置有关：手指出了候选条那一下已经在 [`Self::touch_bar`] 里作废掉了。
-    fn slide_highlight(&mut self, x: f32) {
-        let (left, right, inside) = {
-            let Some(bar) = self.bar.as_ref() else {
-                return;
-            };
-            // 只认候选格，右端的 × 与 ‹ › 不参与滑动选词
-            let cells: Vec<&qingjian_render::BarHit> = bar
+    /// 滚过这一页的宽度就翻到下一页；往回滚过页首就翻回上一页、**从那一页开头接着**
+    /// （上一页多宽这边算不出来，手指多拖的那点就吸收掉，不硬凑）。
+    /// **一次移动最多翻一页**：翻完得重画才知道新一页多宽，剩下的位移交给下一次移动。
+    fn scroll_by(&mut self, step: f32) {
+        // **先量页宽再加位移**：页宽是从上一帧的命中矩形加回 `scroll` 算出来的，
+        // 而那一帧用的是**当前**这个 `scroll`。先改再加，量出来的就多算了这一段，
+        // 结果永远够不到翻页的线（踩过）。
+        let page_width = self.page_width();
+        self.scroll += step;
+        if self.scroll >= page_width {
+            if self.page + 1 < self.page_count() {
+                self.scroll -= page_width;
+                self.page += 1;
+                self.engine.note_page_turn();
+                self.highlight = 0;
+            } else {
+                // 最后一页：滚到底为止，别滚出一片空白
+                self.scroll = page_width;
+            }
+            self.refresh();
+            return;
+        }
+        if self.scroll < 0.0 {
+            if self.page > 0 {
+                self.page -= 1;
+                self.engine.note_page_turn();
+                self.highlight = 0;
+            }
+            self.scroll = 0.0;
+            self.refresh();
+            return;
+        }
+        self.refresh();
+    }
+
+    /// 当前这一页铺开有多宽（像素）——从上一帧的命中矩形量：最后那格的右边缘，加回滚过的量。
+    ///
+    /// 带子的宽度是内容定的、**渲染之前算不出来**，所以用上一次画出来的结果，差一帧
+    /// （手指每动一下都会重画，追得上）。少算了右边距那一点点，不影响手感。
+    fn page_width(&self) -> f32 {
+        self.bar.as_ref().map_or(0.0, |bar| {
+            let right = bar
                 .hits
                 .iter()
                 .filter(|hit| matches!(hit.id, BarHitId::Candidate(_)))
-                .collect();
-            let Some(first) = cells.first() else {
-                return;
-            };
-            let last = cells.last().expect("刚看过非空");
-            let inside = cells
-                .iter()
-                .position(|cell| x >= cell.x && x < cell.x + cell.width);
-            (first.x, last.x + last.width, inside)
-        };
-
-        if let Some(index) = inside {
-            if index != self.highlight {
-                self.highlight = index;
-                self.refresh();
-            }
-            return;
-        }
-        if x < left {
-            self.turn_page(-1);
-        } else if x > right {
-            self.turn_page(1);
-        }
+                .map(|hit| hit.x + hit.width)
+                .fold(0.0, f32::max);
+            right + self.scroll
+        })
     }
 }
 

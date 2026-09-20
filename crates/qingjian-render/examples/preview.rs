@@ -229,7 +229,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (theme_name, theme) in [("light", Theme::light()), ("dark", Theme::dark())] {
         for (state_name, bar_frame) in [("empty", Frame::default()), ("page", bar_page())] {
             let started = Instant::now();
-            let rendered = renderer.render_bar(&bar_frame, BAR_WIDTH, &theme, args.scale)?;
+            let rendered = renderer.render_bar(&bar_frame, BAR_WIDTH, &theme, args.scale, 0.0)?;
             let elapsed = started.elapsed();
             let path = args.out.join(format!("bar-{state_name}-{theme_name}.png"));
             rendered.rendered.pixmap.save_png(&path)?;
