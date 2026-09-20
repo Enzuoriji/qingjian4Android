@@ -116,6 +116,23 @@
 `Handler.postDelayed`。**建议 Kotlin 侧计时、回调 `touch` 一个「重复」动作**——简单、也不用给
 Rust 引运行时。
 
+**2026-09-20 已做**，落在两处：
+
+- **计时在壳**（`QingjianSurfaceView`）：`downAt` 记每根手指按下的时刻，一个 `Runnable` 每 50ms
+  把按够 400ms 的手指各报一次，回调 `QingjianNative.repeat(handle, pointer)`。
+  松手 / `ACTION_CANCEL` 撤掉。**按根记**，不是全局一个「按住的键」——两根手指交替时后者会挤掉前者。
+- **判断在 Rust**：`Session::repeat(pointer)` 问 `Keyboard::held(pointer)` 拿到那根手指按着的键，
+  再看 `action::repeats(key)`（**只有退格**）。壳不知道哪个键会连发。
+
+两条计划里没写、做的时候才撞上的：
+
+- **连发过的，抬起不再补一下**。键是抬起才兑现的，按住删一串之后松手那下会再删一个——
+  每次都要多退一格。`Press` 加了个 `repeated` 标记挡掉。
+- **验收实测**：`ni'hao'ma` 按住退格 600ms 剩 `ni'h`，正好 (600−400)/50 = 4 个；
+  松手不再多删。截图见 `screenshots/2026-09-20_长按退格连删_*.png`。
+
+**没做**：加速连发（按住越久越快）。硬件键盘有，这里先按固定 50ms 来，手感反馈了再说。
+
 ### K4 键上滑动出符号 —— 1 天
 
 **做什么**：手指在键上上下滑出另一个符号（比如 `，` 上滑出 `？`）。`MotionAction::Move` 已经有，

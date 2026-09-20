@@ -753,6 +753,94 @@ fn a_key_without_a_hint_treats_the_swipe_as_a_plain_tap() {
     );
 }
 
+/// 拼音里还剩几个字母。
+///
+/// 数**字母**而不是数长度：拼音变短时引擎会把失去意义的隔音符号 `'` 一起收掉
+/// （`ni'h` → `nih` 是少两个字符），字符数不是退格真正删的东西。
+fn pinyin_letters(session: &Session) -> usize {
+    preedit(session).map_or(0, |text| {
+        text.chars().filter(char::is_ascii_alphabetic).count()
+    })
+}
+
+/// 按住退格不放，壳的计时器到点就问一次 `repeat`——每问一次该少一个字母。
+///
+/// 计时器在壳那边，所以这里模拟的是「手指按住不动、壳一直问」。
+#[test]
+fn holding_backspace_repeats() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let full = pinyin_letters(&session);
+    assert_eq!(
+        full,
+        5,
+        "试不出连删：{}",
+        preedit(&session).unwrap_or_default()
+    );
+
+    let (x, y) = key_centre(&session, KeyId::Backspace);
+    session.touch(MotionAction::Down, POINTER, x, y);
+
+    for round in 1..=3 {
+        session.repeat(POINTER);
+        assert_eq!(
+            pinyin_letters(&session),
+            full - round,
+            "第 {round} 次连发该少一个字母"
+        );
+    }
+
+    // 连发过的，松手不该再补一下——不然按住删一串、抬手总会多退一格
+    session.touch(MotionAction::Up, POINTER, x, y);
+    assert_eq!(
+        pinyin_letters(&session),
+        full - 3,
+        "连发过的手指，抬起不该再补一个"
+    );
+
+    // 松手之后计时器还在（壳那边按键与计时器不同步），更不该再删
+    session.repeat(POINTER);
+    assert_eq!(pinyin_letters(&session), full - 3, "手指已经松了，不该再删");
+}
+
+/// 只有退格连发。按住别的键，壳照样到点就问，但不该有任何反应——
+/// 字母键按住该出的是角标（往下滑那条路），不是连发。
+#[test]
+fn only_backspace_repeats() {
+    for key in [KeyId::Letter('k'), KeyId::Space, KeyId::Mode, KeyId::Enter] {
+        let Some(mut session) = ready() else {
+            return;
+        };
+        let (x, y) = key_centre(&session, key);
+        session.touch(MotionAction::Down, POINTER, x, y);
+        for _ in 0..5 {
+            session.repeat(POINTER);
+        }
+        assert_eq!(
+            preedit(&session),
+            None,
+            "{key:?} 按住不该连发，更不该往拼音里塞东西"
+        );
+        assert_eq!(session.take_commit(), None, "{key:?} 按住不该上屏任何东西");
+    }
+}
+
+/// 手指早就松了、壳的计时器才到点（按键与计时器不同步），不该删任何东西。
+#[test]
+fn repeat_does_nothing_when_no_finger_is_down() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let before = preedit(&session);
+
+    session.repeat(POINTER);
+
+    assert_eq!(preedit(&session), before, "没手指按着，连发该什么也不做");
+}
+
 #[test]
 fn sliding_over_to_another_key_cancels() {
     let Some(mut session) = ready() else {

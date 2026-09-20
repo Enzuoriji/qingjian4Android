@@ -59,6 +59,14 @@ object QingjianNative {
     external fun touch(handle: Long, action: Int, pointer: Int, x: Float, y: Float): Int
 
     /**
+     * 长按连发：计时器到点了，问一次「这根手指按住的那个键要不要再来一下」。
+     *
+     * 返回与 [touch] 同一种位掩码。计时器在壳这边（安卓有现成的 `Handler`），
+     * **该不该触发由 Rust 判**——哪个键连发是输入语义，壳不需要知道。
+     */
+    external fun repeat(handle: Long, pointer: Int): Int
+
+    /**
      * 该镜像给应用的拼音行（取走并清掉脏标记）。
      *
      * 空串表示没在组句，壳应当 `finishComposingText()`。

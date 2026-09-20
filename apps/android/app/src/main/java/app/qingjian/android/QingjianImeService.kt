@@ -106,29 +106,45 @@ class QingjianImeService : InputMethodService() {
         configure(view)
         view.onConfigure = { configure(view) }
         view.onTouch = { action, pointer, x, y ->
-            // 打出慢帧：这一整套（引擎查询 + 画两张位图 + 过 JNI + 传成 Bitmap）都在
-            // 触摸回调里同步做，一次超过一帧的时间打字就会跟不上手感。慢了就报出来。
             val started = SystemClock.elapsedRealtime()
             val flags = QingjianNative.touch(handle, action, pointer, x, y)
-            // 先上屏再镜像拼音：上屏会把组字区替换掉，剩下的拼音要紧跟着补回去
-            if (flags and QingjianNative.FLAG_COMMIT != 0) {
-                deliver()
-            }
-            if (flags and QingjianNative.FLAG_PREEDIT != 0) {
-                mirrorPreedit()
-            }
-            if (flags and QingjianNative.FLAG_BAR != 0) {
-                refreshBar(view)
-            }
-            if (flags and QingjianNative.FLAG_KEYBOARD != 0) {
-                refreshKeyboard(view)
-            }
-            val elapsed = SystemClock.elapsedRealtime() - started
-            if (elapsed >= SLOW_TOUCH_MS) {
-                Log.w(TAG, "这一下花了 ${elapsed}ms，打字会跟不上手感")
-            }
+            afterInput(view, flags, started)
+        }
+        // 长按连发：计时器在视图那边，到点问 Rust「这根手指按住的键要不要再来一下」。
+        // 哪个键连发是输入语义，壳不判断——Rust 那边没按着该连发的键就什么也不做。
+        view.onRepeat = { pointer ->
+            val started = SystemClock.elapsedRealtime()
+            val flags = QingjianNative.repeat(handle, pointer)
+            afterInput(view, flags, started)
         }
         return view
+    }
+
+    /**
+     * 一次输入（敲键、连发、长按）之后的收尾：上屏、镜像拼音、重画脏了的面。
+     *
+     * 打出慢帧：这一整套（引擎查询 + 画两张位图 + 过 JNI + 传成 Bitmap）都在触摸回调里
+     * 同步做，一次超过一帧的时间打字就会跟不上手感。慢了就报出来。连发走的是同一条路，
+     * 所以这里也是连发的耗时观测点——连发要是慢，手感一样钝。
+     */
+    private fun afterInput(view: QingjianSurfaceView, flags: Int, started: Long) {
+        // 先上屏再镜像拼音：上屏会把组字区替换掉，剩下的拼音要紧跟着补回去
+        if (flags and QingjianNative.FLAG_COMMIT != 0) {
+            deliver()
+        }
+        if (flags and QingjianNative.FLAG_PREEDIT != 0) {
+            mirrorPreedit()
+        }
+        if (flags and QingjianNative.FLAG_BAR != 0) {
+            refreshBar(view)
+        }
+        if (flags and QingjianNative.FLAG_KEYBOARD != 0) {
+            refreshKeyboard(view)
+        }
+        val elapsed = SystemClock.elapsedRealtime() - started
+        if (elapsed >= SLOW_TOUCH_MS) {
+            Log.w(TAG, "这一下花了 ${elapsed}ms，打字会跟不上手感")
+        }
     }
 
     /**

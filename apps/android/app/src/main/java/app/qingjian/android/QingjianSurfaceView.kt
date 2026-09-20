@@ -3,9 +3,16 @@ package app.qingjian.android
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
+
+/** 按住多久开始连发（毫秒）。 */
+private const val REPEAT_DELAY_MS = 400L
+
+/** 连发间隔（毫秒）。400 + 50 的话，按住一秒能重复十来次。 */
+private const val REPEAT_INTERVAL_MS = 50L
 
 /**
  * 贴自绘位图的视图：上面一张候选条、下面一张键盘。
@@ -39,8 +46,32 @@ class QingjianSurfaceView(context: Context) : View(context) {
     /** 触摸回调 `(actionMasked, pointerId, x, y)`，坐标是整块输入视图的、且是**那根手指**的。 */
     var onTouch: ((Int, Int, Float, Float) -> Unit)? = null
 
+    /**
+     * 连发回调：某根手指按住够久了，问一次「要不要再来一下」，参数是那根手指的 pointer id。
+     *
+     * 这里只负责**计时**，不判断该不该连发——那是输入语义，在 Rust 那边
+     * （`action::repeats`）。计时器放在这里是因为安卓有现成的 `Handler`，
+     * 为这个给 Rust 引线程或定时器不划算。
+     */
+    var onRepeat: ((Int) -> Unit)? = null
+
     /** 尺寸变化时回调，用来让服务重新告诉 Rust 该画多宽（转屏等）。 */
     var onConfigure: (() -> Unit)? = null
+
+    /** 每根手指按下的时刻，用来判够不够久。 */
+    private val downAt = HashMap<Int, Long>()
+
+    /** 计时器：把按够久的手指各报一次，再排下一拍。 */
+    private val ticker = object : Runnable {
+        override fun run() {
+            val now = SystemClock.uptimeMillis()
+            for ((pointer, at) in downAt) {
+                if (now - at >= REPEAT_DELAY_MS) onRepeat?.invoke(pointer)
+            }
+            // 手指还按着就接着排；全松了的话 UP 那边已经把回调撤了
+            if (downAt.isNotEmpty()) postDelayed(this, REPEAT_INTERVAL_MS)
+        }
+    }
 
     fun setBar(value: Bitmap) {
         bar = value
@@ -89,14 +120,30 @@ class QingjianSurfaceView(context: Context) : View(context) {
         // 混着报会让两根手指互相吃掉对方（真机上「点快了掉字母」）。
         val index = event.actionIndex
         val action = event.actionMasked
+        val pointer = event.getPointerId(index)
         val y = event.getY(index)
-        // 按下就震一下，与原生那条路同一个手感。**候选条不震**：那是点选项，不是敲键。
-        if ((action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) &&
-            y >= (bar?.height ?: 0)
-        ) {
-            keyFeedback(this)
+
+        when (action) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                // 按下就震一下，与原生那条路同一个手感。**候选条不震**：那是点选项，不是敲键。
+                if (y >= (bar?.height ?: 0)) {
+                    keyFeedback(this)
+                }
+                // 第一根手指落下时才起计时器，后面几根跟着一起算
+                if (downAt.isEmpty()) postDelayed(ticker, REPEAT_DELAY_MS)
+                downAt[pointer] = SystemClock.uptimeMillis()
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                downAt.remove(pointer)
+                if (downAt.isEmpty()) removeCallbacks(ticker)
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                downAt.clear()
+                removeCallbacks(ticker)
+            }
         }
-        onTouch?.invoke(action, event.getPointerId(index), event.getX(index), y)
+
+        onTouch?.invoke(action, pointer, event.getX(index), y)
         if (event.actionMasked == MotionEvent.ACTION_UP) {
             performClick()
         }

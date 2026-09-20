@@ -194,6 +194,23 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_touch(
     }
 }
 
+/// 长按连发：壳的计时器到点了，问一次「按住的那个键要不要再来一下」。
+///
+/// 计时器在壳那边（安卓有现成的 `Handler`），这里只回答该不该触发——
+/// 哪个键连发是输入语义，放在 [`crate::action::repeats`]。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_repeat(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+    pointer: jint,
+) -> jint {
+    match unsafe { from_handle(handle) } {
+        Some(session) => catch_unwind(AssertUnwindSafe(|| session.repeat(pointer))).unwrap_or(0),
+        None => 0,
+    }
+}
+
 /// 该镜像给应用的拼音行（取走并清掉脏标记）。空串表示没在组句，壳应当 `finishComposingText`。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_takePreedit(

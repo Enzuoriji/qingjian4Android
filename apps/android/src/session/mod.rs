@@ -365,6 +365,24 @@ impl Session {
         self.mask()
     }
 
+    /// 长按连发：壳的计时器到点了，问一次「按住的那个键要不要再来一下」。
+    ///
+    /// 计时器在壳那边（安卓有现成的 `Handler`，Rust 这边为此引线程或定时器不划算），
+    /// 这里只回答**该不该触发**——哪个键连发是输入语义，不该让壳知道。
+    /// 按住的键不该连发、或者那根手指已经松了，就什么也不做。
+    pub fn repeat(&mut self, pointer: i32) -> i32 {
+        let key = self.keyboard.as_mut().and_then(|keyboard| {
+            let key = keyboard.held(pointer).filter(|key| action::repeats(*key))?;
+            // 记一笔，抬起时就不再按「点击」补一下了
+            keyboard.note_repeat(pointer);
+            Some(key)
+        });
+        if let Some(key) = key {
+            self.apply(action::on_key(key));
+        }
+        self.mask()
+    }
+
     /// 候选条那半边：按下记一笔、滑出去算取消、抬起时判是点了候选还是划着翻页。
     ///
     /// 判法与键盘不同：候选格横向拖是翻页手势，所以只按「挪没挪出触摸阈值」判，

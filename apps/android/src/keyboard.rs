@@ -75,6 +75,12 @@ struct Press {
     /// 与 [`Self::sliding`] 是两回事：下滑是**手势**，手指离开这个键照样算数；
     /// `sliding` 说的是「点击作废」。
     hinted: bool,
+
+    /// 这一下已经连发过了。
+    ///
+    /// 连发过就不再按「点击」兑现——键是**抬起时**才触发一次的，按住删一串之后松手，
+    /// 那一下会再删一个，等于每次都多退一格。
+    repeated: bool,
 }
 
 /// 自绘的键盘前台。
@@ -222,6 +228,7 @@ impl Keyboard {
                     sliding: false,
                     hint: self.hint_at(x, y),
                     hinted: false,
+                    repeated: false,
                 });
                 self.refresh_pressed();
                 None
@@ -260,6 +267,10 @@ impl Keyboard {
                 if ended.hinted {
                     return ended.hint.map(KeyId::Literal);
                 }
+                // 按住连发过的，抬手不再补一下——不然后面总是多删一个字
+                if ended.repeated {
+                    return None;
+                }
                 // 抬起时只要还在那个键上、或者只挪了触摸阈值那么点距离，都算这一下按着了
                 match ended.key {
                     Some(key)
@@ -291,6 +302,30 @@ impl Keyboard {
             .iter()
             .find(|key| key.id == id)
             .copied()
+    }
+
+    /// 这根手指此刻**按住**的键。没按在键上、已经滑开、或者这一下是下滑取角标，都是 `None`。
+    ///
+    /// 给长按连发用：连发要问的是「这根手指现在还按着哪个键」，
+    /// 而不是 [`Self::pressed`] 那个「最后按下的是哪个键」——后者是给键帽上色用的，
+    /// 两根手指交替时它会被后按下的那根挤掉。
+    pub fn held(&self, pointer: i32) -> Option<KeyId> {
+        self.presses
+            .iter()
+            .find(|press| press.pointer == pointer && !press.sliding && !press.hinted)
+            .and_then(|press| press.key)
+    }
+
+    /// 记下这根手指已经连发过了。抬起时就不再按「点击」兑现一次——
+    /// 不然按住删一串、松手那下还会多删一个，每次都要多退一格。
+    pub fn note_repeat(&mut self, pointer: i32) {
+        if let Some(press) = self
+            .presses
+            .iter_mut()
+            .find(|press| press.pointer == pointer)
+        {
+            press.repeated = true;
+        }
     }
 
     /// 命中哪个键。落在键之间的缝上、或者还没画过时是 `None`。

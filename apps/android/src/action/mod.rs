@@ -31,6 +31,15 @@ pub fn on_key(key: KeyId) -> Act {
     }
 }
 
+/// 这个键按住不放会不会连发。
+///
+/// **只有退格连发。** 删错一串字时一下一下点太慢，别的键按住连发都没有意义：
+/// 字母键按住该出的是角标（下滑那条路），空格按住是上屏、再按住只会连着上屏，
+/// 回车更不该连发。
+pub fn repeats(key: KeyId) -> bool {
+    matches!(key, KeyId::Backspace)
+}
+
 /// 碰到候选条上的一块该干什么。候选给的是**页内**下标，与渲染器报的一致。
 pub fn on_bar(id: BarHitId) -> Act {
     match id {
