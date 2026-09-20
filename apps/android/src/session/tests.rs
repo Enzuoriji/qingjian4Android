@@ -1044,6 +1044,33 @@ fn sliding_on_the_space_bar_moves_the_cursor() {
     );
 }
 
+/// **组句当中不动光标**：那会儿输入框里是我们的拼音，挪光标该挪拼音里的位置，
+/// 引擎还没有这个能力——让应用去挪只会把组字区搅乱。
+#[test]
+fn the_cursor_does_not_move_while_composing() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let (x, y) = key_centre(&session, KeyId::Space);
+    let step = crate::keyboard::CURSOR_STEP * DENSITY;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x + step * 3.0, y);
+    session.touch(MotionAction::Up, POINTER, x + step * 3.0, y);
+
+    assert_eq!(
+        session.take_commands(),
+        Vec::<i32>::new(),
+        "还在组句，不该发移光标"
+    );
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("ni'hao"),
+        "拼音该原样留着"
+    );
+}
+
 /// 空格上滑出键外照样移光标——空格键宽，划着划着就出去了，
 /// 那不是「取消这一下」，是这个手势本身就该兑现。
 #[test]

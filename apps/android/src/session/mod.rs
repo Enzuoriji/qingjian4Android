@@ -411,6 +411,11 @@ impl Session {
     /// 攒成一条条方向键交给应用，**不自己动拼音缓冲区**：输入法不知道光标前后有什么，
     /// 挪光标是应用的事（文本框 / 网页 / 代码编辑器各不一样）。
     fn move_cursor(&mut self, steps: isize) {
+        // 组句当中不动光标：那会儿输入框里是我们镜像过去的拼音，挪光标该挪的是**拼音里**的位置，
+        // 而引擎还没有这个能力——让应用去挪只会把组字区搅乱
+        if self.composing() {
+            return;
+        }
         let command = if steps > 0 {
             Command::MoveRight
         } else {

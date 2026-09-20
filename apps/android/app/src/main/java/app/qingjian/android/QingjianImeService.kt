@@ -9,6 +9,8 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.ExtractedTextRequest
+import android.view.inputmethod.InputConnection
 import java.io.File
 import java.io.IOException
 import java.util.Locale
@@ -179,19 +181,48 @@ class QingjianImeService : InputMethodService() {
      */
     private fun deliver() {
         val connection = currentInputConnection ?: return
+        // 移光标可能一次来好几格，攒成**净位移**最后只调一次——每格都去问一遍
+        // 光标在哪儿要多花几十次跨进程往返
+        var cursor = 0
         QingjianNative.takeCommands(handle)?.forEach { code ->
-            val keyCode = when (code) {
-                QingjianNative.COMMAND_BACKSPACE -> KeyEvent.KEYCODE_DEL
-                QingjianNative.COMMAND_ENTER -> KeyEvent.KEYCODE_ENTER
-                // 移光标只能用方向键：输入法不知道光标前后有什么，也没有「挪一格」的 API
-                QingjianNative.COMMAND_MOVE_LEFT -> KeyEvent.KEYCODE_DPAD_LEFT
-                QingjianNative.COMMAND_MOVE_RIGHT -> KeyEvent.KEYCODE_DPAD_RIGHT
-                else -> return@forEach
+            when (code) {
+                QingjianNative.COMMAND_MOVE_LEFT -> cursor -= 1
+                QingjianNative.COMMAND_MOVE_RIGHT -> cursor += 1
+                else -> {
+                    val keyCode = when (code) {
+                        QingjianNative.COMMAND_BACKSPACE -> KeyEvent.KEYCODE_DEL
+                        QingjianNative.COMMAND_ENTER -> KeyEvent.KEYCODE_ENTER
+                        else -> return@forEach
+                    }
+                    connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
+                    connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+                }
             }
-            connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
-            connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
         }
+        if (cursor != 0) moveCursor(connection, cursor)
         QingjianNative.takeCommit(handle)?.let { connection.commitText(it, 1) }
+    }
+
+    /**
+     * 把光标按字符挪 `steps` 格（正数往右）。
+     *
+     * **不能用方向键**：`KEYCODE_DPAD_*` 在安卓上本来就是**焦点导航**用的，
+     * 光标已经在头 / 尾时那个键没人消费，就会往上冒、把焦点挪到界面上的按钮去
+     * （真机上「滑空格把焦点滑到返回 / 删除键上」就是这么来的）。
+     *
+     * 这里问出光标现在在哪儿，直接算好目标位置 `setSelection`——一步到位，
+     * 也不会外溢成焦点移动。**只动这个输入框里的文本，碰不到界面上的别的东西。**
+     */
+    private fun moveCursor(connection: InputConnection, steps: Int) {
+        val extracted = connection.getExtractedText(ExtractedTextRequest(), 0)
+        if (extracted == null || extracted.selectionStart < 0) {
+            Log.w(TAG, "应用不吐光标位置，这一次移不了")
+            return
+        }
+        val length = extracted.text?.length ?: Int.MAX_VALUE
+        val start = (extracted.selectionStart + steps).coerceIn(0, length)
+        val end = (extracted.selectionEnd + steps).coerceIn(0, length)
+        connection.setSelection(minOf(start, end), maxOf(start, end))
     }
 
     /** 把拼音镜像到输入框；空串表示没在组句，结束组字。 */

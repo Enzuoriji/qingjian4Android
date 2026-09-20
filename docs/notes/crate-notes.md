@@ -145,8 +145,10 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 **空格横滑移光标**（2026-09-20）：`Keyboard::touch` 返回 `Option<Fired>`（`Fired::Key` 或
 `Fired::MoveCursor(格数)`）——移光标不是「某个键」，翻不成 `action::on_key`。
 一格 `CURSOR_STEP` 9 点、上限 30 格；判定排在 `sliding` 之前（空格键宽，划出去不算取消）。
-`Session::move_cursor` 把格数摊成一串 `Command::MoveLeft` / `MoveRight`，
-壳那边映射到 `KEYCODE_DPAD_LEFT` / `RIGHT`。
+`Session::move_cursor` 把格数摊成一串 `Command::MoveLeft` / `MoveRight`（组句当中直接忽略）。
+壳那边**攒成净位移调一次 `InputConnection.setSelection`**，不是每格发一个键——
+每格问一遍光标在哪儿要多花几十次跨进程往返。
+**不能用 `KEYCODE_DPAD_*`**：那是焦点导航用的，光标到头时会往上冒、把焦点挪到界面按钮上。
 
 **键预览气泡**（2026-09-20）：画在 `renderer/keyboard/popup.rs`（`render_key_popup`），
 圆角块 + 阴影 + 放大的字/图标，**单独一张小位图**——它要弹到键盘上方，画在键盘那张里会被窗口裁掉。
