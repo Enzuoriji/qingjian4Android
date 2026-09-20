@@ -155,8 +155,10 @@ impl Renderer {
         };
 
         match key.id {
-            KeyId::Shift => icon::draw_shift(canvas, cx, main_cy, height, theme.label),
-            KeyId::Backspace => icon::draw_backspace(canvas, cx, main_cy, height, theme.label),
+            KeyId::Shift => icon::draw_shift(canvas, cx, main_cy, height, scale, theme.label),
+            KeyId::Backspace => {
+                icon::draw_backspace(canvas, cx, main_cy, height, scale, theme.label)
+            }
             _ => {
                 let text = label(key, state);
                 let style = TextStyle::new(
@@ -226,7 +228,7 @@ fn label(key: &Key, state: &KeyboardState) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::label;
+    use super::{KeyHit, label};
     use crate::fonts::FontLibrary;
     use crate::keyboard::{InputMode, Key, KeyId, KeyboardLayout, KeyboardState, Panel};
     use crate::renderer::Renderer;
@@ -255,6 +257,70 @@ mod tests {
                 english,
                 "{id:?} 英文"
             );
+        }
+    }
+
+    /// 键上图标（⇧ / ⌫）的边长**占键高的比例**，量的是画出来的深色像素。
+    fn icon_ratio(scale: f32) -> Option<(f32, f32)> {
+        let library = FontLibrary::system("zh-CN").ok()?;
+        let mut renderer = Renderer::new(library);
+        let layout = KeyboardLayout::letters();
+        let out = renderer
+            .render_keyboard(
+                &layout,
+                &KeyboardState::default(),
+                360.0,
+                0.0,
+                &KeyboardTheme::light(),
+                scale,
+            )
+            .ok()?;
+
+        let pixmap = &out.rendered.pixmap;
+        let dark = |hit: &KeyHit| {
+            let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+            for y in hit.y as u32..(hit.y + hit.height) as u32 {
+                for x in hit.x as u32..(hit.x + hit.width) as u32 {
+                    let Some(p) = pixmap.pixel(x, y) else {
+                        continue;
+                    };
+                    // 键帽是浅灰底、图标是近黑，取深的那撮
+                    if p.red() < 120 && p.green() < 120 && p.blue() < 130 {
+                        x0 = x0.min(x);
+                        y0 = y0.min(y);
+                        x1 = x1.max(x);
+                        y1 = y1.max(y);
+                    }
+                }
+            }
+            (x1 - x0 + 1) as f32 / hit.height
+        };
+
+        let find = |id: KeyId| {
+            let hit = out.keys.iter().find(|key| key.id == id)?;
+            Some(dark(hit))
+        };
+        Some((find(KeyId::Shift)?, find(KeyId::Backspace)?))
+    }
+
+    /// **图标要跟着屏幕密度一起放大**——这条踩过：上限原先按像素写死，
+    /// 而键高是像素值、随密度涨，于是密度越高的屏幕图标相对越小。
+    /// 真机上「退格 / 上档图标偏小」就是这么来的，模拟器（密度 2）上却看着正常。
+    #[test]
+    fn the_icons_scale_with_density() {
+        let Some((low_shift, low_back)) = icon_ratio(2.0) else {
+            return;
+        };
+        let Some((high_shift, high_back)) = icon_ratio(3.0) else {
+            return;
+        };
+
+        for (name, low, high) in [("⇧", low_shift, high_shift), ("⌫", low_back, high_back)] {
+            assert!(
+                (low - high).abs() < 0.02,
+                "{name} 图标占键高的比例该与密度无关：密度 2 是 {low:.2}、密度 3 是 {high:.2}"
+            );
+            assert!(high > 0.25, "{name} 图标太小了：占键高 {high:.2}");
         }
     }
 

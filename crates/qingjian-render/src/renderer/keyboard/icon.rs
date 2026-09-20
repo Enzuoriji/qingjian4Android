@@ -13,14 +13,31 @@ use crate::canvas::Canvas;
 use crate::color::Color;
 
 /// 图标边长相对键高的比例。
-const SIZE_RATIO: f32 = 0.42;
+///
+/// **0.46 是照实机截图反推的**：参考图上 ⌫ 那个图标高占键高 0.33，而画法里图标
+/// 只占这张方块的 0.72，0.33 ÷ 0.72 ≈ 0.46。
+/// 试过 0.55（图标占键高 0.43），比字母还抢眼，退回来了。
+const SIZE_RATIO: f32 = 0.46;
 
-/// 图标的最大边长（点）——键再大也不让图标跟着无限变大。
-const MAX_SIZE: f32 = 20.0;
+/// 图标边长的上限（**点**）。
+///
+/// 上下限都按点算，画的时候再乘密度——**按像素算是个坑**：键高是像素值、随密度涨，
+/// 上限却钉死在像素上，于是**屏幕密度越高、图标相对越小**。真机上「图标偏小」就是这么来的。
+const MAX_SIZE: f32 = 26.0;
+
+/// 图标边长的下限（**点**）。键再小也别小到看不清。
+const MIN_SIZE: f32 = 6.0;
 
 /// 画上档箭头 ⇧，居中在 `(cx, cy)`。
-pub(crate) fn draw_shift(canvas: &mut Canvas, cx: f32, cy: f32, key_height: f32, color: Color) {
-    let Some((mut layer, size)) = layer(key_height) else {
+pub(crate) fn draw_shift(
+    canvas: &mut Canvas,
+    cx: f32,
+    cy: f32,
+    key_height: f32,
+    scale: f32,
+    color: Color,
+) {
+    let Some((mut layer, size)) = layer(key_height, scale) else {
         return;
     };
     let s = size;
@@ -44,8 +61,15 @@ pub(crate) fn draw_shift(canvas: &mut Canvas, cx: f32, cy: f32, key_height: f32,
 }
 
 /// 画退格 ⌫，居中在 `(cx, cy)`。
-pub(crate) fn draw_backspace(canvas: &mut Canvas, cx: f32, cy: f32, key_height: f32, color: Color) {
-    let Some((mut layer, size)) = layer(key_height) else {
+pub(crate) fn draw_backspace(
+    canvas: &mut Canvas,
+    cx: f32,
+    cy: f32,
+    key_height: f32,
+    scale: f32,
+    color: Color,
+) {
+    let Some((mut layer, size)) = layer(key_height, scale) else {
         return;
     };
     let s = size;
@@ -84,8 +108,12 @@ pub(crate) fn draw_backspace(canvas: &mut Canvas, cx: f32, cy: f32, key_height: 
 }
 
 /// 建一张空的小画布与它的边长（像素），给图标用。
-fn layer(key_height: f32) -> Option<(Canvas, f32)> {
-    let size = (key_height * SIZE_RATIO).clamp(8.0, MAX_SIZE).ceil();
+///
+/// `key_height` 是像素，`scale` 是屏幕密度——上下限按点写，乘上 `scale` 才跟键高同一个量纲。
+fn layer(key_height: f32, scale: f32) -> Option<(Canvas, f32)> {
+    let size = (key_height * SIZE_RATIO)
+        .clamp(MIN_SIZE * scale, MAX_SIZE * scale)
+        .ceil();
     let canvas = Canvas::new(size as u32, size as u32).ok()?;
     Some((canvas, size))
 }

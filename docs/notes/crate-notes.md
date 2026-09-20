@@ -101,6 +101,12 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 软键盘走同一条路：布局数据在 `keyboard/`（`KeyboardLayout` 按「单位宽」算几何，每行居中，第 2 行自然得到半键错位，不写死坐标）、绘制在 `renderer/keyboard/`、
 主题在 `theme/keyboard.rs`；`render_keyboard` 与 `render_status` 一样，出位图的同时把**每个键的命中矩形**一并返回。设计与取舍见 `docs/design/keyboard.md`。
 
+**键上图标（⇧ / ⌫）的尺寸要按点写、画的时候乘密度**。踩过的坑：边长的上限原先按**像素**写死，
+而键高是像素值、随密度一起涨，于是**屏幕密度越高的手机图标相对越小**——真机上「退格 / 上档图标偏小」
+就是这么来的，模拟器（密度 2）上却看着正好。现在 `SIZE_RATIO` 占键高 0.46（实机截图反推：
+图标高占键高 0.33，而画法里图标只占方块的 0.72），上下限也按点算。
+`renderer/keyboard` 的 `the_icons_scale_with_density` 盯着密度 2 与 3 下比例一致。
+
 **三页键盘（2026-09-18）**：`keyboard/panel.rs` 是 `Panel`（字母 / 数字 / 符号），`KeyboardLayout::of(panel)` 取某一页的布局，
 `KeyId::Literal(char)` 是「按一下出这个字符」，`KeyId::Panel(Panel)` 是切页键（标签写的是**要去哪一页**）。
 **三页都是四行**——键盘高度是定死的，页与页行数不一样就会把上面的应用顶一下。
