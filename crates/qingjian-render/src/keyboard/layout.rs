@@ -82,16 +82,18 @@ impl KeyboardLayout {
                 },
                 KeyRow {
                     keys: vec![
-                        // 字母页**直接进得了数字页与符号页**，不必先绕一层
-                        Key::new(KeyId::Panel(Panel::Symbols), 1.0),
+                        // 字母页**直接进得了数字页与符号页**，不必先绕一层。
+                        // 这一格宽 1.5：跟回车凑成一对「两头的键」，空格才正好落在正中
+                        // （见下面那条注释）。它比隔壁的 `123` 宽，是居中的代价
+                        Key::new(KeyId::Panel(Panel::Symbols), 1.5),
                         Key::new(KeyId::Panel(Panel::Digits), 1.0),
-                        // 逗号在空格**左边**、句号在右边，中 / 英再往右——**空格两边的键
-                        // 各 3 个单位**，空格正好落在这一排的正中（见下面那条注释）
+                        // 逗号在空格**左边**、句号在右边，中 / 英再往右——
+                        // **空格左右各 3.5 个单位**，正落在这排正中
                         Key::new(KeyId::Comma, 1.0),
-                        Key::new(KeyId::Space, 4.0),
+                        Key::new(KeyId::Space, 3.0),
                         Key::new(KeyId::Period, 1.0),
                         Key::new(KeyId::Mode, 1.0),
-                        Key::new(KeyId::Enter, 1.0),
+                        Key::new(KeyId::Enter, 1.5),
                     ],
                 },
             ],
