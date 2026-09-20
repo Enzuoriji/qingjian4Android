@@ -1013,6 +1013,78 @@ fn the_popup_shows_what_will_actually_be_typed() {
     );
 }
 
+/// 空格键上横着滑 = 移光标，**按位移量发方向键**。
+#[test]
+fn sliding_on_the_space_bar_moves_the_cursor() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Space);
+    let step = crate::keyboard::CURSOR_STEP * DENSITY;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x + step * 3.0, y);
+    session.touch(MotionAction::Up, POINTER, x + step * 3.0, y);
+
+    assert_eq!(
+        session.take_commands(),
+        vec![Command::MoveRight.code(); 3],
+        "往右滑三格该发三次右方向键"
+    );
+    assert_eq!(session.take_commit(), None, "移光标不该顺手把空格打出去");
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - step * 2.0, y);
+    session.touch(MotionAction::Up, POINTER, x - step * 2.0, y);
+
+    assert_eq!(
+        session.take_commands(),
+        vec![Command::MoveLeft.code(); 2],
+        "往左滑两格该发两次左方向键"
+    );
+}
+
+/// 空格上滑出键外照样移光标——空格键宽，划着划着就出去了，
+/// 那不是「取消这一下」，是这个手势本身就该兑现。
+#[test]
+fn moving_the_cursor_survives_leaving_the_space_bar() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Space);
+    let step = crate::keyboard::CURSOR_STEP * DENSITY;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    // 一路滑到空格右边的「。」上
+    session.touch(MotionAction::Move, POINTER, x + step * 6.0, y);
+    session.touch(MotionAction::Up, POINTER, x + step * 6.0, y);
+
+    assert_eq!(
+        session.take_commands(),
+        vec![Command::MoveRight.code(); 6],
+        "滑出空格键外也该照位移量移光标"
+    );
+}
+
+/// 空格上只挪一点点，还是「按空格」——上屏高亮候选，不是移光标。
+#[test]
+fn a_small_drag_on_the_space_bar_is_still_a_space() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let first = drawn(&session).first().map(|text| (*text).to_owned());
+    let (x, y) = key_centre(&session, KeyId::Space);
+
+    // 不够一格的位移
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x + 4.0, y);
+    session.touch(MotionAction::Up, POINTER, x + 4.0, y);
+
+    assert_eq!(session.take_commands(), Vec::<i32>::new(), "不该发方向键");
+    assert_eq!(session.take_commit(), first, "该上屏高亮那个候选");
+}
+
 /// 空格没有字可显示，按住也不弹——弹一个空框子只是晃眼。
 #[test]
 fn the_space_key_has_no_popup() {

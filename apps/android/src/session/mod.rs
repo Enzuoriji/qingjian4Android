@@ -17,7 +17,7 @@ use qingjian_render::{
 
 use crate::action::{self, Act, Command};
 use crate::error::SessionError;
-use crate::keyboard::Keyboard;
+use crate::keyboard::{Fired, Keyboard};
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 
@@ -397,14 +397,31 @@ impl Session {
             .keyboard
             .as_mut()
             .and_then(|keyboard| keyboard.touch(action, pointer, x, y - bar_pixels));
-        if let Some(key) = fired {
-            self.apply(action::on_key(key));
+        match fired {
+            Some(Fired::Key(key)) => self.apply(action::on_key(key)),
+            Some(Fired::MoveCursor(steps)) => self.move_cursor(steps),
+            None => {}
         }
         self.touch_bar(action, pointer, x, y);
         self.mask()
     }
 
-    /// 长按连发：壳的计时器到点了，问一次「按住的那个键要不要再来一下」。
+    /// 光标左右移几格（正数往右）。空格键上横着滑出来的。
+    ///
+    /// 攒成一条条方向键交给应用，**不自己动拼音缓冲区**：输入法不知道光标前后有什么，
+    /// 挪光标是应用的事（文本框 / 网页 / 代码编辑器各不一样）。
+    fn move_cursor(&mut self, steps: isize) {
+        let command = if steps > 0 {
+            Command::MoveRight
+        } else {
+            Command::MoveLeft
+        };
+        for _ in 0..steps.abs() {
+            self.pending_commands.push(command);
+        }
+    }
+
+    /// 长按连发：壳的计时器到点了，问一次「按住的那个键要不要再来一次」。
     ///
     /// 计时器在壳那边（安卓有现成的 `Handler`，Rust 这边为此引线程或定时器不划算），
     /// 这里只回答**该不该触发**——哪个键连发是输入语义，不该让壳知道。

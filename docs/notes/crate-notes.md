@@ -142,6 +142,12 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 下排每格宽度均分（触摸面积一样大）、格间留一条缝，词太长就截断补省略号；
 `×` / `‹` / `›` 与每个候选的位置一并返回，供命中测试。
 
+**空格横滑移光标**（2026-09-20）：`Keyboard::touch` 返回 `Option<Fired>`（`Fired::Key` 或
+`Fired::MoveCursor(格数)`）——移光标不是「某个键」，翻不成 `action::on_key`。
+一格 `CURSOR_STEP` 9 点、上限 30 格；判定排在 `sliding` 之前（空格键宽，划出去不算取消）。
+`Session::move_cursor` 把格数摊成一串 `Command::MoveLeft` / `MoveRight`，
+壳那边映射到 `KEYCODE_DPAD_LEFT` / `RIGHT`。
+
 **键预览气泡**（2026-09-20）：画在 `renderer/keyboard/popup.rs`（`render_key_popup`），
 圆角块 + 阴影 + 放大的字/图标，**单独一张小位图**——它要弹到键盘上方，画在键盘那张里会被窗口裁掉。
 安卓侧 `KeyPopup.kt` 用 `PopupWindow` 承载，位置由 `Keyboard::popup_origin` 算好（视图相对像素）。

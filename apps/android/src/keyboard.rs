@@ -24,6 +24,28 @@ use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 /// 特意滑一下就过。
 pub(crate) const SWIPE: f32 = 12.0;
 
+/// 在空格键上横着滑这么多点，光标移一格。
+///
+/// 比 [`SWIPE`] 小：滑动的门槛是「手指抖一下到不了」，而移光标是**一寸一寸**的——
+/// 门槛大了滑半天不动，小了又容易误触发，取四分之一键高上下。
+pub(crate) const CURSOR_STEP: f32 = 9.0;
+
+/// 一次最多移这么多格。手指划得再远也不至于把光标甩到天边。
+const CURSOR_MAX_STEPS: isize = 30;
+
+/// 抬起来时兑现的东西。
+///
+/// 大多数时候是「按了某个键」，但空格键上横着滑是**移光标**——那不是某个键，
+/// 翻成动作也就不是 [`crate::action::on_key`] 那条路，得分开报。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fired {
+    /// 按了某个键。
+    Key(KeyId),
+
+    /// 光标往右（正数）或往左（负数）移几格。
+    MoveCursor(isize),
+}
+
 /// 尺寸与外观。壳在 `Session::configure` 时给一份。
 #[derive(Debug, Clone, Copy)]
 struct Metrics {
@@ -117,6 +139,15 @@ pub struct Keyboard {
     /// 按住键那一下要弹；同一个键按着不动就不必重画（画一次 ~0.8ms，每拍重画白费）。
     popup: Option<Rendered>,
     popup_for: Option<(KeyId, u32, u32)>,
+}
+
+/// 横着滑了 `dx` 像素，该移几格光标（正数往右）。
+///
+/// 按**位移量**算而不是按手势次数：滑得远就移得多，跟桌面按住方向键连发是一个手感。
+fn cursor_steps(dx: f32, step: f32) -> isize {
+    let steps = (dx.abs() / step) as isize;
+    let steps = steps.min(CURSOR_MAX_STEPS);
+    if dx < 0.0 { -steps } else { steps }
 }
 
 impl Keyboard {
@@ -235,8 +266,8 @@ impl Keyboard {
     /// 只管**起手就落在键盘上**的手指：不在 `presses` 里的 pointer 一律不理，
     /// 所以壳可以把每个事件都送进来，不必自己记「这根手指是哪个区的」。
     ///
-    /// 返回抬起来时兑现的那个键；没有就是 `None`。
-    pub fn touch(&mut self, action: MotionAction, pointer: i32, x: f32, y: f32) -> Option<KeyId> {
+    /// 返回抬起来时兑现的东西（按了某个键，或者空格上横滑移光标）；没有就是 `None`。
+    pub fn touch(&mut self, action: MotionAction, pointer: i32, x: f32, y: f32) -> Option<Fired> {
         match action {
             MotionAction::Down | MotionAction::PointerDown => {
                 // 键盘在候选条下面；y 为负说明按到候选条那半边去了，不归这里管
@@ -289,14 +320,22 @@ impl Keyboard {
                     .position(|press| press.pointer == pointer);
                 let ended = index.map(|index| self.presses.remove(index))?;
                 self.refresh_pressed();
-                // 下滑出来的字符走 `Literal`：与数字页、符号页同一个身份，
+                // 滑出来的字符走 `Literal`：与数字页、符号页同一个身份，
                 // 翻成动作、全角与否都走已经有的那条路
                 if ended.hinted {
-                    return ended.hint.map(KeyId::Literal);
+                    return ended.hint.map(|hint| Fired::Key(KeyId::Literal(hint)));
                 }
                 // 按住连发过的，抬手不再补一下——不然后面总是多删一个字
                 if ended.repeated {
                     return None;
+                }
+                // 空格上横着滑 = 移光标。**排在 `sliding` 前面**：空格键很宽，
+                // 划着划着就滑出键外了，那不算「取消」，是这一手势本身就该兑现
+                if ended.key == Some(KeyId::Space) {
+                    let steps = cursor_steps(x - ended.at.0, CURSOR_STEP * self.metrics.density);
+                    if steps != 0 {
+                        return Some(Fired::MoveCursor(steps));
+                    }
                 }
                 // 抬起时只要还在那个键上、或者只挪了触摸阈值那么点距离，都算这一下按着了
                 match ended.key {
@@ -305,7 +344,7 @@ impl Keyboard {
                             && (self.hit(x, y) == Some(key)
                                 || within_slop(ended.at, self.touch_slop(), x, y)) =>
                     {
-                        Some(key)
+                        Some(Fired::Key(key))
                     }
                     _ => None,
                 }

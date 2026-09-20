@@ -99,6 +99,12 @@ object QingjianNative {
     /** [takeCommands] 里的编号：回车。 */
     const val COMMAND_ENTER = 2
 
+    /** [takeCommands] 里的编号：光标左移一格。 */
+    const val COMMAND_MOVE_LEFT = 3
+
+    /** [takeCommands] 里的编号：光标右移一格。 */
+    const val COMMAND_MOVE_RIGHT = 4
+
     /** 候选条变了。 */
     const val FLAG_BAR = 1
 

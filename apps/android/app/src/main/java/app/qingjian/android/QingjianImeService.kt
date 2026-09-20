@@ -183,6 +183,9 @@ class QingjianImeService : InputMethodService() {
             val keyCode = when (code) {
                 QingjianNative.COMMAND_BACKSPACE -> KeyEvent.KEYCODE_DEL
                 QingjianNative.COMMAND_ENTER -> KeyEvent.KEYCODE_ENTER
+                // 移光标只能用方向键：输入法不知道光标前后有什么，也没有「挪一格」的 API
+                QingjianNative.COMMAND_MOVE_LEFT -> KeyEvent.KEYCODE_DPAD_LEFT
+                QingjianNative.COMMAND_MOVE_RIGHT -> KeyEvent.KEYCODE_DPAD_RIGHT
                 else -> return@forEach
             }
             connection.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
