@@ -200,9 +200,16 @@ fn label(key: &Key, state: &KeyboardState) -> String {
             InputMode::Chinese => "中".to_owned(),
             InputMode::English => "英".to_owned(),
         },
-        // 这两个画全角：字母页底下最常用的标点，一眼认得出来。符号页那些符号仍画半角原字符
-        KeyId::Comma => "，".to_owned(),
-        KeyId::Period => "。".to_owned(),
+        // 这两个跟着模式走：中文画全角、英文画半角。画死成全角的话，
+        // 切到英文之后键帽上写着「。」打出来的却是 `.`，那是骗人
+        KeyId::Comma => match state.mode {
+            InputMode::Chinese => "，".to_owned(),
+            InputMode::English => ",".to_owned(),
+        },
+        KeyId::Period => match state.mode {
+            InputMode::Chinese => "。".to_owned(),
+            InputMode::English => ".".to_owned(),
+        },
         KeyId::Enter => "回车".to_owned(),
         KeyId::Space => String::new(),
         KeyId::Shift | KeyId::Backspace => String::new(),
@@ -219,10 +226,37 @@ fn label(key: &Key, state: &KeyboardState) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::label;
     use crate::fonts::FontLibrary;
-    use crate::keyboard::{KeyboardLayout, KeyboardState, Panel};
+    use crate::keyboard::{InputMode, Key, KeyId, KeyboardLayout, KeyboardState, Panel};
     use crate::renderer::Renderer;
     use crate::theme::KeyboardTheme;
+
+    /// 逗号与句号**跟着中 / 英走**。
+    ///
+    /// 画死成全角的话，切到英文之后键帽上写着「。」、打出来却是 `.`——键帽骗人。
+    /// 别的键（`123`、`符`、`回车`）是动作键，不随模式变。
+    #[test]
+    fn the_punctuation_keys_follow_the_mode() {
+        let state = |mode| KeyboardState {
+            mode,
+            ..KeyboardState::default()
+        };
+
+        for (id, chinese, english) in [(KeyId::Comma, "，", ","), (KeyId::Period, "。", ".")] {
+            let key = Key::new(id, 1.0);
+            assert_eq!(
+                label(&key, &state(InputMode::Chinese)),
+                chinese,
+                "{id:?} 中文"
+            );
+            assert_eq!(
+                label(&key, &state(InputMode::English)),
+                english,
+                "{id:?} 英文"
+            );
+        }
+    }
 
     /// 某一页每一排的左右边缘（像素），按行顺序。
     ///
