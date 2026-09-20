@@ -205,8 +205,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     println!(
-        "候选条固定高度 {:.1}pt（与内容无关）",
-        Renderer::bar_height(&Theme::light())
+        "候选条高度：组句 {:.1}pt、没组句 {:.1}pt（只在「在不在组句」之间变，与候选多少无关）",
+        Renderer::bar_height(&Theme::light(), true),
+        Renderer::bar_height(&Theme::light(), false),
     );
 
     for probe in [

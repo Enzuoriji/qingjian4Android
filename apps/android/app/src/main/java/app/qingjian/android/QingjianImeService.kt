@@ -223,12 +223,17 @@ class QingjianImeService : InputMethodService() {
         refreshKeyboard(view)
     }
 
-    /** 重新取一张候选条位图贴上。Rust 那边没脏就会返回同一张，不会白画。 */
+    /**
+     * 重新取一张候选条位图贴上。Rust 那边没脏就会返回同一张，不会白画。
+     *
+     * **空字节串表示「这一条现在不该在」**（没在组句，整条收起来了），要把视图上那张撤掉——
+     * 光不更新是不够的，旧位图还占着高度、键盘会停在被顶上去的位置。
+     */
     private fun refreshBar(view: QingjianSurfaceView) {
         if (handle == 0L) return
         val bytes = QingjianNative.barSurface(handle)
         if (bytes == null || bytes.isEmpty()) {
-            Log.e(TAG, "候选条没画出来（渲染器没建起来，或者还没配过宽度）")
+            view.setBar(null)
             return
         }
         QingjianNative.toBitmap(bytes)?.let(view::setBar)

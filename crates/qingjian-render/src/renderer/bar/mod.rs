@@ -1,8 +1,11 @@
 //! 候选条（安卓）：屏幕宽的一条，上排拼音、下排候选。
 //!
 //! 与候选窗（`renderer::{vertical,horizontal}`）的差别是结构级的：候选窗的宽高由内容量出来，
-//! 候选条**宽度是屏幕宽、高度必须固定**——高度跟着内容变的话，每敲一个键都会把上面的应用内容顶一下。
-//! 所以这里没有 `preferred_size`，两排的尺寸都由主题算死，拼音行为空时也照样占着位置（只剩底色）。
+//! 候选条**宽度是屏幕宽**，高度由主题算死、不按内容量（没有 `preferred_size`）。
+//!
+//! 高度只在**「在不在组句」**这一个开关上变：组句当中是定值（候选从 0 个变 6 个不会动），
+//! **没组句时整条收起来**（[`Renderer::bar_height`] 是 0），省下的高度还给应用。
+//! 代价是敲第一个字母时上面的应用内容会被顶一下——明知故犯，见那个函数的注释。
 //!
 //! 拼音行直接复用候选窗那一套 [`Renderer::draw_top_line`]——分段、纠错删除线、光标都在里面，
 //! 只有候选行是新写的。命中矩形与键盘一样随位图一并返回，壳只回传原始坐标。
@@ -38,15 +41,41 @@ const BUTTON_GAP: f32 = 4.0;
 /// 词太长装不下时截断补的记号。
 const ELLIPSIS: &str = "…";
 
+/// 工具条的高度（点）。
+///
+/// 候选条底下那条常驻的按钮排——切键盘、设置齿轮那一类。**现在还没有，是 0**；
+/// 将来加的时候改这里，**它不受组句与否影响**：没打字时它照样在。
+const TOOLBAR_HEIGHT: f32 = 0.0;
+
 impl Renderer {
-    /// 候选条该有多高（点）。
+    /// 候选条该占多高（点）。
     ///
-    /// **固定值，不随内容变**：高度跟着内容变的话，每敲一个键都会把上面的应用内容顶一下。
-    pub fn bar_height(theme: &Theme) -> f32 {
+    /// 分两段：
+    /// - **工具条**（[`TOOLBAR_HEIGHT`]）常驻，将来放设置 / 工具按钮
+    /// - **组字区**（拼音行 + 候选行）只在组句时占位；**不组句时整段收起来**，
+    ///   省下的高度还给应用——键盘贴着应用下沿，一敲字母再顶出来
+    ///
+    /// 收起来这件事与「固定高度」那条原则**故意相反**：原先高度定死是为了不顶应用，
+    /// 但空着一条几十点高的白带更难受，两害相权取其轻。代价是敲第一个字母时
+    /// 上面的应用内容会被顶一下。
+    pub fn bar_height(theme: &Theme, composing: bool) -> f32 {
+        TOOLBAR_HEIGHT
+            + if composing {
+                Self::composing_height(theme)
+            } else {
+                0.0
+            }
+    }
+
+    /// 组字区的高度（点）：拼音行 + 候选行 + 上下留白。
+    fn composing_height(theme: &Theme) -> f32 {
         theme.padding * 2.0 + top_line_height(theme) + candidate_row_height(theme)
     }
 
     /// 画候选条，返回位图与每块可点区域。
+    ///
+    /// **高度为 0 的时候不要调这里**（没组句、也没有工具条时就是那样，0 高的位图建不出来）。
+    /// 调用方看 [`Self::bar_height`] 先判一下——`Session::bar_surface` 就是这么做的。
     ///
     /// `width` 是内容宽度（点）——安卓传屏幕宽除以密度。没有阴影：候选条上下都与屏幕边、
     /// 键盘边齐平，四边不露在外面。
@@ -59,7 +88,9 @@ impl Renderer {
     ) -> Result<RenderedBar, RenderError> {
         let m = Metrics { theme, scale };
         let content_width = (width * scale).round().max(1.0);
-        let content_height = (Self::bar_height(theme) * scale).round().max(1.0);
+        let content_height = (Self::bar_height(theme, frame.preedit.is_some()) * scale)
+            .round()
+            .max(1.0);
         let mut canvas = Canvas::new(content_width as u32, content_height as u32)?;
         canvas.fill_rect(
             0.0,
@@ -400,21 +431,41 @@ mod tests {
             return;
         };
         let theme = Theme::light();
-        let empty = renderer
-            .render_bar(&Frame::default(), WIDTH, &theme, SCALE)
+        // 有拼音但一个候选都没有（`ni'h` 这种还拼不成音节的）也是一个高度
+        let bare = renderer
+            .render_bar(&frame(0), WIDTH, &theme, SCALE)
             .unwrap();
         let full = renderer
             .render_bar(&frame(6), WIDTH, &theme, SCALE)
             .unwrap();
         assert_eq!(
-            empty.rendered.content_height, full.rendered.content_height,
-            "候选条高度必须固定，否则每敲一键都会顶一下应用内容"
+            bare.rendered.content_height, full.rendered.content_height,
+            "组句当中高度必须定死，否则候选一多一少就把应用顶一下"
         );
         assert_eq!(
             full.rendered.content_height,
-            (Renderer::bar_height(&theme) * SCALE).round() as u32
+            (Renderer::bar_height(&theme, true) * SCALE).round() as u32
         );
-        assert!(empty.hits.is_empty(), "空帧不该有可点区域");
+        assert!(
+            candidates(&bare).is_empty(),
+            "没候选时不该有候选格子（清空与翻页按钮还在，那是另一回事）"
+        );
+    }
+
+    /// **没在组句时这一条整个收起来**——高度是 0，不是「矮一点」。
+    ///
+    /// 收起来省下的高度还给应用，键盘贴着应用下沿；一敲字母再顶出来。
+    /// 与「组句当中高度定死」不矛盾：变的只是**在不在组句**这一个开关。
+    #[test]
+    fn the_bar_has_no_height_when_not_composing() {
+        let theme = Theme::light();
+
+        assert_eq!(
+            Renderer::bar_height(&theme, false),
+            0.0,
+            "没组句时不该占任何高度"
+        );
+        assert!(Renderer::bar_height(&theme, true) > 0.0, "组句时该有高度");
     }
 
     #[test]

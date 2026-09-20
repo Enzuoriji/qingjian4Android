@@ -263,9 +263,18 @@ impl Session {
         self.keyboard.as_ref().map_or(0.0, Keyboard::height)
     }
 
-    /// 候选条该有多高（点）。固定值，与有没有候选无关。
+    /// 候选条该占多高（点）。**没在组句时是 0**——这一条整个收起来，高度还给应用。
+    ///
+    /// 壳按两张位图的高度自己量视图，所以这个值只要跟着 [`Self::bar_surface`] 一致就行。
     pub fn bar_height(&self) -> f32 {
-        Renderer::bar_height(&self.theme())
+        Renderer::bar_height(&self.theme(), self.composing())
+    }
+
+    /// 在组句吗——拼音缓冲区里有没有东西。
+    ///
+    /// 候选条收不收就看它，**不是看有没有候选**：`ni'h` 这种还拼不成音节的也有拼音行要显示。
+    fn composing(&self) -> bool {
+        self.preedit.is_some()
     }
 
     /// 现在是英文模式吗。
@@ -289,9 +298,18 @@ impl Session {
         }
     }
 
-    /// 候选条的位图（8 字节头 + 预乘 RGBA）。没配过宽度或渲染器不可用时返回空。
+    /// 候选条的位图（8 字节头 + 预乘 RGBA）。没配过宽度、渲染器不可用、**或者没在组句**时返回空。
+    ///
+    /// 没在组句时把 `bar` 也清掉：那块命中区跟着一起没了，触摸自然落不到候选条上。
+    /// 壳收到空字节串要把视图上那张位图**撤掉**，视图量出来的高度才会跟着缩回去——
+    /// 光不更新是不够的，那张旧位图还占着位置。
     pub fn bar_surface(&mut self) -> Vec<u8> {
         if self.width <= 0.0 {
+            return Vec::new();
+        }
+        if !self.composing() {
+            self.bar = None;
+            self.bar_dirty = false;
             return Vec::new();
         }
         if self.bar_dirty || self.bar.is_none() {

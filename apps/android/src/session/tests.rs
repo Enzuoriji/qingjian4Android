@@ -421,27 +421,44 @@ fn a_tap_on_the_bar_is_not_a_key_press() {
     let Some(mut session) = ready() else {
         return;
     };
-    // 候选条那一段点空处（没有候选时哪块都不占）
-    let (x, y) = (WIDTH * DENSITY / 2.0, session.bar_height() * DENSITY / 2.0);
-    tap_at(&mut session, x, y);
-    assert!(
-        session.frame.preedit.is_none(),
+    // 先敲一个字母把候选条顶出来——**没组句时这一条根本不存在**，没有可点的空处
+    type_text(&mut session, "n");
+    let before = preedit(&session);
+
+    // 点在拼音行那块空白上——避开右端的清空 / 翻页按钮，也避开下方的候选格子
+    // （点到格子会上屏候选，那是另一回事，不是这条要验的）
+    let y = 10.0 * DENSITY;
+    tap_at(&mut session, 100.0, y);
+
+    assert_eq!(
+        preedit(&session),
+        before,
         "候选条那一排不归任何键，不该出拼音"
     );
 }
 
+/// 候选条**只在组句时存在**：没拼音时不出位图，壳据此把视图缩回去、高度还给应用。
+///
+/// 组句当中高度仍是定死的：候选从 0 个变 6 个不动，否则每敲一键都顶一下应用。
 #[test]
-fn the_bar_is_drawn_at_the_fixed_height() {
+fn the_bar_only_exists_while_composing() {
     let Some(mut session) = ready() else {
         return;
     };
+
+    assert_eq!(session.bar_height(), 0.0, "没组句时不该占高度");
+    assert!(session.bar_surface().is_empty(), "没组句时不该出位图");
+    assert!(session.bar.is_none(), "命中区也该跟着一起没");
+
+    type_text(&mut session, "nihao");
+
     let bytes = session.bar_surface();
-    assert!(bytes.len() > 8, "候选条该有位图");
+    assert!(bytes.len() > 8, "组句了就该有位图");
     let height = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
     assert_eq!(
         height,
         (session.bar_height() * DENSITY).round() as u32,
-        "候选条高度必须是主题定死的那个值"
+        "组句时的高度该是主题定死的那个值"
     );
 }
 
@@ -886,7 +903,12 @@ fn two_fingers_overlapping_do_not_eat_each_other() {
 
     session.touch(MotionAction::Down, 0, nx, ny); // 拇指 A 按 n
     session.touch(MotionAction::PointerDown, 1, ix, iy); // 拇指 B 在 A 抬起前按 i
-    session.touch(MotionAction::PointerUp, 0, nx, ny); // A 抬起
+    session.touch(MotionAction::PointerUp, 0, nx, ny); // A 抬起 → 上屏 n，候选条顶出来
+
+    // 候选条一顶出来**视图就长高了**，同一根手指在视图里的 y 也就大了整整一个候选条的高度。
+    // 真机上安卓自己会这么报（每一拍都是当前坐标），测试里得照着模拟——
+    // 拿按下时那对旧坐标去抬，就打到别的键上了
+    let (_, iy) = key_centre(&session, KeyId::Letter('i'));
     session.touch(MotionAction::Up, 1, ix, iy); // B 抬起
 
     assert_eq!(
@@ -906,7 +928,9 @@ fn overlapping_fingers_keep_their_own_letter_when_lifted_in_the_other_order() {
 
     session.touch(MotionAction::Down, 0, nx, ny);
     session.touch(MotionAction::PointerDown, 1, ax, ay);
-    session.touch(MotionAction::PointerUp, 1, ax, ay); // 后按下的先抬
+    session.touch(MotionAction::PointerUp, 1, ax, ay); // 后按下的先抬 → 候选条顶出来
+    // 视图长高了，同一根手指的 y 跟着大一个候选条的高度（见上一个用例的注释）
+    let (nx, ny) = key_centre(&session, KeyId::Letter('n'));
     session.touch(MotionAction::Up, 0, nx, ny);
 
     assert_eq!(

@@ -73,7 +73,8 @@ class QingjianSurfaceView(context: Context) : View(context) {
         }
     }
 
-    fun setBar(value: Bitmap) {
+    /** 贴候选条。传 `null` 表示这一条现在不该在（没在组句），高度也跟着让出去。 */
+    fun setBar(value: Bitmap?) {
         bar = value
         refreshHeight()
         invalidate()
