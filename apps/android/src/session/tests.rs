@@ -408,12 +408,18 @@ fn a_drag_on_the_keyboard_does_not_page() {
     session.touch(MotionAction::Move, POINTER, x - 120.0, y);
     session.touch(MotionAction::Up, POINTER, x - 120.0, y);
 
-    assert_eq!(
-        preedit(&session).as_deref(),
-        Some("shi"),
-        "在键盘上划走该什么也不做（不算按了 a，也不算翻页）"
+    // 横着划走够远，现在也算「在键上滑了一下」，出的是角标 `@` 而不是字母 `a`。
+    // 组句当中打标点会先把高亮候选上屏，所以上屏的是「候选 + @」
+    let committed = session.take_commit().expect("该有东西上屏");
+    assert!(
+        committed.ends_with('@'),
+        "横着划走够远算滑动，出的是角标 @：{committed}"
     );
-    assert!(session.frame.footer.as_deref().unwrap().starts_with("1/"));
+    assert!(!committed.contains('a'), "不该把字母 a 打出去：{committed}");
+    assert!(
+        drawn(&session).is_empty(),
+        "上屏之后候选该清空——**翻页是候选条的手势**，在键盘上划不该翻它的页"
+    );
 }
 
 #[test]
@@ -669,19 +675,24 @@ fn lifting_a_hair_past_the_key_edge_still_counts() {
     );
 }
 
-/// 在 `id` 这个键上按下，往下滑 `dy` 像素，再抬起。
-fn swipe_down(session: &mut Session, id: KeyId, dy: f32) {
+/// 在 `id` 这个键上按下，往 `(dx, dy)` 方向滑，再抬起。
+fn drag(session: &mut Session, id: KeyId, dx: f32, dy: f32) {
     let (x, y) = key_centre(session, id);
     session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x, y + dy);
-    session.touch(MotionAction::Up, POINTER, x, y + dy);
+    session.touch(MotionAction::Move, POINTER, x + dx, y + dy);
+    session.touch(MotionAction::Up, POINTER, x + dx, y + dy);
     session.bar_surface();
     session.keyboard_surface();
 }
 
-/// 够下滑阈值那么多像素。
+/// 往下滑——`drag` 的常用写法。
+fn swipe_down(session: &mut Session, id: KeyId, dy: f32) {
+    drag(session, id, 0.0, dy);
+}
+
+/// 够滑动阈值那么多像素（**不看方向**，离按下那点这么远就算）。
 fn swipe_distance() -> f32 {
-    crate::keyboard::SWIPE_DOWN * DENSITY
+    crate::keyboard::SWIPE * DENSITY
 }
 
 /// 字母键往下滑，打出来的是键帽角上那个小字，不是字母本身。
@@ -731,23 +742,66 @@ fn a_swipe_that_leaves_the_key_still_counts() {
     );
 }
 
-/// 手指往下挪几个像素不算下滑——快敲时手指本来就会往下沉一点。
+/// 手指挪几个像素不算滑动——快敲时手指本来就会歪一点。
 ///
-/// 阈值定小了这条就会挂：正常打字全变成打符号，那是灾难。
+/// 阈值定小了这条就会挂：正常打字全变成打符号，那是灾难。**四个方向都试**，
+/// 因为滑动现在不看方向了。
 #[test]
-fn a_downward_wobble_still_types_the_letter() {
-    // 每个距离都重开一台，上一次敲进去的字母不会串到下一次
-    for drift in [1.0, 3.0, 6.0, 10.0, swipe_distance() - 1.0] {
+fn a_wobble_still_types_the_letter() {
+    let drift = swipe_distance() - 1.0;
+    // 每个方向、每个距离都重开一台，上一次敲进去的字母不会串到下一次
+    for (dx, dy) in [
+        (0.0, 1.0),
+        (0.0, 3.0),
+        (-6.0, 0.0),
+        (0.0, 10.0),
+        (drift, 0.0),
+        (-drift, 0.0),
+        (0.0, -drift),
+        (0.0, drift),
+    ] {
         let Some(mut session) = ready() else {
             return;
         };
-        swipe_down(&mut session, KeyId::Letter('q'), drift);
+        drag(&mut session, KeyId::Letter('q'), dx, dy);
         assert_eq!(
             preedit(&session).as_deref(),
             Some("q"),
-            "只往下挪 {drift} 像素，这一下该还是字母 q"
+            "只挪 ({dx}, {dy}) 像素（不够阈值），这一下该还是字母 q"
         );
         assert_eq!(session.take_commit(), None, "不该打出角标");
+    }
+}
+
+/// **四个方向滑都出角标**，不只是往下。
+///
+/// 以前只认往下滑，得特意朝下瞄；快打时手指歪一点就什么也没出。
+#[test]
+fn the_hint_comes_out_whichever_way_you_swipe() {
+    for (dx, dy) in [
+        (0.0, 1.0),
+        (0.0, -1.0),
+        (1.0, 0.0),
+        (-1.0, 0.0),
+        (0.85, 0.85),
+        (-0.85, -0.85),
+    ] {
+        let Some(mut session) = ready() else {
+            return;
+        };
+        let distance = swipe_distance();
+        // q 的角标是 1
+        drag(
+            &mut session,
+            KeyId::Letter('q'),
+            dx * distance,
+            dy * distance,
+        );
+        assert_eq!(
+            session.take_commit().as_deref(),
+            Some("1"),
+            "往 ({dx}, {dy}) 方向滑也该出角标 1"
+        );
     }
 }
 

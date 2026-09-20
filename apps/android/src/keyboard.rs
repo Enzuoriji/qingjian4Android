@@ -15,10 +15,14 @@ use qingjian_render::{
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 
-/// 在键上往下滑这么远（点），兑现的就是键帽角上那个小字而不是字母本身。
+/// 手指离开按下那点这么远（点），就算「在键上滑了一下」——兑现键帽角上那个小字。
 ///
-/// 键高 42 点上下，这个阈值约合三分之一——手指正常抖一下到不了，特意滑一下就到了。
-pub(crate) const SWIPE_DOWN: f32 = 12.0;
+/// **不看方向**：四个方向都算，手指往哪歪都行，不用瞄准。以前只认往下滑，
+/// 得特意朝下瞄，快打时很容易滑歪。
+///
+/// 键高 42 点上下，这个阈值约合三分之一——正常敲字时手指只挪几个像素，到不了；
+/// 特意滑一下就过。
+pub(crate) const SWIPE: f32 = 12.0;
 
 /// 尺寸与外观。壳在 `Session::configure` 时给一份。
 #[derive(Debug, Clone, Copy)]
@@ -254,15 +258,19 @@ impl Keyboard {
             }
             MotionAction::Move => {
                 let hit = self.hit(x, y);
-                let threshold = SWIPE_DOWN * self.metrics.density;
+                let threshold = SWIPE * self.metrics.density;
                 if let Some(press) = self
                     .presses
                     .iter_mut()
                     .find(|press| press.pointer == pointer)
                 {
-                    // 往下滑够远就是「要打角标那个字符」。判定了就不再改回去——
-                    // 手指滑到键外面也还算数，这是手势不是点击。
-                    if !press.hinted && press.hint.is_some() && y - press.at.1 >= threshold {
+                    // 离开按下那点够远就是「要打角标那个字符」——**四个方向都算**。
+                    // 判定了就不再改回去：手指滑到键外面也还算数，这是手势不是点击。
+                    let (dx, dy) = (x - press.at.0, y - press.at.1);
+                    if !press.hinted
+                        && press.hint.is_some()
+                        && dx * dx + dy * dy >= threshold * threshold
+                    {
                         press.hinted = true;
                     }
                     // 键很大（三十多点宽），手指抖一抖不该掉字，所以「还落在这个键上」就一直算按着；
