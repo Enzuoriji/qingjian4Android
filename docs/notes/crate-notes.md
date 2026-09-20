@@ -101,9 +101,15 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 软键盘走同一条路：布局数据在 `keyboard/`（`KeyboardLayout` 按「单位宽」算几何，每行居中，第 2 行自然得到半键错位，不写死坐标）、绘制在 `renderer/keyboard/`、
 主题在 `theme/keyboard.rs`；`render_keyboard` 与 `render_status` 一样，出位图的同时把**每个键的命中矩形**一并返回。设计与取舍见 `docs/design/keyboard.md`。
 
-**横屏**（2026-09-20）：`KeyboardTheme::landscape()` 只把高度改成 176 点
-（fcitx5 的横屏缺省是屏幕高的 49%，手机上横屏高 360 点就是 176；用固定点数是因为
-平板横屏按百分比会给出巨无霸键盘）。横竖屏由壳判断后随 `configure` 一起报进来。
+**键盘高度按屏幕算**（2026-09-20，K9）：`KeyboardTheme::fitted(screen_height, landscape)`
+把高度定成屏幕当前方向那一维的 **30%**（横屏 **49%**），夹在 `[200, 300]` / `[170, 260]` 之间。
+改之前是写死的 202 / 176，大屏手机上偏矮——而那两个数本来就是 fcitx5 那套比例
+（竖屏 30%、横屏 49%）按一台小屏手机换算出来的，所以定值法必然在大屏上偏矮。
+**上限是给平板留的**（当初不敢用百分比就是怕平板横屏八百点高算出巨无霸），
+下限贴着那两个老定值，小屏不至于更矮。
+`screen_height` 由壳算好报进来（`configure` 的第二个参数）：**竖屏取长边、横屏取短边**，
+不直接用 `displayMetrics` 的高度——有的 ROM 转屏后它还是报竖屏那个值
+（`QingjianImeService.screenHeightPoints`）。横竖屏也由壳判断后一起报。
 
 **壳报的宽度要用「视图量出来的」，不是屏幕宽**：输入法窗口不一定占满屏幕——
 横屏时系统给挖孔 / 手势区让位，实测 720×1280 的机器横过来窗口只从 x=136 起、宽 1144。

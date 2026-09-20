@@ -95,7 +95,8 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_clear(
     }
 }
 
-/// 壳报告输入视图的宽度（点）、屏幕密度、底部被系统占掉的高度、明暗，
+/// 壳报告输入视图的宽度（点）、**屏幕在当前方向上的高度**（点）、屏幕密度、
+/// 底部被系统占掉的高度、明暗，
 /// 返回整块输入视图**总共该有多高**（点）：候选条 + 键盘 + 底部让开的那一段。
 ///
 /// 高度要回传：安卓按视图量出来的尺寸给输入法窗口大小，壳不知道高度就会把窗口撑满整屏。
@@ -105,6 +106,7 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_configure(
     _this: JObject,
     handle: jlong,
     width: jfloat,
+    screen_height: jfloat,
     density: jfloat,
     bottom_inset: jfloat,
     dark: jboolean,
@@ -112,7 +114,14 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_configure(
 ) -> jfloat {
     match unsafe { from_handle(handle) } {
         Some(session) => catch_unwind(AssertUnwindSafe(|| {
-            session.configure(width, density, bottom_inset, dark != 0, landscape != 0)
+            session.configure(
+                width,
+                screen_height,
+                density,
+                bottom_inset,
+                dark != 0,
+                landscape != 0,
+            )
         }))
         .unwrap_or(0.0),
         None => 0.0,

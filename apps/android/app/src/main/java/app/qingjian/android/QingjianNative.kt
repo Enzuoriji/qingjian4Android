@@ -30,12 +30,17 @@ object QingjianNative {
     external fun clear(handle: Long): Int
 
     /**
-     * 告诉 Rust 输入视图有多宽（点）、屏幕密度、底部被系统占掉多高、是不是深色。
+     * 告诉 Rust 输入视图有多宽（点）、**屏幕在当前方向上的高度**（点）、屏幕密度、
+     * 底部被系统占掉多高、是不是深色。
      * **返回整块输入视图总共该有多高（点）**：候选条 + 键盘 + 底部让开的那一段。
+     *
+     * `screenHeight` 是给键盘定高度的（屏幕大的手机键盘也大），竖屏取长边、横屏取短边
+     * ——怎么算见 `QingjianImeService.screenHeightPoints`。
      */
     external fun configure(
         handle: Long,
         width: Float,
+        screenHeight: Float,
         density: Float,
         bottomInset: Float,
         dark: Boolean,

@@ -305,11 +305,13 @@ class QingjianImeService : InputMethodService() {
     private fun configure(view: QingjianSurfaceView) {
         if (handle == 0L) return
         val metrics = resources.displayMetrics
+        val density = metrics.density
         val width = if (view.width > 0) view.width else metrics.widthPixels
         QingjianNative.configure(
             handle,
-            width / metrics.density,
-            metrics.density,
+            width / density,
+            screenHeightPoints(metrics.widthPixels, metrics.heightPixels, density),
+            density,
             view.bottomInsetPoints,
             isDark(),
             isLandscape(),
@@ -317,6 +319,18 @@ class QingjianImeService : InputMethodService() {
         // 高度不用自己算：视图按两张位图加起来的像素高自己量
         refreshBar(view)
         refreshKeyboard(view)
+    }
+
+    /**
+     * 屏幕在**当前方向**上的高度（点）：竖屏取长边、横屏取短边。键盘高度按它算。
+     *
+     * **不直接用 `displayMetrics.heightPixels`**：有的 ROM 转屏之后它还是报竖屏那个值，
+     * 那样横屏会按八百点去算，算出一块占掉半个屏幕的键盘。按长边 / 短边分则与转没转屏无关。
+     */
+    private fun screenHeightPoints(widthPixels: Int, heightPixels: Int, density: Float): Float {
+        val long = maxOf(widthPixels, heightPixels) / density
+        val short = minOf(widthPixels, heightPixels) / density
+        return if (isLandscape()) short else long
     }
 
     /**

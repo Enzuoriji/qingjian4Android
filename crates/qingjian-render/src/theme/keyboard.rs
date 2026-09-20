@@ -10,6 +10,22 @@
 use crate::color::Color;
 use crate::theme::FontSpec;
 
+/// 键盘高度占**屏幕当前方向那一维**的比例，竖屏 / 横屏各一个。
+///
+/// 这两个数不是新拍的，是 fcitx5-android 的缺省（它竖屏 30%、横屏 49%）——原先那两个定值
+/// 202 / 176 本来就是从它这儿按一台小屏手机换算出来的快照。**换成比例是为了大屏手机**：
+/// 定值在 6.7 寸的机器上明显偏矮。
+const PORTRAIT_RATIO: f32 = 0.30;
+const LANDSCAPE_RATIO: f32 = 0.49;
+
+/// 高度的上下限（点），`(下限, 上限)`。
+///
+/// **上限是给平板留的**：原先不用百分比，怕的就是平板横屏八百点高算出一块巨无霸键盘
+/// ——夹一下就没这个问题了，比例才敢用。下限贴着改之前那两个定值，
+/// 小屏手机不至于比原来还矮。
+const PORTRAIT_RANGE: (f32, f32) = (200.0, 300.0);
+const LANDSCAPE_RANGE: (f32, f32) = (170.0, 260.0);
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KeyboardTheme {
     /// 键盘底色（键帽之间的缝）。
@@ -76,6 +92,9 @@ pub struct KeyboardTheme {
     pub radius: f32,
 
     /// 键盘总高（点）。行高按行数均分。
+    ///
+    /// 这只是**缺省值**（离线预览、渲染器自己的单测用它）；真机上由 [`Self::fitted`]
+    /// 按屏幕高矮现算，不用这个数。
     pub height: f32,
 }
 
@@ -129,17 +148,18 @@ impl KeyboardTheme {
         }
     }
 
-    /// **横屏那套尺寸**。
+    /// 按屏幕高矮定键盘高度：**屏幕大的手机键盘也大**，不再是写死的一个值。
     ///
-    /// **只动高度**：手机横过来屏幕矮（通常只有三百多点），还用竖屏那个高度会占掉半个屏幕。
-    /// 配色、缝、字号都不变——键变宽变扁是横屏本来的样子，不必另配一套。
-    ///
-    /// 176 点是照 fcitx5-android 的横屏缺省来的：它按**屏幕高的 49%**（竖屏 30%），
-    /// 手机上横屏高约 360 点，49% 就是 176。用固定点数而不是百分比：
-    /// 平板横屏有八百点高，按百分比会给出一块巨无霸键盘。
-    pub const fn landscape(self) -> Self {
+    /// `screen_height` 是**屏幕在当前方向上的高度**（点）——竖屏是长边、横屏是短边。
+    /// 由壳算好给过来：壳那边不该让 `displayMetrics` 转不转屏说了算（见 `QingjianImeService`）。
+    pub fn fitted(self, screen_height: f32, landscape: bool) -> Self {
+        let (ratio, (min, max)) = if landscape {
+            (LANDSCAPE_RATIO, LANDSCAPE_RANGE)
+        } else {
+            (PORTRAIT_RATIO, PORTRAIT_RANGE)
+        };
         Self {
-            height: 176.0,
+            height: (screen_height * ratio).clamp(min, max),
             ..self
         }
     }

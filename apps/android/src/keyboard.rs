@@ -84,6 +84,9 @@ struct Metrics {
     /// 输入视图的宽度（点）。
     width: f32,
 
+    /// **屏幕在当前方向上的高度**（点）——竖屏是长边、横屏是短边。键盘高度按它算。
+    screen_height: f32,
+
     /// 屏幕密度（点 → 像素）。命中阈值按它换算。
     density: f32,
 
@@ -101,6 +104,7 @@ impl Default for Metrics {
     fn default() -> Self {
         Self {
             width: 0.0,
+            screen_height: 0.0,
             density: 1.0,
             bottom_inset: 0.0,
             dark: false,
@@ -231,12 +235,14 @@ impl Keyboard {
     pub fn set_metrics(
         &mut self,
         width: f32,
+        screen_height: f32,
         density: f32,
         bottom_inset: f32,
         dark: bool,
         landscape: bool,
     ) {
         if (self.metrics.width - width).abs() > 0.5
+            || (self.metrics.screen_height - screen_height).abs() > 0.5
             || (self.metrics.density - density).abs() > 0.01
             || (self.metrics.bottom_inset - bottom_inset).abs() > 0.5
             || self.metrics.dark != dark
@@ -244,6 +250,7 @@ impl Keyboard {
         {
             self.metrics = Metrics {
                 width,
+                screen_height,
                 density,
                 bottom_inset,
                 dark,
@@ -253,7 +260,7 @@ impl Keyboard {
         }
     }
 
-    /// 键盘占多高（点），不含底部让开的那一段。由布局决定，与屏幕尺寸无关。
+    /// 键盘占多高（点），不含底部让开的那一段。**按屏幕高矮算**，见 `KeyboardTheme::fitted`。
     pub fn height(&self) -> f32 {
         self.theme().height
     }
@@ -691,18 +698,14 @@ impl Keyboard {
         TOUCH_SLOP * self.metrics.density
     }
 
-    /// 当前该用的键盘主题。
+    /// 当前该用的键盘主题：明暗一套，高度按屏幕高矮现算。
     fn theme(&self) -> KeyboardTheme {
         let base = if self.metrics.dark {
             KeyboardTheme::dark()
         } else {
             KeyboardTheme::light()
         };
-        if self.metrics.landscape {
-            base.landscape()
-        } else {
-            base
-        }
+        base.fitted(self.metrics.screen_height, self.metrics.landscape)
     }
 }
 

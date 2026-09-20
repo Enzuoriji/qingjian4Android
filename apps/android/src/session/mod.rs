@@ -237,14 +237,19 @@ impl Session {
         }
     }
 
-    /// 壳报告输入视图的宽度（点）、屏幕密度、底部被系统占掉的高度、明暗，
+    /// 壳报告输入视图的宽度（点）、**屏幕在当前方向上的高度**（点）、屏幕密度、
+    /// 底部被系统占掉的高度、明暗，
     /// 返回整块输入视图**总共该有多高**（点）：候选条 + 键盘 + 底部让开的那一段。
     ///
     /// 高度要回传是因为安卓只按视图量出来的尺寸给输入法窗口大小——壳得知道自己该占多高，
     /// 否则窗口会被撑满整屏。几项都没变时不重画。
+    ///
+    /// `screen_height` 只有键盘用得上（[`KeyboardTheme::fitted`] 按它定键盘高度），
+    /// 候选条与它无关，所以它不进脏标记那份判断。
     pub fn configure(
         &mut self,
         width: f32,
+        screen_height: f32,
         density: f32,
         bottom_inset: f32,
         dark: bool,
@@ -266,7 +271,7 @@ impl Session {
             self.bar_dirty = true;
         }
         if let Some(keyboard) = self.keyboard.as_mut() {
-            keyboard.set_metrics(width, density, bottom_inset, dark, landscape);
+            keyboard.set_metrics(width, screen_height, density, bottom_inset, dark, landscape);
         }
         self.bar_height() + self.keyboard_height() + self.bottom_inset
     }

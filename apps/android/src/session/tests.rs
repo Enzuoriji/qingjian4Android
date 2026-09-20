@@ -17,6 +17,13 @@ const POINTER: i32 = 0;
 const WIDTH: f32 = 360.0;
 const DENSITY: f32 = 2.75;
 
+/// 屏幕在**当前方向**上的高度（点）。这台手机是 360 × 800，所以竖屏 800、横屏 360。
+///
+/// 键盘高度按它算（屏幕大的手机键盘也大），所以这两个数得跟着方向换——
+/// 拿同一个高度去比「横屏矮一截」，验的就不是真机上的那回事了。
+const PORTRAIT_HEIGHT: f32 = 800.0;
+const LANDSCAPE_HEIGHT: f32 = 360.0;
+
 /// 词库：产品数据优先，退回基础词库（9.3 万条，翻页这些才验得出来），最后是随包样例。
 /// 都没有就跳过（CI 容器里可能没有产品数据）。
 fn dictionary() -> Option<PathBuf> {
@@ -75,7 +82,7 @@ fn type_text(session: &mut Session, text: &str) {
 
 fn ready() -> Option<Session> {
     let mut session = Session::open(&dictionary()?, "zh-CN", None).ok()?;
-    session.configure(WIDTH, DENSITY, 0.0, false, false);
+    session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
     // 两块面都画一次，命中矩形才存在
     session.keyboard_surface();
     session.bar_surface();
@@ -592,7 +599,7 @@ fn the_bundled_emoji_table_puts_emoji_in_the_candidates() {
         return;
     };
     let mut session = Session::open(&dictionary, "zh-CN", Some(&bundle)).expect("会话该能打开");
-    session.configure(WIDTH, DENSITY, 0.0, false, false);
+    session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
     session.keyboard_surface();
     session.bar_surface();
 
@@ -1196,8 +1203,8 @@ fn the_keyboard_is_shorter_in_landscape() {
         return;
     };
 
-    let portrait = session.configure(WIDTH, DENSITY, 0.0, false, false);
-    let landscape = session.configure(WIDTH, DENSITY, 0.0, false, true);
+    let portrait = session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
+    let landscape = session.configure(WIDTH, LANDSCAPE_HEIGHT, DENSITY, 0.0, false, true);
 
     assert!(
         landscape < portrait,
@@ -1207,6 +1214,46 @@ fn the_keyboard_is_shorter_in_landscape() {
         portrait - landscape >= 20.0,
         "矮得太少了，只差 {} 点",
         portrait - landscape
+    );
+}
+
+/// **大屏手机的键盘更高**——高度写死一个值的话，6.7 寸的机器上就显得矮（用户报的）。
+#[test]
+fn a_bigger_screen_gets_a_taller_keyboard() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    let small = session.configure(WIDTH, 640.0, DENSITY, 0.0, false, false);
+    let typical = session.configure(WIDTH, 800.0, DENSITY, 0.0, false, false);
+    let big = session.configure(WIDTH, 926.0, DENSITY, 0.0, false, false);
+
+    assert!(
+        small <= typical && typical < big,
+        "屏幕越大键盘该越高：640 点 → {small}、800 点 → {typical}、926 点 → {big}"
+    );
+}
+
+/// **平板不许长出一块巨无霸键盘**——上限就是为它设的。
+///
+/// 原先高度用固定点数而不用百分比，怕的正是「平板横屏八百点高，按百分比算出一块巨无霸」。
+/// 改成按屏幕比例之后，这条守着当初那个决定没被丢掉。
+#[test]
+fn a_tablet_does_not_get_a_giant_keyboard() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    let portrait = session.configure(WIDTH, 1200.0, DENSITY, 0.0, false, false);
+    assert!(
+        portrait <= 300.0 + 0.01,
+        "竖屏上限该夹住：1200 点高的屏幕给到了 {portrait}"
+    );
+
+    let landscape = session.configure(WIDTH, 800.0, DENSITY, 0.0, false, true);
+    assert!(
+        landscape <= 260.0 + 0.01,
+        "横屏上限该夹住：800 点高的屏幕给到了 {landscape}"
     );
 }
 
