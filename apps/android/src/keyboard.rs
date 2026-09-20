@@ -7,11 +7,9 @@
 //! 分工：`Session::touch` 把**键盘那半边**的触摸转进来（坐标已减掉候选条高度），
 //! 这里只回答「抬起来时兑现的是哪个键」；翻成动作在 `crate::action`，执行在 `Session`。
 
-#[cfg(test)]
-use qingjian_render::KeyHit;
 use qingjian_render::{
-    InputMode, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, RenderedKeyboard, Renderer,
-    ShiftState,
+    InputMode, Key, KeyHit, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Rendered,
+    RenderedKeyboard, Renderer, ShiftState,
 };
 
 use crate::surface;
@@ -104,6 +102,12 @@ pub struct Keyboard {
 
     /// 正被按住的键，画成按下态。
     pressed: Option<KeyId>,
+
+    /// 画好的键预览气泡，以及它是**给哪个键、多大尺寸**画的。
+    ///
+    /// 按住键那一下要弹；同一个键按着不动就不必重画（画一次 ~0.8ms，每拍重画白费）。
+    popup: Option<Rendered>,
+    popup_for: Option<(KeyId, u32, u32)>,
 }
 
 impl Keyboard {
@@ -116,6 +120,8 @@ impl Keyboard {
             dirty: true,
             presses: Vec::new(),
             pressed: None,
+            popup: None,
+            popup_for: None,
         }
     }
 
@@ -155,7 +161,14 @@ impl Keyboard {
         // 页换了，旧页上按着的手指对新页没有意义
         self.presses.clear();
         self.pressed = None;
+        self.forget_popup();
         self.dirty = true;
+    }
+
+    /// 把画好的气泡丢掉，下次重画。
+    fn forget_popup(&mut self) {
+        self.popup = None;
+        self.popup_for = None;
     }
 
     /// 键盘脏了没有——`Session` 据此决定要不要让壳重取位图。
@@ -293,8 +306,7 @@ impl Keyboard {
 
     /// 某个键的命中矩形（**键盘局部**像素）。还没画过、或键盘上没这个键时为 `None`。
     ///
-    /// 给测试取点位用——真机上的点位是手指给的，不走这里。
-    #[cfg(test)]
+    /// 测试拿它取点位；键预览气泡拿它算摆哪儿。
     pub(crate) fn key_rect(&self, id: KeyId) -> Option<KeyHit> {
         self.rendered
             .as_ref()?
@@ -302,6 +314,98 @@ impl Keyboard {
             .iter()
             .find(|key| key.id == id)
             .copied()
+    }
+
+    /// 按住键时那张预览气泡的位图（8 字节头 + 预乘 RGBA）。没按住、或那个键没什么可预览的，就是空的。
+    ///
+    /// 壳收到空字节串要把浮动小窗收起来——跟候选条「空表示不该在」一个规矩。
+    pub fn popup_surface(
+        &mut self,
+        renderer: Option<&mut Renderer>,
+        shift: ShiftState,
+        mode: InputMode,
+    ) -> Vec<u8> {
+        let Some((key, rect)) = self.pressed_key() else {
+            self.forget_popup();
+            return Vec::new();
+        };
+        // 空格没有字可显示，弹一个空框子只是晃眼
+        if key.id == KeyId::Space {
+            self.forget_popup();
+            return Vec::new();
+        }
+
+        let mark = (
+            key.id,
+            rect.width.round() as u32,
+            rect.height.round() as u32,
+        );
+        if self.popup_for != Some(mark) || self.popup.is_none() {
+            let theme = self.theme();
+            let state = KeyboardState {
+                shift,
+                mode,
+                pressed: self.pressed,
+            };
+            let density = self.metrics.density;
+            let rendered = renderer.and_then(|renderer| {
+                renderer
+                    .render_key_popup(
+                        &key,
+                        &state,
+                        rect.width / density,
+                        rect.height / density,
+                        &theme,
+                        density,
+                    )
+                    .ok()
+            });
+            let Some(rendered) = rendered else {
+                return Vec::new();
+            };
+            self.popup = Some(rendered);
+            self.popup_for = Some(mark);
+        }
+
+        self.popup
+            .as_ref()
+            .map_or_else(Vec::new, |popup| surface::encode(&popup.pixmap))
+    }
+
+    /// 气泡位图**左上角**在键盘局部（像素）的坐标。没在预览时是 `None`。
+    ///
+    /// 摆哪儿在这边算：壳只把浮动小窗挪到「视图在屏幕上的位置 + 这个偏移」，不掺和布局
+    /// ——与「命中测试在 Rust 里做」同一个规矩。
+    /// 气泡**内容**的底边贴着键的上边、水平中心对齐键的中心；位图四周还留着阴影，减掉才是左上角。
+    pub fn popup_origin(&self) -> Option<(f32, f32)> {
+        let (_, rect) = self.pressed_key()?;
+        let popup = self.popup.as_ref()?;
+        // **位图**的左上角，不是**内容**的：位图四周还留着一圈阴影，得减掉。
+        // 横向内容在位图里居中，所以按位图宽算；纵向内容底边对齐键顶，按内容在位图里的偏移算
+        let bitmap = popup.pixmap.width() as f32;
+        let x = rect.x + rect.width / 2.0 - bitmap / 2.0;
+        let y = rect.y - popup.content_y as f32 - popup.content_height as f32;
+
+        // 最左 / 最右那几个键（`符`、`回车`、`⌫`），气泡比键宽，居中就探出屏幕了——
+        // 往里夹一下。夹的是整张位图，内容在里面居中，所以只是整体挪进来，不会变形
+        let room = (self.metrics.width * self.metrics.density - bitmap).max(0.0);
+        Some((x.clamp(0.0, room), y))
+    }
+
+    /// 此刻正按住的那个键：**布局数据、命中矩形、以及它在这张位图里多大**。
+    ///
+    /// 三样一起给，是因为键预览气泡三样都要——分三次查不如一次给全。
+    /// 没按住键、或者键盘还没画过时为 `None`。
+    pub fn pressed_key(&self) -> Option<(Key, KeyHit)> {
+        let id = self.pressed?;
+        let rect = self.key_rect(id)?;
+        let key = self
+            .layout
+            .rows()
+            .iter()
+            .flat_map(|row| row.keys.iter())
+            .find(|key| key.id == id)?;
+        Some((*key, rect))
     }
 
     /// 这根手指此刻**按住**的键。没按在键上、已经滑开、或者这一下是下滑取角标，都是 `None`。

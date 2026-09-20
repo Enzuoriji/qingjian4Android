@@ -47,6 +47,20 @@ object QingjianNative {
     /** 键盘的位图（8 字节头 + 预乘 RGBA）。没配过宽度时是空数组。 */
     external fun keyboardSurface(handle: Long): ByteArray?
 
+    /**
+     * 按住键时那张预览气泡的位图。**空数组表示「这个浮动小窗现在不该在」**。
+     *
+     * 与 [barSurface] 一个规矩：拿到空要把窗收起来，不是「不更新」。
+     */
+    external fun popupSurface(handle: Long): ByteArray?
+
+    /**
+     * 气泡位图左上角该摆在哪儿（**整块输入视图**的像素）：`[x, y]`。
+     *
+     * 空数组表示没在预览。摆哪儿由 Rust 算好——壳只把窗挪过去，不掺和布局。
+     */
+    external fun popupOrigin(handle: Long): FloatArray?
+
     /** 键盘又要弹出来了：把页复位回字母页，返回与 [touch] 同一种位掩码。 */
     external fun resetPanel(handle: Long): Int
 

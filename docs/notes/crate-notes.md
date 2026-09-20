@@ -142,6 +142,13 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 下排每格宽度均分（触摸面积一样大）、格间留一条缝，词太长就截断补省略号；
 `×` / `‹` / `›` 与每个候选的位置一并返回，供命中测试。
 
+**键预览气泡**（2026-09-20）：画在 `renderer/keyboard/popup.rs`（`render_key_popup`），
+圆角块 + 阴影 + 放大的字/图标，**单独一张小位图**——它要弹到键盘上方，画在键盘那张里会被窗口裁掉。
+安卓侧 `KeyPopup.kt` 用 `PopupWindow` 承载，位置由 `Keyboard::popup_origin` 算好（视图相对像素）。
+两个坑：**`PopupWindow` 是输入法窗口的子窗**（`mParentWindow=InputMethod`），坐标相对父窗、
+**不是屏幕**（按屏幕坐标传会整块跑到屏幕外）；传的必须是**位图**左上角，不是**内容**的
+（位图四周留着阴影留白）。空字节串表示「这个窗现在不该在」，与候选条一个规矩。
+
 **彩色 emoji 与系统字体**（2026-09-18）：swash 只读 COLR **v0** 的基字形 / 图层记录（`swash/src/scale/color.rs` 的 `layers()`），
 而安卓 15 起自带的 `NotoColorEmoji.ttf` 是**纯 COLR v1、v0 记录为 0**，三条路于是全落空：`ColorOutline` 读不到图层 →
 `ColorBitmap` 没 CBDT/CBLC → 退到矢量轮廓，可 COLR 字形的基字形**本身没有轮廓**（可见部分在图层里），

@@ -101,6 +101,7 @@ class QingjianImeService : InputMethodService() {
     override fun onCreateInputView(): View {
         val view = QingjianSurfaceView(this)
         inputView = view
+        popup = KeyPopup(this)
         // 直接按屏幕宽度配一次，不等视图量出来——视图的初始高度是 0，安卓不会给 0 高的视图
         // 发尺寸变化回调，等它就成了死锁。宽度变了（转屏）时再走 onConfigure。
         configure(view)
@@ -141,9 +142,33 @@ class QingjianImeService : InputMethodService() {
         if (flags and QingjianNative.FLAG_KEYBOARD != 0) {
             refreshKeyboard(view)
         }
+        refreshPopup(view)
         val elapsed = SystemClock.elapsedRealtime() - started
         if (elapsed >= SLOW_TOUCH_MS) {
             Log.w(TAG, "这一下花了 ${elapsed}ms，打字会跟不上手感")
+        }
+    }
+
+    /**
+     * 按住键时那张预览气泡：贴上去、挪到 Rust 算好的位置；没在预览就收起来。
+     *
+     * 每次输入之后都问一次。没按住键时 Rust 那边立刻就回空（不做任何绘制），
+     * 所以这一次调用很便宜——不必再加一个「气泡变了」的位掩码。
+     */
+    private fun refreshPopup(view: QingjianSurfaceView) {
+        if (handle == 0L) return
+        val bytes = QingjianNative.popupSurface(handle)
+        if (bytes == null || bytes.isEmpty()) {
+            popup?.dismiss()
+            return
+        }
+        val origin = QingjianNative.popupOrigin(handle)
+        if (origin == null || origin.size < 2) {
+            popup?.dismiss()
+            return
+        }
+        QingjianNative.toBitmap(bytes)?.let { bitmap ->
+            popup?.show(view, bitmap, origin[0], origin[1])
         }
     }
 
@@ -200,6 +225,7 @@ class QingjianImeService : InputMethodService() {
         // 清空顺带把键盘复位回字母页，掩码里会带 FLAG_KEYBOARD——照同一套收尾重画一遍，
         // 不然键盘收起来再弹出来还停着上一页的键
         val flags = QingjianNative.clear(handle)
+        popup?.dismiss()
         inputView?.let { view ->
             if (flags and QingjianNative.FLAG_BAR != 0) refreshBar(view)
             if (flags and QingjianNative.FLAG_KEYBOARD != 0) refreshKeyboard(view)
@@ -208,6 +234,9 @@ class QingjianImeService : InputMethodService() {
     }
 
     /** 按当前屏幕宽度告诉 Rust 该画多宽，并把整块输入视图的高度要回来。 */
+    /** 键预览气泡的浮动小窗。位图由 Rust 画，这里只贴上去。 */
+    private var popup: KeyPopup? = null
+
     private fun configure(view: QingjianSurfaceView) {
         if (handle == 0L) return
         val metrics = resources.displayMetrics

@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use qingjian_render::{
-    FontLibrary, Frame, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Layout, Preedit,
+    FontLibrary, Frame, Key, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Layout, Preedit,
     PreeditSegment, PreeditStyle, Renderer, Row, Shadow, ShiftState, StatusCell, Theme, Tone,
 };
 
@@ -138,6 +138,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             status.cell_edges,
             path.display()
         );
+    }
+
+    // 键预览气泡：字母键一个、窄键（句号）一个、图标键（退格）一个
+    for (theme_name, keyboard_theme) in [
+        ("light", KeyboardTheme::light()),
+        ("dark", KeyboardTheme::dark()),
+    ] {
+        for (name, key) in [
+            ("letter", Key::letter('A', '1')),
+            ("narrow", Key::new(KeyId::Period, 1.0)),
+            ("icon", Key::new(KeyId::Backspace, 1.5)),
+        ] {
+            let started = Instant::now();
+            let rendered = renderer.render_key_popup(
+                &key,
+                &KeyboardState::default(),
+                29.7,
+                42.25,
+                &keyboard_theme,
+                args.scale,
+            )?;
+            let elapsed = started.elapsed();
+            let path = args.out.join(format!("popup-{name}-{theme_name}.png"));
+            rendered.pixmap.save_png(&path)?;
+            let (w, h) = rendered.content_size_points();
+            println!(
+                "{:<28} {:>4.0}×{:<4.0}pt  {:>8.2?}  {}",
+                format!("popup-{name}-{theme_name}"),
+                w,
+                h,
+                elapsed,
+                path.display()
+            );
+        }
     }
 
     // 软键盘：常态与「Shift 锁定 + 正按着 A」两种状态，明暗两套主题

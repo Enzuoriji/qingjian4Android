@@ -858,6 +858,85 @@ fn repeat_does_nothing_when_no_finger_is_down() {
     assert_eq!(preedit(&session), before, "没手指按着，连发该什么也不做");
 }
 
+/// 按住键出预览气泡、松手就收；气泡**水平正对着那个键、在键的上方**。
+#[test]
+fn the_popup_follows_the_pressed_key() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Letter('n'));
+
+    assert!(session.popup_surface().is_empty(), "没按键时不该有气泡");
+    assert!(session.popup_origin().is_none(), "没按键时没有摆放位置");
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+
+    let bytes = session.popup_surface();
+    assert!(bytes.len() > 8, "按住键该出气泡");
+    let (bitmap_w, _) = (
+        u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f32,
+        u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as f32,
+    );
+    let (px, py) = session.popup_origin().expect("该有摆放位置");
+    let (kx, ky, kw, _) = key_rect(&session, KeyId::Letter('n'));
+
+    assert!(
+        (px + bitmap_w / 2.0 - (kx + kw / 2.0)).abs() < 1.0,
+        "气泡该正对着键：气泡中心 {}，键中心 {}",
+        px + bitmap_w / 2.0,
+        kx + kw / 2.0
+    );
+    assert!(py < ky, "气泡该在键的上方：气泡顶 {py}，键顶 {ky}");
+
+    session.touch(MotionAction::Up, POINTER, x, y);
+    assert!(session.popup_surface().is_empty(), "松手了气泡就该收");
+    assert!(session.popup_origin().is_none());
+}
+
+/// 边上的键（`⌫`、`回车`）气泡比键还宽，**不许探出屏幕**。
+#[test]
+fn the_popup_stays_on_screen_at_the_edges() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let view_width = WIDTH * DENSITY;
+
+    for id in [KeyId::Backspace, KeyId::Panel(Panel::Symbols)] {
+        let (x, y) = key_centre(&session, id);
+        session.touch(MotionAction::Down, POINTER, x, y);
+
+        let bytes = session.popup_surface();
+        assert!(bytes.len() > 8, "{id:?} 该出气泡");
+        let bitmap_w = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f32;
+        let (px, _) = session.popup_origin().expect("该有摆放位置");
+
+        assert!(px >= 0.0, "{id:?} 的气泡左边探出屏幕了：{px}");
+        assert!(
+            px + bitmap_w <= view_width,
+            "{id:?} 的气泡右边探出屏幕了：{} > {view_width}",
+            px + bitmap_w
+        );
+
+        session.touch(MotionAction::Up, POINTER, x, y);
+    }
+}
+
+/// 空格没有字可显示，按住也不弹——弹一个空框子只是晃眼。
+#[test]
+fn the_space_key_has_no_popup() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Space);
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+
+    assert!(
+        session.popup_surface().is_empty(),
+        "空格弹气泡没东西可看，不该弹"
+    );
+}
+
 #[test]
 fn sliding_over_to_another_key_cancels() {
     let Some(mut session) = ready() else {

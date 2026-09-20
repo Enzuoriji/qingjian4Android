@@ -331,6 +331,27 @@ impl Session {
             .map_or_else(Vec::new, |bar| surface::encode(&bar.rendered.pixmap))
     }
 
+    /// 按住键时那张预览气泡的位图（8 字节头 + 预乘 RGBA）。没在预览时是空数组。
+    ///
+    /// 与候选条一样，**空表示「这个小窗现在不该在」**——壳收到空字节串要把浮动小窗收起来。
+    pub fn popup_surface(&mut self) -> Vec<u8> {
+        let (shift, mode) = (self.shift, self.mode);
+        match self.keyboard.as_mut() {
+            Some(keyboard) => keyboard.popup_surface(self.renderer.as_mut(), shift, mode),
+            None => Vec::new(),
+        }
+    }
+
+    /// 气泡位图**左上角**该摆在哪儿（整块输入视图的像素，与触摸坐标同一套）。
+    ///
+    /// 摆哪儿在这边算好告诉壳：壳只把浮动小窗挪到「视图在屏幕上的位置 + 这个偏移」，
+    /// 自己不掺和布局。没在预览时是 `None`。
+    pub fn popup_origin(&self) -> Option<(f32, f32)> {
+        let (x, y) = self.keyboard.as_ref()?.popup_origin()?;
+        // 键盘在候选条下面，加上那一段才是整块视图的坐标
+        Some((x, self.bar_pixels() + y))
+    }
+
     /// 键盘的位图（8 字节头 + 预乘 RGBA）。没配过宽度、渲染器不可用、或者键盘不由这里画时返回空。
     pub fn keyboard_surface(&mut self) -> Vec<u8> {
         let (shift, mode) = (self.shift, self.mode);

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use jni::JNIEnv;
 use jni::objects::{JObject, JString};
-use jni::sys::{jboolean, jbyteArray, jfloat, jint, jintArray, jlong, jstring};
+use jni::sys::{jboolean, jbyteArray, jfloat, jfloatArray, jint, jintArray, jlong, jstring};
 
 use crate::session::Session;
 use crate::touch::MotionAction;
@@ -156,6 +156,57 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_keyboardSurface(
         Ok(array) => array.into_raw(),
         Err(_) => std::ptr::null_mut(),
     }
+}
+
+/// 按住键时那张预览气泡的位图（8 字节头 + 预乘 RGBA）。没在预览时是**空数组**。
+///
+/// 空表示「这个小窗现在不该在」，壳收到要把浮动小窗收起来——与候选条一个规矩。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_popupSurface(
+    env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jbyteArray {
+    let bytes = match unsafe { from_handle(handle) } {
+        Some(session) => {
+            catch_unwind(AssertUnwindSafe(|| session.popup_surface())).unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+
+    match env.byte_array_from_slice(&bytes) {
+        Ok(array) => array.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// 气泡位图左上角该摆在哪儿（整块输入视图的像素，与触摸坐标同一套）：`[x, y]`。
+///
+/// 没在预览时是**空数组**。摆哪儿由 Rust 算好——壳只把浮动小窗挪到
+/// 「视图在屏幕上的位置 + 这个偏移」，不掺和布局。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_popupOrigin(
+    env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jfloatArray {
+    let origin = match unsafe { from_handle(handle) } {
+        Some(session) => catch_unwind(AssertUnwindSafe(|| session.popup_origin())).unwrap_or(None),
+        None => None,
+    };
+    let Some((x, y)) = origin else {
+        return env
+            .new_float_array(0)
+            .map_or(std::ptr::null_mut(), |array| array.into_raw());
+    };
+
+    let Ok(array) = env.new_float_array(2) else {
+        return std::ptr::null_mut();
+    };
+    if env.set_float_array_region(&array, 0, &[x, y]).is_err() {
+        return std::ptr::null_mut();
+    }
+    array.into_raw()
 }
 
 /// 键盘又要弹出来了：把页复位回字母页，返回 [`crate::session::flags`] 的位掩码。

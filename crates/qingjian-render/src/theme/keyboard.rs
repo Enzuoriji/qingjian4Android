@@ -53,6 +53,16 @@ pub struct KeyboardTheme {
     /// 键帽角上那个小字的字号。
     pub hint_font: FontSpec,
 
+    /// 按住键时弹出来的预览气泡的底色。
+    ///
+    /// 浮在键盘上方，要和底下那排键分得开，所以比键帽亮一点（深色主题下也亮一点）。
+    pub popup: Color,
+
+    /// 预览气泡里那个**放大**的字。
+    ///
+    /// 气泡的用处就是手指挡住键帽时还能看清按的是哪个键，字当然要比键帽上的大。
+    pub popup_font: FontSpec,
+
     /// 笔画加深的 gamma——与候选窗用同一个值，两处的字重才一致。
     pub text_gamma: f32,
 
@@ -85,6 +95,8 @@ impl KeyboardTheme {
             accent: Color::rgb(0, 122, 255),
             font: FontSpec::new(17.0, 22.0),
             hint_font: FontSpec::new(9.0, 11.0),
+            popup: Color::rgb(255, 255, 255),
+            popup_font: FontSpec::new(24.0, 30.0),
             text_gamma: 0.85,
             gap_x: 7.0,
             gap_y: 11.0,
@@ -107,6 +119,8 @@ impl KeyboardTheme {
             accent: Color::rgb(10, 132, 255),
             font: FontSpec::new(17.0, 22.0),
             hint_font: FontSpec::new(9.0, 11.0),
+            popup: Color::rgb(122, 122, 126),
+            popup_font: FontSpec::new(24.0, 30.0),
             text_gamma: 0.75,
             gap_x: 7.0,
             gap_y: 11.0,

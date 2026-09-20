@@ -5,6 +5,7 @@
 
 mod hit;
 mod icon;
+mod popup;
 mod rendered;
 
 pub use hit::KeyHit;
