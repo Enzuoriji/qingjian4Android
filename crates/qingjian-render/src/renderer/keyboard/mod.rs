@@ -182,7 +182,9 @@ fn label(key: &Key, state: &KeyboardState) -> String {
             InputMode::Chinese => "中".to_owned(),
             InputMode::English => "英".to_owned(),
         },
+        // 这两个画全角：字母页底下最常用的标点，一眼认得出来。符号页那些符号仍画半角原字符
         KeyId::Comma => "，".to_owned(),
+        KeyId::Period => "。".to_owned(),
         KeyId::Enter => "回车".to_owned(),
         KeyId::Space => String::new(),
         KeyId::Shift | KeyId::Backspace => String::new(),

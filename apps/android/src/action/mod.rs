@@ -23,8 +23,9 @@ pub fn on_key(key: KeyId) -> Act {
         KeyId::Backspace => Act::Backspace,
         KeyId::Shift => Act::ToggleShift,
         KeyId::Mode => Act::ToggleMode,
-        // 键盘上画的是全角「，」，这里给引擎的是半角原字符，转不转由它按设置定
+        // 键盘上画的是全角「，」「。」，这里给引擎的是半角原字符，转不转由它按设置定
         KeyId::Comma => Act::Punctuate(','),
+        KeyId::Period => Act::Punctuate('.'),
         // 数字与符号一样：键帽上是原字符，全角与否交给引擎
         KeyId::Literal(c) => Act::Punctuate(c),
         KeyId::Panel(panel) => Act::SwitchPanel(panel),
@@ -76,6 +77,8 @@ mod tests {
     fn the_comma_key_hands_the_engine_the_half_width_character() {
         // 键帽上画的是「，」，但引擎拿到的该是半角 —— 全角与否是它的判断
         assert_eq!(on_key(KeyId::Comma), Act::Punctuate(','));
+        // 句号一样：键帽上画全角「。」，交出去的是半角 `.`
+        assert_eq!(on_key(KeyId::Period), Act::Punctuate('.'));
     }
 
     #[test]

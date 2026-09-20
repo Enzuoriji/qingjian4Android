@@ -82,14 +82,16 @@ impl KeyboardLayout {
                 },
                 KeyRow {
                     keys: vec![
-                        // 字母页**直接进得了数字页与符号页**，不必先绕一层。
-                        // 这一行原先 9 个单位宽，插两个切页键之后把空格从 5 让到 3，
-                        // **还是 9 个**——不然它会变成最宽的一行，把整块键盘的键都挤小
+                        // 字母页**直接进得了数字页与符号页**，不必先绕一层
                         Key::new(KeyId::Panel(Panel::Symbols), 1.0),
                         Key::new(KeyId::Mode, 1.5),
                         Key::new(KeyId::Panel(Panel::Digits), 1.0),
-                        Key::new(KeyId::Space, 3.0),
+                        // 逗号在空格**左边**、句号在右边：这一行因此是 10 个单位宽，
+                        // 与第 1、3 行齐平。原先只有 9 个（逗号在空格右边、没有句号），
+                        // 整排比上下两行各缩进去半个键，看着是歪的
                         Key::new(KeyId::Comma, 1.0),
+                        Key::new(KeyId::Space, 3.0),
+                        Key::new(KeyId::Period, 1.0),
                         Key::new(KeyId::Enter, 1.5),
                     ],
                 },
@@ -207,15 +209,55 @@ impl KeyboardLayout {
 
 #[cfg(test)]
 mod tests {
-    use super::{KeyId, KeyboardLayout, Panel};
+    use super::{KeyId, KeyRow, KeyboardLayout, Panel};
 
     #[test]
-    fn letters_layout_is_26_letters_plus_eight_function_keys() {
+    fn letters_layout_is_26_letters_plus_nine_function_keys() {
         let layout = KeyboardLayout::letters();
         let total: usize = layout.rows().iter().map(|row| row.keys.len()).sum();
-        // 26 字母 + Shift / 退格 / 中英 / 空格 / 逗号 / 回车 / 123 / 符（第 3、4 行共 8 个功能键）
-        assert_eq!(total, 26 + 8);
+        // 26 字母 + Shift / 退格 / 中英 / 空格 / 逗号 / 句号 / 回车 / 123 / 符
+        // （第 3、4 行共 9 个功能键）
+        assert_eq!(total, 26 + 9);
         assert_eq!(layout.rows().len(), 4);
+    }
+
+    /// 最下一排要跟第 1、3 行**一样宽**（10 个单位），左右才齐平。
+    ///
+    /// 原先只有 9 个（逗号在空格右边、没有句号），整排比上下两行各缩进去半个键，
+    /// 一眼就看得出是歪的。
+    #[test]
+    fn the_letters_bottom_row_lines_up_with_the_rows_above() {
+        let layout = KeyboardLayout::letters();
+        let rows = layout.rows();
+        let widest = rows.iter().map(KeyRow::weight).fold(0.0, f32::max);
+
+        assert_eq!(widest, 10.0, "最宽的行该是 10 个单位");
+        assert_eq!(
+            rows[3].weight(),
+            widest,
+            "最下一排该跟第 1、3 行一样宽，不然整排是缩进去的"
+        );
+    }
+
+    /// 最下一排的键序：**逗号在空格左边，句号在右边**。
+    #[test]
+    fn the_letters_bottom_row_puts_the_comma_before_the_space() {
+        let layout = KeyboardLayout::letters();
+        let ids: Vec<KeyId> = layout.rows()[3].keys.iter().map(|key| key.id).collect();
+
+        assert_eq!(
+            ids,
+            vec![
+                KeyId::Panel(Panel::Symbols),
+                KeyId::Mode,
+                KeyId::Panel(Panel::Digits),
+                KeyId::Comma,
+                KeyId::Space,
+                KeyId::Period,
+                KeyId::Enter,
+            ],
+            "符 中/英 123 ， 空格 。 回车"
+        );
     }
 
     /// 26 个字母键**个个都带角标**，一个不多一个不少。

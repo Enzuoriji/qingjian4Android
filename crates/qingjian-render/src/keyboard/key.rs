@@ -23,8 +23,15 @@ pub enum KeyId {
     /// 空格：上屏高亮候选。
     Space,
 
-    /// 逗号键（中文模式下出全角）。
+    /// 逗号键。键帽画**全角**「，」，交出去的仍是半角 `,`。
     Comma,
+
+    /// 句号键。键帽画**全角**「。」，交出去的仍是半角 `.`。
+    ///
+    /// 与 [`KeyId::Comma`] 是一对，本可以都写成 [`KeyId::Literal`]——区别只在**键帽画全角**：
+    /// 字母页底下这两个是最常用的标点，画全角一眼认得出来。符号页那些符号仍走 `Literal`，
+    /// 画半角原字符（英文模式下不会画着全角却打出半角）。
+    Period,
 
     /// 回车：上屏拼音原文。
     Enter,
@@ -91,9 +98,12 @@ impl Key {
             KeyId::Letter(_) | KeyId::Literal(_) | KeyId::Space => KeyStyle::Letter,
             // 回车是唯一的强调键
             KeyId::Enter => KeyStyle::Primary,
-            KeyId::Shift | KeyId::Backspace | KeyId::Mode | KeyId::Comma | KeyId::Panel(_) => {
-                KeyStyle::Function
-            }
+            KeyId::Shift
+            | KeyId::Backspace
+            | KeyId::Mode
+            | KeyId::Comma
+            | KeyId::Period
+            | KeyId::Panel(_) => KeyStyle::Function,
         }
     }
 }
