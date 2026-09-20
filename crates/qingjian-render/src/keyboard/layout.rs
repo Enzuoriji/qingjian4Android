@@ -3,7 +3,7 @@
 //! 几何按「单位宽」算，不写死坐标——每行按自己的总宽**居中**摆放，第 2 行（9 个键）自然
 //! 得到半键错位，不用单独记缩进量。一个单位多宽由 [`KeyboardLayout::unit_width`] 取最挤的那一行定。
 
-use super::key::{Key, KeyId};
+use super::key::{Key, KeyId, KeyWidth};
 use super::panel::Panel;
 
 /// 一行按键，一个字符一个键——字母页与数字 / 符号页的一半都是这么来的。
@@ -48,9 +48,14 @@ pub struct KeyRow {
 }
 
 impl KeyRow {
-    /// 这一行按键的总权重（不含缝隙）。
+    /// 这一行**按单位宽算**的键加起来有几个单位（不含缝隙，也不含撑满的那个键）。
     pub fn weight(&self) -> f32 {
-        self.keys.iter().map(|key| key.weight).sum()
+        self.keys.iter().map(Key::units).sum()
+    }
+
+    /// 这一行有没有「撑满剩余宽度」的键。
+    pub fn has_fill(&self) -> bool {
+        self.keys.iter().any(|key| key.width == KeyWidth::Fill)
     }
 }
 
@@ -63,7 +68,8 @@ pub struct KeyboardLayout {
 impl KeyboardLayout {
     /// 字母页：26 键全键盘，每个字母键上都带一个角标（见 [`LETTER_ROWS`]）。
     ///
-    /// 最下一行左边多了个 `123`（去数字页），空格的宽度是从它那儿让出来的，这一行还是 9 个单位宽。
+    /// 最下一行两头的键宽 1.5、中间的 1，空格是**撑满**的（[`KeyWidth::Fill`]）——
+    /// 这一排只有 7 个键、比上面少 3 条缝，靠空格吃掉多出来的那一段，两头才跟第 1、3 行对齐。
     /// 隔音符号 `'` 没有独立键位，现在挂在 `Z` 的角标上——它原先住符号页，符号页改版后没了着落。
     pub fn letters() -> Self {
         let [qwerty, home, bottom] = LETTER_ROWS.map(|(letters, hints)| letter_row(letters, hints));
@@ -90,7 +96,10 @@ impl KeyboardLayout {
                         // 逗号在空格**左边**、句号在右边，中 / 英再往右——
                         // **空格左右各 3.5 个单位**，正落在这排正中
                         Key::new(KeyId::Comma, 1.0),
-                        Key::new(KeyId::Space, 3.0),
+                        // 空格**不按单位宽**，它吃掉这一行剩下的：这一排 7 个键比上面
+                        // 10 个键少 3 条缝，固定宽度排下来两头会各缩进去半个键。
+                        // 剩下的都给空格，两头就跟第 1、3 行对齐了
+                        Key::fill(KeyId::Space),
                         Key::new(KeyId::Period, 1.0),
                         Key::new(KeyId::Mode, 1.0),
                         Key::new(KeyId::Enter, 1.5),
@@ -197,12 +206,17 @@ impl KeyboardLayout {
     pub fn unit_width(&self, width: f32, gap: f32) -> f32 {
         self.rows
             .iter()
-            .filter(|row| !row.keys.is_empty())
+            // 一个固定宽度的键都没有的排不参与——一个单位多宽对它没有意义（除下来是无穷大），
+            // 它整排都是「撑满」的
+            .filter(|row| row.weight() > 0.0)
             .map(|row| (width - gap * (row.keys.len() - 1) as f32) / row.weight())
             .fold(f32::MAX, f32::min)
     }
 
-    /// 一行的总宽（点）。
+    /// 这一行**按单位宽算的那部分**有多宽（点）——撑满的那个键不算在内。
+    ///
+    /// 没有撑满键的行，这就是整行的宽度（量出来居中用）；有撑满键的行，它铺满整宽，
+    /// 这个值只是「除去撑满键还占掉多少」，撑满键自己拿的是剩下的。
     pub fn row_width(row: &KeyRow, unit: f32, gap: f32) -> f32 {
         unit * row.weight() + gap * (row.keys.len().saturating_sub(1)) as f32
     }
@@ -210,7 +224,7 @@ impl KeyboardLayout {
 
 #[cfg(test)]
 mod tests {
-    use super::{KeyId, KeyRow, KeyboardLayout, Panel};
+    use super::{Key, KeyId, KeyWidth, KeyboardLayout, Panel};
 
     #[test]
     fn letters_layout_is_26_letters_plus_nine_function_keys() {
@@ -222,21 +236,32 @@ mod tests {
         assert_eq!(layout.rows().len(), 4);
     }
 
-    /// 最下一排要跟第 1、3 行**一样宽**（10 个单位），左右才齐平。
+    /// 最下一排靠**一个撑满的键**补齐宽度，别的排不该有。
     ///
-    /// 原先只有 9 个（逗号在空格右边、没有句号），整排比上下两行各缩进去半个键，
-    /// 一眼就看得出是歪的。
+    /// 「整排跟上面一样宽」这件事本身在这层看不出来（撑满那个键的宽度要等画的时候才知道），
+    /// 由 `renderer::keyboard` 的 `the_bottom_row_lines_up_with_the_first_row` 按像素盯。
+    /// 这条盯的是结构：**只能有一个撑满的键**，多了就分不清谁拿多少。
     #[test]
-    fn the_letters_bottom_row_lines_up_with_the_rows_above() {
+    fn only_the_bottom_row_has_a_filling_key() {
         let layout = KeyboardLayout::letters();
-        let rows = layout.rows();
-        let widest = rows.iter().map(KeyRow::weight).fold(0.0, f32::max);
+        let filling: Vec<usize> = layout
+            .rows()
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.has_fill())
+            .map(|(index, _)| index)
+            .collect();
 
-        assert_eq!(widest, 10.0, "最宽的行该是 10 个单位");
+        assert_eq!(filling, vec![3], "该只有最下一排有撑满的键");
+
+        let row = &layout.rows()[3];
         assert_eq!(
-            rows[3].weight(),
-            widest,
-            "最下一排该跟第 1、3 行一样宽，不然整排是缩进去的"
+            row.keys
+                .iter()
+                .filter(|key| key.width == KeyWidth::Fill)
+                .count(),
+            1,
+            "一排里只能有一个撑满的键"
         );
     }
 
@@ -278,8 +303,8 @@ mod tests {
             .position(|key| key.id == KeyId::Space)
             .expect("最下一排该有空格");
 
-        let left: f32 = row.keys[..space].iter().map(|key| key.weight).sum();
-        let right: f32 = row.keys[space + 1..].iter().map(|key| key.weight).sum();
+        let left: f32 = row.keys[..space].iter().map(Key::units).sum();
+        let right: f32 = row.keys[space + 1..].iter().map(Key::units).sum();
         let offset = (left - right) / 2.0;
 
         assert_eq!(

@@ -13,7 +13,9 @@ pub use rendered::RenderedKeyboard;
 use super::{Rendered, Renderer};
 use crate::canvas::Canvas;
 use crate::error::RenderError;
-use crate::keyboard::{InputMode, Key, KeyId, KeyboardLayout, KeyboardState, Panel, ShiftState};
+use crate::keyboard::{
+    InputMode, Key, KeyId, KeyWidth, KeyboardLayout, KeyboardState, Panel, ShiftState,
+};
 use crate::text::TextStyle;
 use crate::theme::KeyboardTheme;
 
@@ -51,10 +53,26 @@ impl Renderer {
         let mut keys = Vec::new();
         let mut y = 0.0;
         for row in layout.rows() {
-            // 每行按自己的总宽居中，第 2 行自然得到半键错位
-            let mut x = (content_width - KeyboardLayout::row_width(row, unit, gap_x)) / 2.0;
+            // 按单位宽算的那部分（不含撑满的键）。有撑满键的行**铺满整宽**，
+            // 其余按自己的总宽居中——第 2 行（9 个键）由此自然得到半键错位。
+            let fixed = KeyboardLayout::row_width(row, unit, gap_x);
+            let mut x = if row.has_fill() {
+                0.0
+            } else {
+                (content_width - fixed) / 2.0
+            };
+            // 撑满的键**平分**这一行剩下的（同一排里有几个就除以几；现在最多一个，
+            // 但除以个数才对——不然两个会各自占满、叠在一起）
+            let fills = row
+                .keys
+                .iter()
+                .filter(|key| key.width == KeyWidth::Fill)
+                .count();
             for key in &row.keys {
-                let key_width = unit * key.weight;
+                let key_width = match key.width {
+                    KeyWidth::Units(weight) => unit * weight,
+                    KeyWidth::Fill => (content_width - fixed).max(0.0) / fills.max(1) as f32,
+                };
                 self.draw_key(
                     &mut canvas,
                     key,
@@ -196,5 +214,80 @@ fn label(key: &Key, state: &KeyboardState) -> String {
             Panel::Digits => "123".to_owned(),
             Panel::Symbols => "符".to_owned(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KeyHit;
+    use crate::fonts::FontLibrary;
+    use crate::keyboard::{KeyboardLayout, KeyboardState, Panel};
+    use crate::renderer::Renderer;
+    use crate::theme::KeyboardTheme;
+
+    /// 某一页画出来之后，第 1 行与最下一行的左右边缘（像素）。
+    ///
+    /// 命中矩形在 `keys` 里是**按行顺序**推的，所以按各行的键数切开就行，不用再按 y 分。
+    fn row_edges(panel: Panel) -> Option<((f32, f32), (f32, f32))> {
+        // 没有系统字体的环境（CI 容器）跳过
+        let library = FontLibrary::system("zh-CN").ok()?;
+        let mut renderer = Renderer::new(library);
+        let layout = KeyboardLayout::of(panel);
+        let out = renderer
+            .render_keyboard(
+                &layout,
+                &KeyboardState::default(),
+                360.0,
+                0.0,
+                &KeyboardTheme::light(),
+                2.0,
+            )
+            .ok()?;
+
+        let edges = |slice: &[KeyHit]| {
+            let left = slice.iter().map(|key| key.x).fold(f32::MAX, f32::min);
+            let right = slice
+                .iter()
+                .map(|key| key.x + key.width)
+                .fold(f32::MIN, f32::max);
+            (left, right)
+        };
+        let rows = layout.rows();
+        let first = rows.first()?.keys.len();
+        let last = rows.last()?.keys.len();
+        Some((
+            edges(&out.keys[..first]),
+            edges(&out.keys[out.keys.len() - last..]),
+        ))
+    }
+
+    /// 最下一排的左右边缘要跟第 1 行**严丝合缝**。
+    ///
+    /// 字母页最下一排只有 7 个键（6 条缝），第 1 行有 10 个（9 条缝）——全按固定单位宽
+    /// 排下来整排会窄一条、两头各缩进去半个键。空格是「撑满」的，多出来的都归它，
+    /// 两头才对齐。这条来回错过三次，别再凭眼睛看。
+    #[test]
+    fn the_bottom_row_lines_up_with_the_first_row() {
+        let Some((first, last)) = row_edges(Panel::Letters) else {
+            return;
+        };
+        assert!(
+            (first.0 - last.0).abs() < 0.01 && (first.1 - last.1).abs() < 0.01,
+            "第 1 行是 {first:?}，最下一排是 {last:?}，两边没对齐"
+        );
+    }
+
+    /// 数字页、符号页本来就是每行 5 个单位、一样宽，这条守着别退化。
+    #[test]
+    fn every_panel_has_rows_of_the_same_width() {
+        for panel in [Panel::Digits, Panel::Symbols] {
+            let Some((first, last)) = row_edges(panel) else {
+                return;
+            };
+            assert!(
+                (first.0 - last.0).abs() < 0.01 && (first.1 - last.1).abs() < 0.01,
+                "{panel:?} 的第 1 行是 {first:?}，最下一排是 {last:?}"
+            );
+        }
     }
 }

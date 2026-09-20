@@ -9,7 +9,7 @@ mod layout;
 mod panel;
 mod state;
 
-pub use key::{Key, KeyId, KeyStyle};
+pub use key::{Key, KeyId, KeyStyle, KeyWidth};
 pub use layout::{KeyRow, KeyboardLayout};
 pub use panel::Panel;
 pub use state::{InputMode, KeyboardState, ShiftState};

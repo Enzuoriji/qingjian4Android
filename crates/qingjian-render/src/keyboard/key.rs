@@ -59,13 +59,30 @@ pub enum KeyStyle {
     Primary,
 }
 
+/// 键有多宽。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KeyWidth {
+    /// 占几个标准单位。
+    Units(f32),
+
+    /// 撑满这一行**剩下的**宽度。一行里最多一个。
+    ///
+    /// 键少的那一排靠它跟别的排一样宽：字母页最下一排只有 7 个键（6 条缝），
+    /// 第 1、3 行有 10 个（9 条缝），全按固定单位排下来整排会窄一条、两头各缩进去半个键。
+    /// 空格吃掉多出来的那一段，两头就对齐了。
+    ///
+    /// 这个做法是照 fcitx5-android 的：它的空格键 `percentWidth = 0`，
+    /// 代码里写着 `0f means fill remaining space`。
+    Fill,
+}
+
 /// 键盘上的一个键。
 #[derive(Debug, Clone, Copy)]
 pub struct Key {
     pub id: KeyId,
 
-    /// 宽度占几个标准单位。普通键 1.0，Shift 与回车 1.5，空格 5.0。
-    pub weight: f32,
+    /// 宽度。普通键 [`KeyWidth::Units`]，空格是 [`KeyWidth::Fill`]。
+    pub width: KeyWidth,
 
     /// 键帽上方那个小字：**在键上往下滑**打出来的字符。没有角标就是 `None`。
     ///
@@ -77,8 +94,26 @@ impl Key {
     pub const fn new(id: KeyId, weight: f32) -> Self {
         Self {
             id,
-            weight,
+            width: KeyWidth::Units(weight),
             hint: None,
+        }
+    }
+
+    /// 一个撑满这一行剩余宽度的键（见 [`KeyWidth::Fill`]）。
+    pub const fn fill(id: KeyId) -> Self {
+        Self {
+            id,
+            width: KeyWidth::Fill,
+            hint: None,
+        }
+    }
+
+    /// 这个键占几个标准单位。`Fill` 那个算 **0**——它拿的是剩下的，
+    /// 不参与「一个单位多宽」的计算，否则会跟自己的宽度循环论证。
+    pub const fn units(&self) -> f32 {
+        match self.width {
+            KeyWidth::Units(weight) => weight,
+            KeyWidth::Fill => 0.0,
         }
     }
 
@@ -86,7 +121,7 @@ impl Key {
     pub const fn letter(c: char, hint: char) -> Self {
         Self {
             id: KeyId::Letter(c),
-            weight: 1.0,
+            width: KeyWidth::Units(1.0),
             hint: Some(hint),
         }
     }
