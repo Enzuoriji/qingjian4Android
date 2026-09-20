@@ -24,14 +24,21 @@ use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 /// 特意滑一下就过。
 pub(crate) const SWIPE: f32 = 12.0;
 
-/// 在空格键上横着滑这么多点，光标移一格。
-///
-/// 比 [`SWIPE`] 小：滑动的门槛是「手指抖一下到不了」，而移光标是**一寸一寸**的——
-/// 门槛大了滑半天不动，小了又容易误触发，取四分之一键高上下。
-pub(crate) const CURSOR_STEP: f32 = 9.0;
+/// 空格上横滑的**死区**（点）：位移不到这儿不算移光标，仍然是「按空格」。
+pub(crate) const CURSOR_DEAD_ZONE: f32 = 8.0;
 
-/// 一次最多移这么多格。手指划得再远也不至于把光标甩到天边。
-const CURSOR_MAX_STEPS: isize = 30;
+/// 光标拖动最慢 / 最快时**每一拍**走几格。
+///
+/// 「一拍」是壳那边 50ms 的心跳，所以 0.2 格/拍约合 4 格/秒、2 格/拍是 40 格/秒。
+/// 这个数和壳的 [`REPEAT_INTERVAL_MS`](crate::keyboard) 是一对，改一个要想着另一个。
+const CURSOR_SLOWEST: f32 = 0.2;
+const CURSOR_FASTEST: f32 = 2.0;
+
+/// 位移涨到这么大（点）就到最快了。
+const CURSOR_FAST_AT: f32 = 80.0;
+
+/// 一次拖动最多连着走这么多格——手指一直按着不放也不至于把光标甩到天边。
+const CURSOR_MAX_STEPS: isize = 400;
 
 /// 抬起来时兑现的东西。
 ///
@@ -100,6 +107,15 @@ struct Press {
     /// `sliding` 说的是「点击作废」。
     hinted: bool,
 
+    /// 这根手指此刻**横着离开了按下那点多远**（点，正数往右）。只有空格上移光标用得上。
+    swipe: f32,
+
+    /// 已经越过死区、进入移光标了——那这一下就不是「按空格」。
+    cursor_started: bool,
+
+    /// 移光标的小数累加器：速度是小数（慢的时候几拍才够一格），攒够一格才走。
+    cursor_carry: f32,
+
     /// 这一下已经连发过了。
     ///
     /// 连发过就不再按「点击」兑现——键是**抬起时**才触发一次的，按住删一串之后松手，
@@ -141,13 +157,19 @@ pub struct Keyboard {
     popup_for: Option<(KeyId, u32, u32)>,
 }
 
-/// 横着滑了 `dx` 像素，该移几格光标（正数往右）。
+/// 空格上横滑时，位移 `dx`（点）下**一拍**该走几格（正数往右）。
 ///
-/// 按**位移量**算而不是按手势次数：滑得远就移得多，跟桌面按住方向键连发是一个手感。
-fn cursor_steps(dx: f32, step: f32) -> isize {
-    let steps = (dx.abs() / step) as isize;
-    let steps = steps.min(CURSOR_MAX_STEPS);
-    if dx < 0.0 { -steps } else { steps }
+/// **越远越快**：位移从死区涨到 [`CURSOR_FAST_AT`] 的过程中，速度在
+/// [`CURSOR_SLOWEST`] 与 [`CURSOR_FASTEST`] 之间线性插值——手指挪得越远，
+/// 光标走得一格比一格快，这是要的手感。
+fn cursor_rate(dx: f32, dead_zone: f32) -> f32 {
+    let distance = dx.abs();
+    if distance < dead_zone {
+        return 0.0;
+    }
+    let t = ((distance - dead_zone) / (CURSOR_FAST_AT - dead_zone)).clamp(0.0, 1.0);
+    let rate = CURSOR_SLOWEST + (CURSOR_FASTEST - CURSOR_SLOWEST) * t;
+    if dx < 0.0 { -rate } else { rate }
 }
 
 impl Keyboard {
@@ -282,6 +304,9 @@ impl Keyboard {
                     sliding: false,
                     hint: self.hint_at(x, y),
                     hinted: false,
+                    swipe: 0.0,
+                    cursor_started: false,
+                    cursor_carry: 0.0,
                     repeated: false,
                 });
                 self.refresh_pressed();
@@ -290,6 +315,7 @@ impl Keyboard {
             MotionAction::Move => {
                 let hit = self.hit(x, y);
                 let threshold = SWIPE * self.metrics.density;
+                let dead_zone = CURSOR_DEAD_ZONE * self.metrics.density;
                 if let Some(press) = self
                     .presses
                     .iter_mut()
@@ -304,9 +330,26 @@ impl Keyboard {
                     {
                         press.hinted = true;
                     }
+                    // 空格上横着滑 = 移光标。**拖动当中就走**，不是等松手才算——
+                    // 松手才走的话手指得先盲拖一段、再抬起来看结果，没法一边看一边调。
+                    if press.key == Some(KeyId::Space) {
+                        press.swipe = x - press.at.0;
+                        if !press.cursor_started && press.swipe.abs() >= dead_zone {
+                            // 刚越过死区**先走一格**：不然要等下一拍（最多 50ms）才有反应
+                            press.cursor_started = true;
+                            press.cursor_carry = 0.0;
+                            let first = if press.swipe > 0.0 { 1 } else { -1 };
+                            self.refresh_pressed();
+                            return Some(Fired::MoveCursor(first));
+                        }
+                    }
                     // 键很大（三十多点宽），手指抖一抖不该掉字，所以「还落在这个键上」就一直算按着；
                     // 滑到别的键或键之间的缝上才取消。候选条那边不是这个判法，得挪出触摸阈值。
-                    if !press.hinted && (press.key.is_none() || hit != press.key) {
+                    // 移光标当中不取消：空格键宽，划着划着就出去了，那不是「这一下不要了」
+                    if !press.hinted
+                        && !press.cursor_started
+                        && (press.key.is_none() || hit != press.key)
+                    {
                         press.sliding = true;
                     }
                 }
@@ -329,13 +372,9 @@ impl Keyboard {
                 if ended.repeated {
                     return None;
                 }
-                // 空格上横着滑 = 移光标。**排在 `sliding` 前面**：空格键很宽，
-                // 划着划着就滑出键外了，那不算「取消」，是这一手势本身就该兑现
-                if ended.key == Some(KeyId::Space) {
-                    let steps = cursor_steps(x - ended.at.0, CURSOR_STEP * self.metrics.density);
-                    if steps != 0 {
-                        return Some(Fired::MoveCursor(steps));
-                    }
+                // 空格上移过光标了：这一下已经在拖动当中兑现完了，抬手不再补一个空格
+                if ended.cursor_started {
+                    return None;
                 }
                 // 抬起时只要还在那个键上、或者只挪了触摸阈值那么点距离，都算这一下按着了
                 match ended.key {
@@ -489,6 +528,29 @@ impl Keyboard {
         {
             press.repeated = true;
         }
+    }
+
+    /// 空格上移光标的**一拍**：壳每 50ms 敲一次，问「这一拍走几格」。
+    ///
+    /// 速度是个小数（慢的时候几拍才够一格），用累加器摊平——不是每一拍都能走整格，
+    /// 但几拍下来的总位移是对的，看着就是连续加速。
+    pub fn cursor_tick(&mut self, pointer: i32) -> isize {
+        let dead_zone = CURSOR_DEAD_ZONE * self.metrics.density;
+        let Some(press) = self
+            .presses
+            .iter_mut()
+            .find(|press| press.pointer == pointer)
+        else {
+            return 0;
+        };
+        if press.key != Some(KeyId::Space) {
+            return 0;
+        }
+        press.cursor_carry += cursor_rate(press.swipe, dead_zone);
+        let steps = press.cursor_carry.trunc();
+        let steps = steps.clamp(-(CURSOR_MAX_STEPS as f32), CURSOR_MAX_STEPS as f32);
+        press.cursor_carry -= steps;
+        steps as isize
     }
 
     /// 气泡此刻是**按哪个身份**画的——测试用，验证下滑之后画的是角标而不是字母。

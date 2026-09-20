@@ -262,6 +262,25 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_repeat(
     }
 }
 
+/// 空格上移光标的**一拍**：壳的心跳到点了，问「这一拍走几格」。
+///
+/// 走几格由 Rust 按**手指离开按下那点多远**算（越远越快），壳不必知道死区与速度。
+/// 计时在壳（有现成的 `Handler`）、节奏在 Rust——与长按连发同一个分工。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_cursorTick(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+    pointer: jint,
+) -> jint {
+    match unsafe { from_handle(handle) } {
+        Some(session) => {
+            catch_unwind(AssertUnwindSafe(|| session.cursor_tick(pointer))).unwrap_or(0)
+        }
+        None => 0,
+    }
+}
+
 /// 该镜像给应用的拼音行（取走并清掉脏标记）。空串表示没在组句，壳应当 `finishComposingText`。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_takePreedit(

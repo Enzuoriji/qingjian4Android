@@ -81,6 +81,13 @@ object QingjianNative {
     external fun repeat(handle: Long, pointer: Int): Int
 
     /**
+     * 空格上移光标的**一拍**：壳的心跳到点了，问「这一拍走几格」。
+     *
+     * 走几格由 Rust 按**手指离开按下那点多远**算（越远越快），壳不必知道死区与速度。
+     */
+    external fun cursorTick(handle: Long, pointer: Int): Int
+
+    /**
      * 该镜像给应用的拼音行（取走并清掉脏标记）。
      *
      * 空串表示没在组句，壳应当 `finishComposingText()`。

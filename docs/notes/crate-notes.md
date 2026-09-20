@@ -144,7 +144,10 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 
 **空格横滑移光标**（2026-09-20）：`Keyboard::touch` 返回 `Option<Fired>`（`Fired::Key` 或
 `Fired::MoveCursor(格数)`）——移光标不是「某个键」，翻不成 `action::on_key`。
-一格 `CURSOR_STEP` 9 点、上限 30 格；判定排在 `sliding` 之前（空格键宽，划出去不算取消）。
+**拖动当中就走**（`Move` 里越过死区先走一格，之后靠 `cursor_tick` 每拍走），
+速度随位移线性涨（死区 8 点 → 0.2 格/拍；80 点以上 → 2 格/拍，一拍是壳的 50ms 心跳）。
+`cursor_tick` 用小数累加器摊平——慢的时候几拍才够一格，几拍下来的总位移是对的。
+判定排在 `sliding` 之前（空格键宽，划出去不算取消）。
 `Session::move_cursor` 把格数摊成一串 `Command::MoveLeft` / `MoveRight`（组句当中直接忽略）。
 壳那边**攒成净位移调一次 `InputConnection.setSelection`**，不是每格发一个键——
 每格问一遍光标在哪儿要多花几十次跨进程往返。

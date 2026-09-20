@@ -1013,35 +1013,116 @@ fn the_popup_shows_what_will_actually_be_typed() {
     );
 }
 
-/// 空格键上横着滑 = 移光标，**按位移量发方向键**。
+/// 在空格上横滑到 `dx` 处按着不动，敲 `ticks` 拍，返回这几拍总共走了几格。
+///
+/// **不算越过死区那一格**（那是拖动一开始就兑现的），只看「按着不动」的持续速度。
+fn cursor_steps_over(dx: f32, ticks: usize) -> Option<isize> {
+    let mut session = ready()?;
+    let (x, y) = key_centre(&session, KeyId::Space);
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x + dx, y);
+    session.take_commands();
+    let mut total = 0;
+    for _ in 0..ticks {
+        session.cursor_tick(POINTER);
+        total += session.take_commands().len() as isize;
+    }
+    Some(total)
+}
+
+/// 空格上横滑**拖动当中就走**，不用等松手。
+///
+/// 松手才走的话，手指得先盲拖一段、再抬起来看结果，没法一边看一边调——
+/// 用户报的就是这个。
 #[test]
-fn sliding_on_the_space_bar_moves_the_cursor() {
+fn dragging_on_the_space_bar_moves_the_cursor_right_away() {
     let Some(mut session) = ready() else {
         return;
     };
     let (x, y) = key_centre(&session, KeyId::Space);
-    let step = crate::keyboard::CURSOR_STEP * DENSITY;
+    let dead = crate::keyboard::CURSOR_DEAD_ZONE * DENSITY;
 
     session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x + step * 3.0, y);
-    session.touch(MotionAction::Up, POINTER, x + step * 3.0, y);
+    session.touch(MotionAction::Move, POINTER, x + dead + 10.0, y);
 
     assert_eq!(
         session.take_commands(),
-        vec![Command::MoveRight.code(); 3],
-        "往右滑三格该发三次右方向键"
+        vec![Command::MoveRight.code()],
+        "刚越过死区就该先走一格，不用等松手"
     );
-    assert_eq!(session.take_commit(), None, "移光标不该顺手把空格打出去");
+
+    // 往左同理
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - dead - 10.0, y);
+    assert_eq!(session.take_commands(), vec![Command::MoveLeft.code()]);
+}
+
+/// 手指按着不动，光标会**一拍一拍地接着走**（壳每 50ms 敲一拍）。
+#[test]
+fn holding_the_drag_keeps_the_cursor_moving() {
+    let Some(total) = cursor_steps_over(80.0, 10) else {
+        return;
+    };
+    assert!(total >= 5, "按着不动十拍该走好几格，实际 {total}");
+}
+
+/// **拖得越远走得越快**——「离按下那点多少像素，走得一格比一格快」。
+#[test]
+fn the_further_you_drag_the_faster_it_goes() {
+    let Some(near) = cursor_steps_over(12.0, 20) else {
+        return;
+    };
+    let Some(far) = cursor_steps_over(200.0, 20) else {
+        return;
+    };
+    assert!(
+        far > near,
+        "同样二十拍，拖得远该走得多：近处 {near} 格、远处 {far} 格"
+    );
+}
+
+/// 死区以内不动：那还是「按空格」，上屏高亮候选。
+#[test]
+fn a_small_drag_on_the_space_bar_is_still_a_space() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let first = drawn(&session).first().map(|text| (*text).to_owned());
+    let (x, y) = key_centre(&session, KeyId::Space);
+    let dead = crate::keyboard::CURSOR_DEAD_ZONE * DENSITY;
 
     session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x - step * 2.0, y);
-    session.touch(MotionAction::Up, POINTER, x - step * 2.0, y);
+    session.touch(MotionAction::Move, POINTER, x + dead - 2.0, y);
+    for _ in 0..10 {
+        session.cursor_tick(POINTER);
+    }
+    session.touch(MotionAction::Up, POINTER, x + dead - 2.0, y);
 
     assert_eq!(
         session.take_commands(),
-        vec![Command::MoveLeft.code(); 2],
-        "往左滑两格该发两次左方向键"
+        Vec::<i32>::new(),
+        "死区以内不该移光标"
     );
+    assert_eq!(session.take_commit(), first, "该上屏高亮那个候选");
+}
+
+/// 空格上滑出键外照样走——空格键宽，划着划着就出去了，
+/// 那不是「取消这一下」，是这个手势本身就该兑现。
+#[test]
+fn moving_the_cursor_survives_leaving_the_space_bar() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Space);
+    let dead = crate::keyboard::CURSOR_DEAD_ZONE * DENSITY;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    // 一路滑到空格右边的「。」上
+    session.touch(MotionAction::Move, POINTER, x + dead + 120.0, y);
+    session.cursor_tick(POINTER);
+
+    assert!(!session.take_commands().is_empty(), "滑出空格键外也该照走");
 }
 
 /// **组句当中不动光标**：那会儿输入框里是我们的拼音，挪光标该挪拼音里的位置，
@@ -1053,11 +1134,13 @@ fn the_cursor_does_not_move_while_composing() {
     };
     type_text(&mut session, "nihao");
     let (x, y) = key_centre(&session, KeyId::Space);
-    let step = crate::keyboard::CURSOR_STEP * DENSITY;
+    let dead = crate::keyboard::CURSOR_DEAD_ZONE * DENSITY;
 
     session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x + step * 3.0, y);
-    session.touch(MotionAction::Up, POINTER, x + step * 3.0, y);
+    session.touch(MotionAction::Move, POINTER, x + dead + 60.0, y);
+    for _ in 0..10 {
+        session.cursor_tick(POINTER);
+    }
 
     assert_eq!(
         session.take_commands(),
@@ -1069,47 +1152,6 @@ fn the_cursor_does_not_move_while_composing() {
         Some("ni'hao"),
         "拼音该原样留着"
     );
-}
-
-/// 空格上滑出键外照样移光标——空格键宽，划着划着就出去了，
-/// 那不是「取消这一下」，是这个手势本身就该兑现。
-#[test]
-fn moving_the_cursor_survives_leaving_the_space_bar() {
-    let Some(mut session) = ready() else {
-        return;
-    };
-    let (x, y) = key_centre(&session, KeyId::Space);
-    let step = crate::keyboard::CURSOR_STEP * DENSITY;
-
-    session.touch(MotionAction::Down, POINTER, x, y);
-    // 一路滑到空格右边的「。」上
-    session.touch(MotionAction::Move, POINTER, x + step * 6.0, y);
-    session.touch(MotionAction::Up, POINTER, x + step * 6.0, y);
-
-    assert_eq!(
-        session.take_commands(),
-        vec![Command::MoveRight.code(); 6],
-        "滑出空格键外也该照位移量移光标"
-    );
-}
-
-/// 空格上只挪一点点，还是「按空格」——上屏高亮候选，不是移光标。
-#[test]
-fn a_small_drag_on_the_space_bar_is_still_a_space() {
-    let Some(mut session) = ready() else {
-        return;
-    };
-    type_text(&mut session, "nihao");
-    let first = drawn(&session).first().map(|text| (*text).to_owned());
-    let (x, y) = key_centre(&session, KeyId::Space);
-
-    // 不够一格的位移
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x + 4.0, y);
-    session.touch(MotionAction::Up, POINTER, x + 4.0, y);
-
-    assert_eq!(session.take_commands(), Vec::<i32>::new(), "不该发方向键");
-    assert_eq!(session.take_commit(), first, "该上屏高亮那个候选");
 }
 
 /// 空格没有字可显示，按住也不弹——弹一个空框子只是晃眼。

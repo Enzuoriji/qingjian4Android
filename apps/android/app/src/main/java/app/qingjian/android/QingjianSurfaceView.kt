@@ -55,18 +55,31 @@ class QingjianSurfaceView(context: Context) : View(context) {
      */
     var onRepeat: ((Int) -> Unit)? = null
 
+    /**
+     * 移光标的一拍：空格键上按着不放时，每一拍问一次「这一拍走几格」。
+     *
+     * 走几格、什么时候算「在移光标」都由 Rust 定——壳只管按节拍敲。
+     */
+    var onCursorTick: ((Int) -> Unit)? = null
+
     /** 尺寸变化时回调，用来让服务重新告诉 Rust 该画多宽（转屏等）。 */
     var onConfigure: (() -> Unit)? = null
 
     /** 每根手指按下的时刻，用来判够不够久。 */
     private val downAt = HashMap<Int, Long>()
 
-    /** 计时器：把按够久的手指各报一次，再排下一拍。 */
+    /**
+     * 连发 / 移光标共用的一拍：每 50ms 把所有按着的手指各报一次，再排下一拍。
+     *
+     * 两者要的时机不一样，所以分了两个回调：**长按连发**要按够 [`REPEAT_DELAY_MS`] 才算，
+     * **移光标**是拖动当中就走（等 400ms 才动就太迟了）。
+     */
     private val ticker = object : Runnable {
         override fun run() {
             val now = SystemClock.uptimeMillis()
             for ((pointer, at) in downAt) {
                 if (now - at >= REPEAT_DELAY_MS) onRepeat?.invoke(pointer)
+                onCursorTick?.invoke(pointer)
             }
             // 手指还按着就接着排；全松了的话 UP 那边已经把回调撤了
             if (downAt.isNotEmpty()) postDelayed(this, REPEAT_INTERVAL_MS)

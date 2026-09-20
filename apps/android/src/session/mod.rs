@@ -426,6 +426,21 @@ impl Session {
         }
     }
 
+    /// 空格上移光标的**一拍**：壳每 50ms 敲一次，返回 [`flags`] 的位掩码。
+    ///
+    /// 这一拍走几格由 [`Keyboard::cursor_tick`] 按位移量定（**越远越快**），
+    /// 这里只负责摊成一串方向命令。壳不用自己算速度，也就不必知道死区是多少。
+    pub fn cursor_tick(&mut self, pointer: i32) -> i32 {
+        let steps = self
+            .keyboard
+            .as_mut()
+            .map_or(0, |keyboard| keyboard.cursor_tick(pointer));
+        if steps != 0 {
+            self.move_cursor(steps);
+        }
+        self.mask()
+    }
+
     /// 长按连发：壳的计时器到点了，问一次「按住的那个键要不要再来一次」。
     ///
     /// 计时器在壳那边（安卓有现成的 `Handler`，Rust 这边为此引线程或定时器不划算），

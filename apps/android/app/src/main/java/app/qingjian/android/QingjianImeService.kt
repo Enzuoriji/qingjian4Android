@@ -120,6 +120,13 @@ class QingjianImeService : InputMethodService() {
             val flags = QingjianNative.repeat(handle, pointer)
             afterInput(view, flags, started)
         }
+        // 移光标：空格键上按着横滑时，壳按节拍问一次「这一拍走几格」。
+        // 走几格、多快，全由 Rust 按位移量算——壳不必知道死区与速度曲线。
+        view.onCursorTick = { pointer ->
+            val started = SystemClock.elapsedRealtime()
+            val flags = QingjianNative.cursorTick(handle, pointer)
+            afterInput(view, flags, started)
+        }
         return view
     }
 
