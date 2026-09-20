@@ -18,7 +18,7 @@ pub use hit::BarHit;
 pub use id::BarHitId;
 pub use rendered::RenderedBar;
 
-use super::{INDEX_GAP, Metrics, Rendered, Renderer};
+use super::{Metrics, Rendered, Renderer};
 use crate::canvas::Canvas;
 use crate::error::RenderError;
 use crate::frame::{Frame, Row};
@@ -250,7 +250,13 @@ impl Renderer {
         }
     }
 
-    /// 画一个候选：序号 + 词（云端词前带云朵），整块在 `(x, 宽)` 的格子里居中。
+    /// 画一个候选：词（云端词前带云朵），整块在 `(x, 宽)` 的格子里居中。
+    ///
+    /// **不画序号**（2026-09-20）：候选条是手指点的，选哪一格靠位置不靠数字——
+    /// 序号是实体键盘那套（`⇧ + 数字`）留下的，手指够不着，白占宽度。
+    /// 一格约 68 点宽，序号连间距就吃掉十来点，去掉相当于**每个词多出半个字**，
+    /// 三字词被截成「你…」的那条线也就跟着往后挪了。
+    /// 序号仍在 [`Row::index`] 里（桌面候选窗要用），只是这里不画。
     fn draw_bar_row(
         &mut self,
         canvas: &mut Canvas,
@@ -260,34 +266,19 @@ impl Renderer {
         band: Band,
     ) {
         let (x, width) = slot;
-        let index_style = m.index_style();
         let text_style = m.text_style();
-        let index = self.measure(&candidate.index, &index_style);
-        let gap = m.px(INDEX_GAP);
         let cloud = if candidate.cloud {
             m.cloud_width()
         } else {
             0.0
         };
         // 格子宽度是硬约束，宁可少显示几个字也不能压到隔壁
-        let text = self.fit(
-            &candidate.text,
-            &text_style,
-            width - index.width - gap - cloud,
-        );
+        let text = self.fit(&candidate.text, &text_style, width - cloud);
         let text_size = self.measure(&text, &text_style);
 
         let text_height = m.px(m.theme.text_font.line_height);
         let top = band.centre(text_height);
-        let mut left = x + (width - index.width - gap - cloud - text_size.width) / 2.0;
-        self.draw_text(
-            canvas,
-            &candidate.index,
-            &index_style,
-            left,
-            top + m.small_offset(text_height),
-        );
-        left += index.width + gap;
+        let mut left = x + (width - cloud - text_size.width) / 2.0;
         if candidate.cloud {
             left += self.draw_cloud(canvas, m, left, top, text_height);
         }
