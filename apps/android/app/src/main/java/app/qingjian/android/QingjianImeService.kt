@@ -191,17 +191,13 @@ class QingjianImeService : InputMethodService() {
         // 移光标可能一次来好几格，攒成**净位移**最后只调一次——每格都去问一遍
         // 光标在哪儿要多花几十次跨进程往返
         var cursor = 0
-        var select = 0
+        var clear = false
         QingjianNative.takeCommands(handle)?.forEach { code ->
             when (code) {
                 QingjianNative.COMMAND_MOVE_LEFT -> cursor -= 1
                 QingjianNative.COMMAND_MOVE_RIGHT -> cursor += 1
-                // 方向就在名字里：往左扩。所以是**减**，不是加
-                QingjianNative.COMMAND_SELECT_LEFT -> select -= 1
+                QingjianNative.COMMAND_CLEAR_ALL -> clear = true
                 else -> {
-                    // 别的命令一来（松手那条退格），这一个选字手势就算完了
-                    selectAnchor = -1
-                    selectSteps = 0
                     val keyCode = when (code) {
                         QingjianNative.COMMAND_BACKSPACE -> KeyEvent.KEYCODE_DEL
                         QingjianNative.COMMAND_ENTER -> KeyEvent.KEYCODE_ENTER
@@ -213,37 +209,20 @@ class QingjianImeService : InputMethodService() {
             }
         }
         if (cursor != 0) moveCursor(connection, cursor)
-        if (select != 0) selectChars(connection, select)
+        if (clear) clearToStart(connection)
         QingjianNative.takeCommit(handle)?.let { connection.commitText(it, 1) }
     }
 
-    /** 退格上滑选字：手势开始时的光标位置（锚点）。-1 表示没在选。 */
-    private var selectAnchor = -1
-
-    /** 这一个选字手势**累计**选了几个字。 */
-    private var selectSteps = 0
-
     /**
-     * 退格上滑选字：把选区往左扩 `delta` 个字。
+     * 把**光标前面整段**清掉。⌫ 上往上滑、松手时兑现。
      *
-     * 第一次调用记下**锚点**——那会儿光标还在手势开始的位置，之后按
-     * 「锚点 + 累计格数」设选区。松手会来一条退格命令，那条会把锚点清掉。
-     *
-     * 用 `setSelection` 而不是 `SHIFT + 方向键`：方向键在安卓上是**焦点导航**用的，
-     * 选到头会把焦点挪到界面按钮上（移光标已经踩过这个坑）。
+     * 用 `deleteSurroundingText(前面有几个字, 0)` 一次删完——这是安卓专门干这事的 API：
+     * 不用自己算选区、不会外溢成焦点移动、也不碰界面上的别的东西。
      */
-    private fun selectChars(connection: InputConnection, delta: Int) {
-        if (selectSteps == 0) {
-            val at = connection.getExtractedText(ExtractedTextRequest(), 0)?.selectionEnd ?: -1
-            if (at < 0) {
-                Log.w(TAG, "应用不吐光标位置，这一次选不了")
-                return
-            }
-            selectAnchor = at
-        }
-        selectSteps += delta
-        val target = (selectAnchor + selectSteps).coerceAtLeast(0)
-        connection.setSelection(minOf(selectAnchor, target), maxOf(selectAnchor, target))
+    private fun clearToStart(connection: InputConnection) {
+        val before = connection.getExtractedText(ExtractedTextRequest(), 0)?.selectionStart ?: -1
+        if (before <= 0) return
+        connection.deleteSurroundingText(before, 0)
     }
 
     /**

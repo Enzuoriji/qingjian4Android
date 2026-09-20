@@ -40,14 +40,11 @@ const CURSOR_FAST_AT: f32 = 80.0;
 /// 一次拖动最多连着走这么多格——手指一直按着不放也不至于把光标甩到天边。
 const CURSOR_MAX_STEPS: isize = 400;
 
-/// 退格键上往左滑这么多点，多选一个字。
+/// ⌫ 上**往上滑**这么多点，就是「要清掉光标前面整段」——**松手时**兑现。
 ///
-/// 与移光标一样是**位置对应**（滑多远选多少），**不做加速连发**：选字是「挑一段」，
-/// 手指停住选择就该停住；光标那种「要去很远的地方」才需要越拖越快。
-pub(crate) const SELECT_STEP: f32 = 9.0;
-
-/// 一次最多选这么多字。
-const SELECT_MAX_STEPS: isize = 400;
+/// 复用 [`SWIPE`] 那个阈值：两处都是「手指挪够了，这是手势不是点击」。
+/// 12 点约合键高的三分之一，正常敲字的手指抖动到不了。
+const CLEAR_SWIPE: f32 = SWIPE;
 
 /// 抬起来时兑现的东西。
 ///
@@ -61,11 +58,10 @@ pub enum Fired {
     /// 光标往右（正数）或往左（负数）移几格。
     MoveCursor(isize),
 
-    /// 把选区往左扩几格（正数）。退格键上往左滑出来的。
+    /// 把光标**前面整段**清掉。⌫ 上往上滑、松手时兑现。
     ///
-    /// 报的是**增量**（这次比上次多几格），不是累计——壳那边按「手势起点的光标位置 +
-    /// 自己攒的累计格数」设选区。
-    SelectLeft(isize),
+    /// 清多少由壳去问应用（输入法不知道光标前面有什么），这边只说「清」。
+    ClearToStart,
 }
 
 /// 尺寸与外观。壳在 `Session::configure` 时给一份。
@@ -135,8 +131,8 @@ struct Press {
     /// 移光标的小数累加器：速度是小数（慢的时候几拍才够一格），攒够一格才走。
     cursor_carry: f32,
 
-    /// 退格上滑选字：这一手势**已经报出去**的累计格数，用来算下一次报多少增量。
-    select_steps: isize,
+    /// 已经往上滑够了：松手要把光标前面整段清掉。
+    clearing: bool,
 
     /// 这一下已经连发过了。
     ///
@@ -177,18 +173,6 @@ pub struct Keyboard {
     /// 按住键那一下要弹；同一个键按着不动就不必重画（画一次 ~0.8ms，每拍重画白费）。
     popup: Option<Rendered>,
     popup_for: Option<(KeyId, u32, u32)>,
-}
-
-/// 退格上往左滑了 `dx`（点，负数），该多选几个字。
-///
-/// **只认往左**：退格删的是光标**前面**的字，往右选再删那是「删」不是「退格」。
-/// 位置对应、不加速——手指停住选择就停住。
-fn select_steps(dx: f32, step: f32) -> isize {
-    let left = -dx;
-    if left <= 0.0 {
-        return 0;
-    }
-    ((left / step) as isize).min(SELECT_MAX_STEPS)
 }
 
 /// 空格上横滑时，位移 `dx`（点）下**一拍**该走几格（正数往右）。
@@ -350,7 +334,7 @@ impl Keyboard {
                     swipe: 0.0,
                     cursor_started: false,
                     cursor_carry: 0.0,
-                    select_steps: 0,
+                    clearing: false,
                     repeated: false,
                 });
                 self.refresh_pressed();
@@ -360,6 +344,7 @@ impl Keyboard {
                 let hit = self.hit(x, y);
                 let threshold = SWIPE * self.metrics.density;
                 let dead_zone = CURSOR_DEAD_ZONE * self.metrics.density;
+                let clear_swipe = CLEAR_SWIPE * self.metrics.density;
                 if let Some(press) = self
                     .presses
                     .iter_mut()
@@ -368,27 +353,17 @@ impl Keyboard {
                     // 离开按下那点够远就是「要打角标那个字符」——**四个方向都算**。
                     // 判定了就不再改回去：手指滑到键外面也还算数，这是手势不是点击。
                     let (dx, dy) = (x - press.at.0, y - press.at.1);
-                    if press.key == Some(KeyId::Backspace) {
-                        press.swipe = dx;
-                    }
                     if !press.hinted
                         && press.hint.is_some()
                         && dx * dx + dy * dy >= threshold * threshold
                     {
                         press.hinted = true;
                     }
-                    // 退格上往左滑 = 选字。**位置对应**：滑多远选多少，跟着手指走。
-                    // 判定排在 `sliding` 前面——这是手势，手指滑出键外照算。
-                    if press.key == Some(KeyId::Backspace) {
-                        let steps = select_steps(press.swipe, SELECT_STEP * self.metrics.density);
-                        if steps != press.select_steps {
-                            // 报**增量**：这次比上次多几格。壳那边按「锚点 + 累计」设选区，
-                            // 累计由壳自己攒——报累计会让它攒重
-                            let delta = steps - press.select_steps;
-                            press.select_steps = steps;
-                            self.refresh_pressed();
-                            return Some(Fired::SelectLeft(delta));
-                        }
+                    // ⌫ 上**往上滑** = 要清掉光标前面整段（**松手才清**，滑上去只是「预备」）。
+                    // 挑往上而不是往左：往左是「退格」本来的方向，容易跟普通退格混；
+                    // 往上是个独立的动作，不会误触。
+                    if press.key == Some(KeyId::Backspace) && dy <= -clear_swipe {
+                        press.clearing = true;
                     }
                     // 空格上横着滑 = 移光标。**拖动当中就走**，不是等松手才算——
                     // 松手才走的话手指得先盲拖一段、再抬起来看结果，没法一边看一边调。
@@ -436,10 +411,10 @@ impl Keyboard {
                 if ended.cursor_started {
                     return None;
                 }
-                // 退格上选过字了：松手把选中的删掉。走 `Backspace` 这条身份——
-                // 翻成动作、交给应用删，都跟平时按一下退格是同一套路
-                if ended.select_steps > 0 {
-                    return Some(Fired::Key(KeyId::Backspace));
+                // ⌫ 上往上滑过：松手把光标前面整段清掉。**不是**按一下退格——
+                // 那一下的语义是「清空前面」，跟删一个字不是一回事
+                if ended.clearing {
+                    return Some(Fired::ClearToStart);
                 }
                 // 抬起时只要还在那个键上、或者只挪了触摸阈值那么点距离，都算这一下按着了
                 match ended.key {
@@ -577,9 +552,9 @@ impl Keyboard {
     /// 而不是 [`Self::pressed`] 那个「最后按下的是哪个键」——后者是给键帽上色用的，
     /// 两根手指交替时它会被后按下的那根挤掉。
     ///
-    /// **手势一开就不算「按住」**：滑动取角标、空格移光标、退格选字，这三样都是从
+    /// **手势一开就不算「按住」**：滑动取角标、空格移光标、退格上滑清空，这三样都是从
     /// 「按住这个键」岔出去的路。不排掉的话，滑得慢一点（超过连发门槛 400ms）
-    /// 就会一边选字一边被连发删——实测踩到过。
+    /// 就会一边做手势一边被连发删——实测踩到过。
     pub fn held(&self, pointer: i32) -> Option<KeyId> {
         self.presses
             .iter()
@@ -588,7 +563,7 @@ impl Keyboard {
                     && !press.sliding
                     && !press.hinted
                     && !press.cursor_started
-                    && press.select_steps == 0
+                    && !press.clearing
             })
             .and_then(|press| press.key)
     }

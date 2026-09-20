@@ -162,12 +162,12 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 每格问一遍光标在哪儿要多花几十次跨进程往返。
 **不能用 `KEYCODE_DPAD_*`**：那是焦点导航用的，光标到头时会往上冒、把焦点挪到界面按钮上。
 
-**退格上滑选字**（2026-09-20，K7）：⌫ 上往左滑 = 选字（位置对应、不加速），松手删掉选中的。
-`Keyboard::touch` 多报一种 `Fired::SelectLeft(增量)`；`Session::select_left` 摊成
-`Command::SelectLeft`（**方向在名字里，壳那边是减不是加**——踩过，反了）。
-壳按「手势起点的光标位置（锚点）+ 自己攒的累计格数」`setSelection`，松手走退格那条身份
-（`KEYCODE_DEL` 在应用那边本来就删选区）。
+**⌫ 上滑清空**（2026-09-20，K7）：⌫ 上**往上滑**（滑上去只是预备）、**松手**把光标前面整段清掉。
+`Keyboard::touch` 多报一种 `Fired::ClearToStart` → `Command::ClearToStart`，
+壳用一条 `deleteSurroundingText(光标前面有几个字, 0)` 兑现。组句当中不理。
 **`Keyboard::held` 排掉了正在做手势的手指**——不然长按连发会和滑动手势抢同一个键。
+（第一版做的是「往左滑选字、松手删选中的」，用户说不好用，整块换掉了。）
+
 
 **键预览气泡**（2026-09-20）：画在 `renderer/keyboard/popup.rs`（`render_key_popup`），
 圆角块 + 阴影 + 放大的字/图标，**单独一张小位图**——它要弹到键盘上方，画在键盘那张里会被窗口裁掉。

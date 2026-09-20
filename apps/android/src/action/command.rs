@@ -22,8 +22,11 @@ pub enum Command {
     /// 这两个编号是给「往哪边挪」用的，具体挪法在壳那边。
     MoveRight,
 
-    /// 把选区往左扩一个字。退格键上往左滑出来的，松手会删掉选中的那段。
-    SelectLeft,
+    /// 把**光标前面整段**清掉。⌫ 上往上滑、松手时兑现。
+    ///
+    /// 清多少得问应用（输入法不知道光标前面有什么），壳用
+    /// `InputConnection.deleteSurroundingText(光标前面有几个字, 0)` 一次删完。
+    ClearToStart,
 }
 
 impl Command {
@@ -34,7 +37,7 @@ impl Command {
             Self::Enter => 2,
             Self::MoveLeft => 3,
             Self::MoveRight => 4,
-            Self::SelectLeft => 5,
+            Self::ClearToStart => 5,
         }
     }
 }
