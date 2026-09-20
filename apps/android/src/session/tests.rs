@@ -122,8 +122,8 @@ fn tapping_nihao_offers_it_in_the_bar() {
         drawn(&session)
     );
     assert!(
-        drawn(&session).len() <= 5,
-        "一页最多 5 个，实际 {:?}",
+        drawn(&session).len() <= 6,
+        "一页最多 6 个（一个音节时），实际 {:?}",
         drawn(&session)
     );
     assert_eq!(session.frame.highlighted, Some(0), "默认高亮第一个");
@@ -279,7 +279,8 @@ fn paging_shows_the_next_batch() {
     );
     let second_page: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
     assert_ne!(first_page, second_page, "第二页该是别的候选");
-    assert_eq!(second_page.len(), 5, "满页该有 5 个");
+    // 「shi」只有一个音节，页大小是 6（见 `the_page_size_follows_how_many_syllables_were_typed`）
+    assert_eq!(second_page.len(), 6, "满页该有 6 个");
 
     tap_bar(&mut session, BarHitId::PagePrev);
     assert_eq!(
@@ -290,6 +291,69 @@ fn paging_shows_the_next_batch() {
         first_page,
         "翻回来该是原来那一页"
     );
+}
+
+/// **一页画几个，按这次打了几个音节定**（2026-09-20 改，原先写死 5）。
+///
+/// 打的音越多，候选越长、一格越占地方：一个音多半是单字，两三个音是常用词，
+/// 四个音往上基本是成语或整句。所以音少时反而多给一两个。
+#[test]
+fn the_page_size_follows_how_many_syllables_were_typed() {
+    // 一个音 → 6 个（「shi」候选一大把，够满页）
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    assert_eq!(
+        drawn(&session).len(),
+        6,
+        "一个音节时一页该画 6 个，实际 {:?}",
+        drawn(&session)
+    );
+
+    // 两个音 → 5 个
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    assert_eq!(
+        drawn(&session).len(),
+        5,
+        "两个音节时一页该画 5 个，实际 {:?}",
+        drawn(&session)
+    );
+
+    // 四个音 → 4 个
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "yixinyiyi");
+    assert_eq!(
+        drawn(&session).len(),
+        4,
+        "四个音节时一页该画 4 个，实际 {:?}",
+        drawn(&session)
+    );
+}
+
+/// 页大小跟着音数走，但**音数在整段组句里是不变的**——所以「第几页从第几条起」仍然是一个乘法，
+/// 翻页与页码都不必改。这条守着那个前提：翻一页正好跳过一页那么多条，两页不重不漏。
+#[test]
+fn paging_lands_on_the_next_batch_when_the_page_size_is_not_five() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    let first: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
+    assert_eq!(first.len(), 6, "「shi」是一个音，一页 6 个");
+
+    tap_bar(&mut session, BarHitId::PageNext);
+    let second: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
+
+    assert_eq!(second.len(), 6, "第二页也该是满的");
+    for text in &first {
+        assert!(!second.contains(text), "第二页不该和第一页重：「{text}」");
+    }
 }
 
 #[test]

@@ -21,11 +21,25 @@ use crate::keyboard::{Fired, Keyboard};
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 
-/// 候选条一页画几个。
+/// 候选条一页画几个——**按这次打了几个音节定**（2026-09-20 改，原先写死 5）。
 ///
-/// 桌面一页 9 个，手机上放不下：360pt 宽的屏幕里一页 6 个时，三字词会被截成「你…」，
-/// 5 个才留得下格与格之间的缝。触摸目标也因此一样大，手指点的时候不用瞄。
-const PAGE_SIZE: usize = 5;
+/// 打的音越多，候选越长、一格越占地方：一个音多半是单字，两三个音是常用词，
+/// 四个音往上基本是成语或整句。所以页大小跟着音数**往回收**，音少时反而多给一两个。
+/// （桌面一页 9 个；手机上还要留得下格与格之间的缝，一个音最多也就 6 个。）
+///
+/// **这么做还有个便宜**：音数在整段组句里是不变的，页大小因此是个定值——
+/// 「第几页从第几条起」仍然是一个乘法（`page * 页大小`），翻页与页码都不用改。
+/// 换成「按宽度能塞几个塞几个」就没这个便宜了：那得把**全部候选**都量一遍才知道页数，
+/// 每次按键量上百条，几十毫秒就出去了。
+///
+/// 数大数小是手感常数，只能靠真机调。
+fn page_size_for(syllables: usize) -> usize {
+    match syllables {
+        0 | 1 => 6,
+        2 | 3 => 5,
+        _ => 4,
+    }
+}
 
 /// 在候选条上横向划这么远（点）算翻页。
 const SWIPE_MIN: f32 = 40.0;
@@ -588,7 +602,7 @@ impl Session {
         match act {
             Act::Push(c) => self.type_letter(c),
             Act::CommitCandidate(index) => {
-                let absolute = self.page * PAGE_SIZE + index;
+                let absolute = self.page * self.page_size() + index;
                 if let Some(candidate) = self.candidates.get(absolute).cloned() {
                     let text = self.engine.commit(&candidate);
                     self.commit_text(text);
@@ -596,7 +610,7 @@ impl Session {
             }
             Act::CommitHighlighted => {
                 // 高亮永远是本页第一个：还没有移动高亮的手势（点了就直接上屏）
-                let first = self.page * PAGE_SIZE;
+                let first = self.page * self.page_size();
                 match self.candidates.get(first).cloned() {
                     Some(candidate) => {
                         let text = self.engine.commit(&candidate);
@@ -662,7 +676,7 @@ impl Session {
     /// 一起算），那是给实体键盘的，触摸键盘上不是这个预期，这里不跟。
     fn punctuate(&mut self, c: char) {
         if !self.engine.composition().is_empty()
-            && let Some(candidate) = self.candidates.get(self.page * PAGE_SIZE).cloned()
+            && let Some(candidate) = self.candidates.get(self.page * self.page_size()).cloned()
         {
             let text = self.engine.commit(&candidate);
             self.pending_commit
@@ -754,14 +768,29 @@ impl Session {
         self.bar_dirty = true;
     }
 
+    /// 这一页画几个候选——见 [`page_size_for`]。
+    fn page_size(&self) -> usize {
+        page_size_for(self.syllables())
+    }
+
+    /// 这次打了几个音节：拼音行按 `'` 分出来的段数。
+    ///
+    /// 引擎在音节之间插 `'`（`ni'hao` 是两段），所以数段数就是数音节。
+    /// 没在组句时是 0——那会儿候选条整个收着，这个数用不上。
+    fn syllables(&self) -> usize {
+        self.preedit
+            .as_ref()
+            .map_or(0, |preedit| preedit.text().split('\'').count())
+    }
+
     /// 本页画哪几个候选、页码是几。这一轮不画译文，所以不调 `engine.annotate()`。
     fn build_frame(&self) -> Frame {
-        let start = self.page * PAGE_SIZE;
+        let start = self.page * self.page_size();
         let rows: Vec<Row> = self
             .candidates
             .iter()
             .skip(start)
-            .take(PAGE_SIZE)
+            .take(self.page_size())
             .enumerate()
             .map(|(i, candidate)| row(i, candidate))
             .collect();
@@ -780,7 +809,7 @@ impl Session {
 
     /// 一共有几页，至少 1。
     fn page_count(&self) -> usize {
-        self.candidates.len().div_ceil(PAGE_SIZE).max(1)
+        self.candidates.len().div_ceil(self.page_size()).max(1)
     }
 
     /// 翻页，夹在首末页之间。
