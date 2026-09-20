@@ -31,6 +31,14 @@ class QingjianImeService : InputMethodService() {
     /** 输入视图。`onFinishInput` 里也要用它重画，所以记一份。 */
     private var inputView: QingjianSurfaceView? = null
 
+    /**
+     * 应用那边此刻有没有**我们镜像过去的组字区**。
+     *
+     * 拼音没了的时候要靠它决定收尾怎么收：有就得**撤掉**（见 [mirrorPreedit]），
+     * 没有才用 `finishComposingText()`。上屏时 `commitText` 会把组字区一起换掉，也跟着清掉。
+     */
+    private var mirrored = false
+
     override fun onCreate() {
         super.onCreate()
 
@@ -210,7 +218,11 @@ class QingjianImeService : InputMethodService() {
         }
         if (cursor != 0) moveCursor(connection, cursor)
         if (clear) clearToStart(connection)
-        QingjianNative.takeCommit(handle)?.let { connection.commitText(it, 1) }
+        QingjianNative.takeCommit(handle)?.let {
+            connection.commitText(it, 1)
+            // `commitText` 会把组字区一起换掉，应用那边已经没有我们镜像过去的拼音了
+            mirrored = false
+        }
     }
 
     /**
@@ -247,15 +259,29 @@ class QingjianImeService : InputMethodService() {
         connection.setSelection(minOf(start, end), maxOf(start, end))
     }
 
-    /** 把拼音镜像到输入框；空串表示没在组句，结束组字。 */
+    /**
+     * 把拼音镜像到输入框；空串表示这一串没了，**应用那边镜像过去的也得撤掉**。
+     *
+     * **`finishComposingText()` 不能当「清空」用**：它的语义是「组字到此为止，**文字留在原处**」
+     * ——只去掉那层下划线，一个字都不删。拿它收尾，拼音就被**烘焙成了正式文本**：
+     * 输入法这边缓冲区已经空了、应用那边却多出一串删不掉的。用户看到的正是这个
+     * （「ni 打错了要按好几下退格才干净」）：退格删掉的是输入法的拼音，那一串留在原地。
+     *
+     * 撤掉要用 `setComposingText("", 0)`——把组字区**替换成空**，也就是删掉。
+     */
     private fun mirrorPreedit() {
         val connection = currentInputConnection ?: return
         val preedit = QingjianNative.takePreedit(handle)
-        if (preedit.isEmpty()) {
-            connection.finishComposingText()
-        } else {
+        if (preedit.isNotEmpty()) {
             connection.setComposingText(preedit, 1)
+            mirrored = true
+            return
         }
+        if (mirrored) {
+            connection.setComposingText("", 0)
+            mirrored = false
+        }
+        connection.finishComposingText()
     }
 
     /** 换应用时把没上屏的拼音丢掉，免得在 A 应用敲的拼音跑到 B 应用里。 */
