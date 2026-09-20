@@ -84,15 +84,14 @@ impl KeyboardLayout {
                     keys: vec![
                         // 字母页**直接进得了数字页与符号页**，不必先绕一层
                         Key::new(KeyId::Panel(Panel::Symbols), 1.0),
-                        Key::new(KeyId::Mode, 1.5),
                         Key::new(KeyId::Panel(Panel::Digits), 1.0),
-                        // 逗号在空格**左边**、句号在右边：这一行因此是 10 个单位宽，
-                        // 与第 1、3 行齐平。原先只有 9 个（逗号在空格右边、没有句号），
-                        // 整排比上下两行各缩进去半个键，看着是歪的
+                        // 逗号在空格**左边**、句号在右边，中 / 英再往右——**空格两边的键
+                        // 各 3 个单位**，空格正好落在这一排的正中（见下面那条注释）
                         Key::new(KeyId::Comma, 1.0),
-                        Key::new(KeyId::Space, 3.0),
+                        Key::new(KeyId::Space, 4.0),
                         Key::new(KeyId::Period, 1.0),
-                        Key::new(KeyId::Enter, 1.5),
+                        Key::new(KeyId::Mode, 1.0),
+                        Key::new(KeyId::Enter, 1.0),
                     ],
                 },
             ],
@@ -239,7 +238,7 @@ mod tests {
         );
     }
 
-    /// 最下一排的键序：**逗号在空格左边，句号在右边**。
+    /// 最下一排的键序：**逗号在空格左边、句号在右边，中 / 英在句号与回车之间**。
     #[test]
     fn the_letters_bottom_row_puts_the_comma_before_the_space() {
         let layout = KeyboardLayout::letters();
@@ -249,14 +248,41 @@ mod tests {
             ids,
             vec![
                 KeyId::Panel(Panel::Symbols),
-                KeyId::Mode,
                 KeyId::Panel(Panel::Digits),
                 KeyId::Comma,
                 KeyId::Space,
                 KeyId::Period,
+                KeyId::Mode,
                 KeyId::Enter,
             ],
-            "符 中/英 123 ， 空格 。 回车"
+            "符 123 ， 空格 。 中/英 回车"
+        );
+    }
+
+    /// **空格正落在这排的正中。**
+    ///
+    /// 这条踩过两次：中 / 英原在左边第二位（1.5 个单位），把空格往右顶了半格；
+    /// 后来在空格右边补句号时，逗号落在左边、句号落在右边，等于只往左加了一格，偏得更狠
+    /// （左边 4.5、右边 2.5，中心偏右整整 1 格）。现在两边各 3 个单位，偏 0。
+    ///
+    /// 判据是**空格中心的偏移**（左右差的一半），不是左右差本身——差 2 个单位才等于偏 1 格。
+    #[test]
+    fn the_space_bar_is_centred_in_its_row() {
+        let layout = KeyboardLayout::letters();
+        let row = &layout.rows()[3];
+        let space = row
+            .keys
+            .iter()
+            .position(|key| key.id == KeyId::Space)
+            .expect("最下一排该有空格");
+
+        let left: f32 = row.keys[..space].iter().map(|key| key.weight).sum();
+        let right: f32 = row.keys[space + 1..].iter().map(|key| key.weight).sum();
+        let offset = (left - right) / 2.0;
+
+        assert_eq!(
+            offset, 0.0,
+            "空格左边 {left} 个单位、右边 {right}，中心偏了 {offset} 格"
         );
     }
 
