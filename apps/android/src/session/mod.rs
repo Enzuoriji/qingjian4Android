@@ -41,9 +41,6 @@ fn page_size_for(syllables: usize) -> usize {
     }
 }
 
-/// 在候选条上横向划这么远（点）算翻页。
-const SWIPE_MIN: f32 = 40.0;
-
 /// 随包资源目录里的 emoji 字体名（`assets/emoji/README.md` 写了为什么要带它）。
 const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
 
@@ -116,6 +113,12 @@ pub struct Session {
     /// 当前页，从 0 起。
     page: usize,
 
+    /// 高亮在**本页第几个**（页内下标，从 0 起）。
+    ///
+    /// 手指在候选条上横滑时跟着走（见 [`Self::slide_highlight`]）；不动它时是本页第一个，
+    /// 空格上屏的就是它。组句一变（[`Self::recompose`]）回到 0。
+    highlight: usize,
+
     /// 当前该画的候选条那一帧。缓冲变化或翻页时由 [`Self::refresh`] 重建。
     frame: Frame,
 
@@ -158,6 +161,12 @@ struct BarPress {
     /// **不能直接把记录删掉**——删了抬起时就不知道刚才从哪儿按的、划了多远，
     /// 翻页手势也就跟着没了。留个标记，抬起时按「不是点击」处理，还够判是不是在划。
     sliding: bool,
+
+    /// 手指**划出了候选条**（往上顶出屏幕、往下溜进键盘都算）——这一下作废。
+    ///
+    /// 「横滑到某格、松手就选它」这套手势需要一条退路：不然只想翻看不想选的人一松手就上屏了。
+    /// 拖出去就是那条退路，与键盘上「滑出键外作废」同一个规矩。
+    outside: bool,
 }
 
 impl Session {
@@ -207,6 +216,7 @@ impl Session {
             preedit: None,
             candidates: Vec::new(),
             page: 0,
+            highlight: 0,
             frame: Frame::default(),
             bar: None,
             bar_dirty: true,
@@ -507,11 +517,17 @@ impl Session {
         self.mask()
     }
 
-    /// 候选条那半边：按下记一笔、滑出去算取消、抬起时判是点了候选还是划着翻页。
+    /// 候选条那半边。**三条路，按手指怎么动分**：
     ///
-    /// 判法与键盘不同：候选格横向拖是翻页手势，所以只按「挪没挪出触摸阈值」判，
+    /// - **点击**：按下再抬起、没怎么挪 → 上屏点的那个（与键盘一样的按钮语义）
+    /// - **横滑选词**：按住横着滑，**高亮跟着手指走**（[`Self::slide_highlight`]），
+    ///   松手把高亮那个上屏。这是「滑动选词」——不用抬手再点，也不会整页跳
+    /// - **拖出去**：手指划出候选条（往上顶出屏幕、往下溜进键盘）→ **这一下作废**。
+    ///   留这条路是因为前一条会「松手就上屏」：只想翻看不想选的人得有地方退。
+    ///   想只看不选还有一条正路——右端的 `‹` `›` 按钮，按它不选词
+    ///
+    /// 判法与键盘不同：候选格横向拖是手势，所以只按「挪没挪出触摸阈值」判，
     /// 不按「还在不在原来那一格上」判——否则拖一下会被当成点了那个候选。
-    /// 从候选条起手横向划得够远则翻页（往左划是下一页，与翻书一个方向）。
     fn touch_bar(&mut self, action: MotionAction, pointer: i32, x: f32, y: f32) {
         match action {
             MotionAction::Down | MotionAction::PointerDown => {
@@ -526,27 +542,46 @@ impl Session {
                     hit,
                     at: (x, y),
                     sliding: false,
+                    outside: false,
                 });
             }
             MotionAction::Move => {
+                let outside = y < 0.0 || y >= self.bar_pixels();
                 let slop = self.touch_slop();
-                if let Some(held) = self.pressed.iter_mut().find(|held| held.pointer == pointer)
-                    && !within_slop(held.at, slop, x, y)
-                {
+                let Some(held) = self.pressed.iter_mut().find(|held| held.pointer == pointer)
+                else {
+                    return;
+                };
+                if !within_slop(held.at, slop, x, y) {
                     held.sliding = true;
                 }
+                held.outside |= outside;
+                if held.outside {
+                    // 划出去了，这一下已经作废——别再跟着改高亮
+                    return;
+                }
+                self.slide_highlight(x);
             }
             MotionAction::Up | MotionAction::PointerUp => {
                 let index = self.pressed.iter().position(|held| held.pointer == pointer);
                 let Some(ended) = index.map(|index| self.pressed.remove(index)) else {
                     return;
                 };
+                if ended.outside {
+                    // 拖出候选条 = 这一下不要了（见 `BarPress::outside`）
+                    return;
+                }
+                if ended.sliding {
+                    // **横滑选词**：手指停在哪个候选上就上屏哪个。
+                    // 高亮在拖动当中已经跟着手指走过了，这里只是兑现它。
+                    self.apply(Act::CommitHighlighted);
+                    return;
+                }
+                // 没怎么挪 = 点击：抬起时还在按下那个目标上（或只挪了触摸阈值那么点）才算数
                 let hit = self.bar.as_ref().and_then(|bar| bar.hit(x, y));
                 let fired = match ended.hit {
                     Some(id)
-                        if !ended.sliding
-                            && (hit == Some(id)
-                                || within_slop(ended.at, self.touch_slop(), x, y)) =>
+                        if hit == Some(id) || within_slop(ended.at, self.touch_slop(), x, y) =>
                     {
                         Some(id)
                     }
@@ -554,9 +589,6 @@ impl Session {
                 };
                 if let Some(id) = fired {
                     self.apply(action::on_bar(id));
-                } else if (x - ended.at.0).abs() > self.swipe_min() {
-                    // 往左划是下一页，与翻书一个方向
-                    self.apply(Act::Page(if x < ended.at.0 { 1 } else { -1 }));
                 }
             }
             MotionAction::Cancel => self.pressed.clear(),
@@ -586,11 +618,6 @@ impl Session {
         self.bar_height() * self.density
     }
 
-    /// 划多远算翻页（像素）。
-    fn swipe_min(&self) -> f32 {
-        SWIPE_MIN * self.density
-    }
-
     /// 手指离按下那点这么近（像素）就算没挪窝。**要按密度换算**：安卓自己的触摸阈值是 8 dp，
     /// 直接拿 8 像素当阈值的话，密度 2.75 的机器上只有 2.9 个点，快敲必然被误判成滑动。
     fn touch_slop(&self) -> f32 {
@@ -609,9 +636,8 @@ impl Session {
                 }
             }
             Act::CommitHighlighted => {
-                // 高亮永远是本页第一个：还没有移动高亮的手势（点了就直接上屏）
-                let first = self.page * self.page_size();
-                match self.candidates.get(first).cloned() {
+                // 高亮那个：平时是本页第一个，在候选条上横滑过之后是手指停下的那个
+                match self.highlighted_candidate() {
                     Some(candidate) => {
                         let text = self.engine.commit(&candidate);
                         self.commit_text(text);
@@ -676,7 +702,7 @@ impl Session {
     /// 一起算），那是给实体键盘的，触摸键盘上不是这个预期，这里不跟。
     fn punctuate(&mut self, c: char) {
         if !self.engine.composition().is_empty()
-            && let Some(candidate) = self.candidates.get(self.page * self.page_size()).cloned()
+            && let Some(candidate) = self.highlighted_candidate()
         {
             let text = self.engine.commit(&candidate);
             self.pending_commit
@@ -733,9 +759,10 @@ impl Session {
         self.recompose();
     }
 
-    /// 缓冲变了：重查候选，回到第一页。
+    /// 缓冲变了：重查候选，回到第一页、高亮也回到第一个。
     fn recompose(&mut self) {
         self.page = 0;
+        self.highlight = 0;
         self.candidates.clear();
         self.preedit = None;
         if !self.engine.composition().is_empty() {
@@ -797,8 +824,9 @@ impl Session {
         let pages = self.page_count();
         Frame {
             preedit: self.preedit.clone(),
-            // 高亮永远是本页第一个：还没有移动高亮的手势
-            highlighted: (!rows.is_empty()).then_some(0),
+            // 高亮跟着手指走（`slide_highlight`），不动它时是本页第一个。
+            // 夹一下：候选变少时旧的高亮下标可能落到这一页外面去
+            highlighted: (!rows.is_empty()).then(|| self.highlight.min(rows.len() - 1)),
             // 只有一页就不报页码——与桌面一致
             footer: (pages > 1).then(|| format!("{}/{}", self.page + 1, pages)),
             rows,
@@ -807,12 +835,35 @@ impl Session {
         }
     }
 
+    /// 当前这一页画几行候选。**不重建帧也算得出来**——翻页时要靠它先把高亮定下来。
+    fn page_rows(&self) -> usize {
+        self.candidates
+            .len()
+            .saturating_sub(self.page * self.page_size())
+            .min(self.page_size())
+    }
+
+    /// 高亮那个候选（**跨页的绝对下标**取回来的本体）。一个候选都没有时是 `None`。
+    ///
+    /// 空格上屏、组句中打标点先上屏，走的都是它——所以「高亮在哪」只有这一个说法。
+    fn highlighted_candidate(&self) -> Option<Candidate> {
+        let rows = self.page_rows();
+        if rows == 0 {
+            return None;
+        }
+        let index = self.page * self.page_size() + self.highlight.min(rows - 1);
+        self.candidates.get(index).cloned()
+    }
+
     /// 一共有几页，至少 1。
     fn page_count(&self) -> usize {
         self.candidates.len().div_ceil(self.page_size()).max(1)
     }
 
     /// 翻页，夹在首末页之间。
+    ///
+    /// **高亮落在新页的对应端**：往后翻是第一格、往前翻是最后一格。
+    /// 一路横滑过去要能接着走——滑到页边界就卡住的话，「滑动选词」就断了。
     fn turn_page(&mut self, step: isize) {
         let pages = self.page_count();
         if pages <= 1 {
@@ -822,7 +873,51 @@ impl Session {
         if target != self.page {
             self.page = target;
             self.engine.note_page_turn();
+            self.highlight = if step < 0 {
+                self.page_rows().saturating_sub(1)
+            } else {
+                0
+            };
             self.refresh();
+        }
+    }
+
+    /// 手指横滑到 `x` 处，**高亮跟过去**——这就是「滑动选词」。
+    ///
+    /// 落在哪一格上就高亮哪一格；滑过这一页的头尾就翻页接着走（见 [`Self::turn_page`]）。
+    /// `x` 只跟横向位置有关：手指出了候选条那一下已经在 [`Self::touch_bar`] 里作废掉了。
+    fn slide_highlight(&mut self, x: f32) {
+        let (left, right, inside) = {
+            let Some(bar) = self.bar.as_ref() else {
+                return;
+            };
+            // 只认候选格，右端的 × 与 ‹ › 不参与滑动选词
+            let cells: Vec<&qingjian_render::BarHit> = bar
+                .hits
+                .iter()
+                .filter(|hit| matches!(hit.id, BarHitId::Candidate(_)))
+                .collect();
+            let Some(first) = cells.first() else {
+                return;
+            };
+            let last = cells.last().expect("刚看过非空");
+            let inside = cells
+                .iter()
+                .position(|cell| x >= cell.x && x < cell.x + cell.width);
+            (first.x, last.x + last.width, inside)
+        };
+
+        if let Some(index) = inside {
+            if index != self.highlight {
+                self.highlight = index;
+                self.refresh();
+            }
+            return;
+        }
+        if x < left {
+            self.turn_page(-1);
+        } else if x > right {
+            self.turn_page(1);
         }
     }
 }

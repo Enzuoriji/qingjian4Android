@@ -411,42 +411,125 @@ fn the_first_page_cannot_be_passed() {
     );
 }
 
+/// 候选条上某一块的中心（按下 / 抬起用）。与 `bar_centre` 同源，只是这里要按需取。
+fn bar_y(session: &Session) -> f32 {
+    session.bar_height() * DENSITY / 2.0
+}
+
+/// **横滑选词**：按住横着滑，高亮跟着手指走，松手上屏手指停下的那个。
+///
+/// 这是 2026-09-21 换掉「横滑翻页」之后的手势：不用抬手再点，也不会整页跳。
 #[test]
-fn swiping_left_on_the_bar_pages_forward() {
+fn sliding_across_the_bar_moves_the_highlight_and_release_selects_it() {
     let Some(mut session) = ready() else {
         return;
     };
     type_text(&mut session, "shi");
-    let (x, y) = (WIDTH * DENSITY / 2.0, session.bar_height() * DENSITY / 2.0);
+    let second = drawn(&session)[1].to_owned();
+    let y = bar_y(&session);
 
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x - 120.0, y);
-    session.touch(MotionAction::Up, POINTER, x - 120.0, y);
+    // 从第一个候选一直滑到第二个候选的中间（顺序：第一格 → 第二格 → 第二格）
+    let first = bar_centre(&session, BarHitId::Candidate(0));
+    let target = bar_centre(&session, BarHitId::Candidate(1));
+    session.touch(MotionAction::Down, POINTER, first.0, y);
+    session.touch(MotionAction::Move, POINTER, target.0, y);
 
-    assert!(
-        session.frame.footer.as_deref().unwrap().starts_with("2/"),
-        "往左划该翻到下一页，实际 {:?}",
-        session.frame.footer
+    assert_eq!(
+        session.frame.highlighted,
+        Some(1),
+        "滑到第二格，高亮该跟过去，实际 {:?}",
+        session.frame.highlighted
+    );
+
+    session.touch(MotionAction::Up, POINTER, target.0, y);
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some(second.as_str()),
+        "松手该上屏高亮那个（第二个候选「{second}」）"
     );
 }
 
+/// **拖出候选条 = 取消**。「松手就上屏」得留这条退路，不然只想翻看的人一松手就选了。
 #[test]
-fn a_small_drag_on_the_bar_does_not_page() {
+fn dragging_off_the_bar_cancels() {
     let Some(mut session) = ready() else {
         return;
     };
     type_text(&mut session, "shi");
-    let (x, y) = (WIDTH * DENSITY / 2.0, session.bar_height() * DENSITY / 2.0);
-    let first_page: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
-    // 拖的距离要挑在「点击容差」与「翻页阈值」之间：这里 60 像素，
-    // 大于触摸阈值（8 点 × 2.75 ≈ 22 像素）算滑动，远小于翻页阈值（40 点 ≈ 110 像素）
-    let drag = 60.0;
+    let (x, _) = bar_centre(&session, BarHitId::Candidate(0));
+    let y = bar_y(&session);
 
     session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x - drag, y);
-    session.touch(MotionAction::Up, POINTER, x - drag, y);
+    // 往下溜进键盘那半边：出了候选条
+    session.touch(
+        MotionAction::Move,
+        POINTER,
+        x,
+        session.bar_height() * DENSITY + 40.0,
+    );
+    session.touch(
+        MotionAction::Up,
+        POINTER,
+        x,
+        session.bar_height() * DENSITY + 40.0,
+    );
 
-    assert_eq!(session.take_commit(), None, "拖了就不该当成点了候选");
+    assert_eq!(session.take_commit(), None, "拖出候选条就不该上屏任何词");
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("shi"),
+        "拼音该原样留着，等着接着打或重选"
+    );
+}
+
+/// 一路往右滑过最后一格，**该接着翻页**，不能卡在页边界上。
+#[test]
+fn sliding_past_the_last_cell_turns_the_page() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    let rows = drawn(&session).len();
+    let last = bar_centre(&session, BarHitId::Candidate(rows - 1));
+    let y = bar_y(&session);
+
+    session.touch(MotionAction::Down, POINTER, last.0, y);
+    // 滑到界面最右边之外——最后一格之外没有候选了，该翻到下一页
+    session.touch(MotionAction::Move, POINTER, WIDTH * DENSITY + 50.0, y);
+
+    assert!(
+        session
+            .frame
+            .footer
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("2/"),
+        "滑过最后一格该翻到下一页，实际 {:?}",
+        session.frame.footer
+    );
+    assert_eq!(
+        session.frame.highlighted,
+        Some(0),
+        "翻到下一页，高亮该落在新页第一个"
+    );
+}
+
+/// 一路往左滑过第一格，**该翻回上一页**，且高亮落在那一页的最后一格。
+#[test]
+fn sliding_past_the_first_cell_turns_back_a_page() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    let first = bar_centre(&session, BarHitId::Candidate(0));
+    let y = bar_y(&session);
+
+    // 先翻到第二页，再从第一格往左滑出去
+    tap_bar(&mut session, BarHitId::PageNext);
+    session.touch(MotionAction::Down, POINTER, first.0, y);
+    session.touch(MotionAction::Move, POINTER, -50.0, y);
+
     assert!(
         session
             .frame
@@ -454,16 +537,13 @@ fn a_small_drag_on_the_bar_does_not_page() {
             .as_deref()
             .unwrap_or_default()
             .starts_with("1/"),
-        "也没划够远，该还停在第一页，实际 {:?}",
+        "滑过第一格该翻回上一页，实际 {:?}",
         session.frame.footer
     );
     assert_eq!(
-        drawn(&session)
-            .iter()
-            .map(|s| (*s).to_owned())
-            .collect::<Vec<_>>(),
-        first_page,
-        "候选不该变"
+        session.frame.highlighted,
+        Some(drawn(&session).len() - 1),
+        "翻回上一页，高亮该落在那一页的最后一格"
     );
 }
 
