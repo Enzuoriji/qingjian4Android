@@ -103,6 +103,11 @@ pub struct Keyboard {
     /// 正被按住的键，画成按下态。
     pressed: Option<KeyId>,
 
+    /// 那一根手指**已经下滑取角标了**：这一下最终打出的是角标那个字符，不是键帽上印的字。
+    ///
+    /// 气泡照它画——不然按住 `y` 往下滑，气泡写着 `y`、打出来却是 `6`，气泡在骗人。
+    pressed_hint: Option<char>,
+
     /// 画好的键预览气泡，以及它是**给哪个键、多大尺寸**画的。
     ///
     /// 按住键那一下要弹；同一个键按着不动就不必重画（画一次 ~0.8ms，每拍重画白费）。
@@ -120,6 +125,7 @@ impl Keyboard {
             dirty: true,
             presses: Vec::new(),
             pressed: None,
+            pressed_hint: None,
             popup: None,
             popup_for: None,
         }
@@ -334,6 +340,12 @@ impl Keyboard {
             self.forget_popup();
             return Vec::new();
         }
+        // **这一下会打出什么就画什么**：下滑取角标时，兑现的是角标那个字符。
+        // 画成 `Literal` 与真正兑现时走的是同一个身份，气泡上的字与打出来的字必然一致
+        let key = match self.pressed_hint {
+            Some(hint) => Key::new(KeyId::Literal(hint), key.units().max(1.0)),
+            None => key,
+        };
 
         let mark = (
             key.id,
@@ -432,6 +444,12 @@ impl Keyboard {
         }
     }
 
+    /// 气泡此刻是**按哪个身份**画的——测试用，验证下滑之后画的是角标而不是字母。
+    #[cfg(test)]
+    pub(crate) fn popup_id(&self) -> Option<KeyId> {
+        self.popup_for.map(|(id, _, _)| id)
+    }
+
     /// 命中哪个键。落在键之间的缝上、或者还没画过时是 `None`。
     fn hit(&self, x: f32, y: f32) -> Option<KeyId> {
         self.rendered
@@ -457,16 +475,19 @@ impl Keyboard {
     /// 多根手指同时按着时取**最后按下**的那根——键帽只画得出一个按下态，
     /// 而这已经够用：反馈要的是「我这一下碰到了」，不是同时高亮好几格。
     fn refresh_pressed(&mut self) {
-        let key = self
+        let held = self
             .presses
             .iter()
             .rev()
-            .find_map(|press| match (press.sliding, press.key) {
-                (false, Some(key)) => Some(key),
-                _ => None,
-            });
-        if self.pressed != key {
+            .find(|press| !press.sliding && press.key.is_some());
+        let key = held.and_then(|press| press.key);
+        // 下滑取角标的那一根：这一下兑现的是角标，不是键帽上的字
+        let hint = held
+            .filter(|press| press.hinted)
+            .and_then(|press| press.hint);
+        if self.pressed != key || self.pressed_hint != hint {
             self.pressed = key;
+            self.pressed_hint = hint;
             self.dirty = true;
         }
     }

@@ -921,6 +921,44 @@ fn the_popup_stays_on_screen_at_the_edges() {
     }
 }
 
+/// **气泡上写的必须是这一下真正会打出去的东西。**
+///
+/// `y` 的角标是 `6`：按住 `y` 往下滑之后，兑现的是 `6` 而不是 `y`，
+/// 气泡要是还写着 `y`，那气泡就在骗人。
+#[test]
+fn the_popup_shows_what_will_actually_be_typed() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Letter('y'));
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.popup_surface(); // 画一次才有「按哪个身份画的」可看
+    assert_eq!(
+        session.keyboard.as_ref().unwrap().popup_id(),
+        Some(KeyId::Letter('Y')),
+        "刚按住时气泡该显示这个字母"
+    );
+
+    // 往下滑够远 → 这一下改判成角标
+    session.touch(MotionAction::Move, POINTER, x, y + swipe_distance());
+    session.popup_surface();
+
+    assert_eq!(
+        session.keyboard.as_ref().unwrap().popup_id(),
+        Some(KeyId::Literal('6')),
+        "下滑之后气泡该显示角标 6，不是字母 y"
+    );
+
+    // 抬起真的打出 6，跟气泡上写的一致
+    session.touch(MotionAction::Up, POINTER, x, y + swipe_distance());
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("6"),
+        "打出来的该是 6"
+    );
+}
+
 /// 空格没有字可显示，按住也不弹——弹一个空框子只是晃眼。
 #[test]
 fn the_space_key_has_no_popup() {
