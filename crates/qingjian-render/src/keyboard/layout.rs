@@ -79,10 +79,12 @@ impl KeyboardLayout {
                 qwerty,
                 home,
                 KeyRow {
+                    // 两头的 ⇧ 与 ⌫ 也是**撑满**的：这一排 9 个键（8 条缝），比第 1 行少一条缝，
+                    // 全按单位宽排下来两头会各缩进去 7 像素。剩下的给这两个键平分，才跟第 1 行齐平
                     keys: [
-                        vec![Key::new(KeyId::Shift, 1.5)],
+                        vec![Key::fill(KeyId::Shift)],
                         bottom.keys,
-                        vec![Key::new(KeyId::Backspace, 1.5)],
+                        vec![Key::fill(KeyId::Backspace)],
                     ]
                     .concat(),
                 },
@@ -236,32 +238,32 @@ mod tests {
         assert_eq!(layout.rows().len(), 4);
     }
 
-    /// 最下一排靠**一个撑满的键**补齐宽度，别的排不该有。
+    /// 撑满的键只出现在**键数比第 1 行少**的那两排，位置也固定。
     ///
-    /// 「整排跟上面一样宽」这件事本身在这层看不出来（撑满那个键的宽度要等画的时候才知道），
-    /// 由 `renderer::keyboard` 的 `the_bottom_row_lines_up_with_the_first_row` 按像素盯。
-    /// 这条盯的是结构：**只能有一个撑满的键**，多了就分不清谁拿多少。
+    /// 「整排跟上面一样宽」这件事本身在这层看不出来（撑满键的宽度要等画的时候才知道），
+    /// 由 `renderer::keyboard` 按像素盯。这条盯的是结构：哪一排、几个。
     #[test]
-    fn only_the_bottom_row_has_a_filling_key() {
+    fn only_the_short_rows_have_filling_keys() {
         let layout = KeyboardLayout::letters();
-        let filling: Vec<usize> = layout
+        let filling: Vec<(usize, usize)> = layout
             .rows()
             .iter()
             .enumerate()
             .filter(|(_, row)| row.has_fill())
-            .map(|(index, _)| index)
+            .map(|(index, row)| {
+                let count = row
+                    .keys
+                    .iter()
+                    .filter(|key| key.width == KeyWidth::Fill)
+                    .count();
+                (index, count)
+            })
             .collect();
 
-        assert_eq!(filling, vec![3], "该只有最下一排有撑满的键");
-
-        let row = &layout.rows()[3];
         assert_eq!(
-            row.keys
-                .iter()
-                .filter(|key| key.width == KeyWidth::Fill)
-                .count(),
-            1,
-            "一排里只能有一个撑满的键"
+            filling,
+            vec![(2, 2), (3, 1)],
+            "该只有第 3 行（⇧ 与 ⌫ 两个）与最下一排（空格一个）有撑满的键"
         );
     }
 

@@ -219,16 +219,15 @@ fn label(key: &Key, state: &KeyboardState) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::KeyHit;
     use crate::fonts::FontLibrary;
     use crate::keyboard::{KeyboardLayout, KeyboardState, Panel};
     use crate::renderer::Renderer;
     use crate::theme::KeyboardTheme;
 
-    /// 某一页画出来之后，第 1 行与最下一行的左右边缘（像素）。
+    /// 某一页每一排的左右边缘（像素），按行顺序。
     ///
     /// 命中矩形在 `keys` 里是**按行顺序**推的，所以按各行的键数切开就行，不用再按 y 分。
-    fn row_edges(panel: Panel) -> Option<((f32, f32), (f32, f32))> {
+    fn row_edges(panel: Panel) -> Option<Vec<(f32, f32)>> {
         // 没有系统字体的环境（CI 容器）跳过
         let library = FontLibrary::system("zh-CN").ok()?;
         let mut renderer = Renderer::new(library);
@@ -244,50 +243,58 @@ mod tests {
             )
             .ok()?;
 
-        let edges = |slice: &[KeyHit]| {
+        let mut edges = Vec::new();
+        let mut at = 0;
+        for row in layout.rows() {
+            let slice = &out.keys[at..at + row.keys.len()];
+            at += row.keys.len();
             let left = slice.iter().map(|key| key.x).fold(f32::MAX, f32::min);
             let right = slice
                 .iter()
                 .map(|key| key.x + key.width)
                 .fold(f32::MIN, f32::max);
-            (left, right)
-        };
-        let rows = layout.rows();
-        let first = rows.first()?.keys.len();
-        let last = rows.last()?.keys.len();
-        Some((
-            edges(&out.keys[..first]),
-            edges(&out.keys[out.keys.len() - last..]),
-        ))
+            edges.push((left, right));
+        }
+        Some(edges)
     }
 
-    /// 最下一排的左右边缘要跟第 1 行**严丝合缝**。
+    /// 某一页几乎所有排的两头都该一样齐。
     ///
-    /// 字母页最下一排只有 7 个键（6 条缝），第 1 行有 10 个（9 条缝）——全按固定单位宽
-    /// 排下来整排会窄一条、两头各缩进去半个键。空格是「撑满」的，多出来的都归它，
-    /// 两头才对齐。这条来回错过三次，别再凭眼睛看。
-    #[test]
-    fn the_bottom_row_lines_up_with_the_first_row() {
-        let Some((first, last)) = row_edges(Panel::Letters) else {
+    /// `skip` 是允许不齐的那一排——字母页第 2 行（`asdfghjkl`）窄半键是**有意的错位**，
+    /// 照实体键盘的排法。
+    fn assert_rows_line_up(panel: Panel, skip: Option<usize>) {
+        let Some(edges) = row_edges(panel) else {
             return;
         };
-        assert!(
-            (first.0 - last.0).abs() < 0.01 && (first.1 - last.1).abs() < 0.01,
-            "第 1 行是 {first:?}，最下一排是 {last:?}，两边没对齐"
-        );
+        let (left, right) = edges[0];
+        for (index, (l, r)) in edges.iter().enumerate() {
+            if Some(index) == skip {
+                continue;
+            }
+            assert!(
+                (l - left).abs() < 0.01 && (r - right).abs() < 0.01,
+                "{panel:?} 第 {} 排是 ({l}, {r})，第 1 排是 ({left}, {right})，两头没对齐",
+                index + 1
+            );
+        }
     }
 
-    /// 数字页、符号页本来就是每行 5 个单位、一样宽，这条守着别退化。
+    /// 字母页除了第 2 行（有意的半键错位），每一排的两头都要跟第 1 行**严丝合缝**。
+    ///
+    /// 第 3 行 9 个键（8 条缝）、最下一排 7 个（6 条缝），第 1 行有 10 个（9 条缝）——
+    /// 全按固定单位宽排下来这两排都会窄一条、两头各缩进去一点。
+    /// 靠 ⇧ / ⌫ / 空格这几个「撑满」的键吃掉多出来的那一段，才对齐。
+    /// 这块来回错过四次，**别再凭眼睛看**。
+    #[test]
+    fn the_letters_rows_line_up() {
+        assert_rows_line_up(Panel::Letters, Some(1));
+    }
+
+    /// 数字页、符号页每行都是 5 个键、一样宽，这条守着别退化。
     #[test]
     fn every_panel_has_rows_of_the_same_width() {
         for panel in [Panel::Digits, Panel::Symbols] {
-            let Some((first, last)) = row_edges(panel) else {
-                return;
-            };
-            assert!(
-                (first.0 - last.0).abs() < 0.01 && (first.1 - last.1).abs() < 0.01,
-                "{panel:?} 的第 1 行是 {first:?}，最下一排是 {last:?}"
-            );
+            assert_rows_line_up(panel, None);
         }
     }
 }
