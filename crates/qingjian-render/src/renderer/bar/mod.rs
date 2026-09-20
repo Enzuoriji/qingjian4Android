@@ -38,6 +38,18 @@ const BUTTON_PAD: f32 = 9.0;
 /// 按钮之间的间距（点）。
 const BUTTON_GAP: f32 = 4.0;
 
+/// 每个候选格的**底线宽度**（点）。
+///
+/// 格宽改成按内容分之后，一个单字候选的自然宽度只有二十来点——没有这条底线就成了一根针，
+/// 点都点不着。安卓自己建议的最小可点区域也是 48dp。
+const MIN_CELL_WIDTH: f32 = 48.0;
+
+/// 词在自己格子里两边各留的空白（点）。
+///
+/// 算「这个候选自然需要多宽」时加进去：一点都不留的话，词会正好顶满格子，
+/// 和隔壁挨在一起看成一串。
+const CELL_PADDING: f32 = 4.0;
+
 /// 词太长装不下时截断补的记号。
 const ELLIPSIS: &str = "…";
 
@@ -212,11 +224,15 @@ impl Renderer {
         left - m.px(BUTTON_GAP)
     }
 
-    /// 下排候选：可用宽度均分给每个候选，格内居中，格与格之间留一条缝。
+    /// 下排候选：**每格宽度按内容分**，装得下的词一律不截断。
     ///
-    /// 均分而不是按自然宽度排，是为了让每格的**触摸面积一样大**——手指点的时候不用瞄。
-    /// 每格两边各让出半条 `column_gap`：不留缝的话，三字词会正好顶满格子，
-    /// 下一个候选的序号紧贴上一个词，一眼看过去像连成一个词。
+    /// 早先每格等宽（触摸面积一样大），但格宽被「一页几个」除死：360 点宽的屏上一页 5 个，
+    /// 一格 60.8 点，而四个汉字要 64 点——于是**逢四字词必截**（用户报的「超过三个字就省略」）。
+    ///
+    /// 现在每格先拿一份**底线宽度**（触摸目标不能太小），剩下的宽度按**各自超出底线多少**分：
+    /// 长的多分、短的不浪费。一页里的词全装得下时，一格都不会被截。
+    /// 思路与 flexbox 的 `minWidth` + `flexGrow` 是一回事，参考项目 fcitx5-android 的候选条
+    /// 就是 `FlexboxLayoutManager` 这么排的。
     fn draw_bar_rows(
         &mut self,
         canvas: &mut Canvas,
@@ -230,24 +246,66 @@ impl Renderer {
             return;
         }
         let padding = m.padding();
-        let slot = (content_width - padding * 2.0) / frame.rows.len() as f32;
         let gap = m.column_gap();
-        let slot_width = (slot - gap).max(1.0);
-        for (i, row) in frame.rows.iter().enumerate() {
-            let left = padding + slot * i as f32 + gap / 2.0;
+        let widths = self.bar_cell_widths(frame, m, content_width);
+        let mut left = padding;
+        for (i, (row, width)) in frame.rows.iter().zip(&widths).enumerate() {
             if Some(i) == frame.highlighted {
-                self.fill_highlight(canvas, m, left, band.top, slot_width, band.height);
+                self.fill_highlight(canvas, m, left, band.top, *width, band.height);
             }
-            self.draw_bar_row(canvas, m, row, (left, slot_width), band);
-            // 命中区只覆盖画出来的这块，格子之间的缝不归任何候选（与键盘一致）
+            self.draw_bar_row(canvas, m, row, (left, *width), band);
+            // 命中区只覆盖这一格，格子之间的缝不归任何候选（与键盘一致）
             hits.push(BarHit {
                 id: BarHitId::Candidate(i),
                 x: left,
                 y: band.top,
-                width: slot_width,
+                width: *width,
                 height: band.height,
             });
+            left += width + gap;
         }
+    }
+
+    /// 下排候选每格多宽（点）。算法见 [`Self::draw_bar_rows`] 的说明。
+    ///
+    /// 输出保证：各格加上缝与左右边距**正好铺满一行**；有富余时每格不低于
+    /// [`MIN_CELL_WIDTH`]；富余不够时按「超出底线多少」的比例分——**长词先吃饱**，
+    /// 短词本来就不需要那么宽。
+    fn bar_cell_widths(&mut self, frame: &Frame, m: &Metrics, content_width: f32) -> Vec<f32> {
+        let count = frame.rows.len();
+        let padding = m.padding();
+        let gap = m.column_gap();
+        let available = (content_width - padding * 2.0 - gap * (count - 1) as f32).max(0.0);
+        let floor = m.px(MIN_CELL_WIDTH);
+        // 连底线都摆不下（屏窄、一页又挤）——只能等分，那就只能截了
+        if floor * count as f32 >= available {
+            return vec![(available / count as f32).max(1.0); count];
+        }
+        // 每格「自然需要」的宽度：词本身（云端词还有那朵云）＋两边留白
+        let natural: Vec<f32> = frame
+            .rows
+            .iter()
+            .map(|row| {
+                let text = self.measure(&row.text, &m.text_style()).width;
+                let cloud = if row.cloud { m.cloud_width() } else { 0.0 };
+                text + cloud + m.px(CELL_PADDING) * 2.0
+            })
+            .collect();
+
+        let extra = available - floor * count as f32;
+        let over: Vec<f32> = natural.iter().map(|need| (need - floor).max(0.0)).collect();
+        let total: f32 = over.iter().sum();
+        over.iter()
+            .map(|over| {
+                // 大家都够短（没有谁超出底线）时平分余量，不然长的按超出量分
+                let share = if total > 0.0 {
+                    extra * over / total
+                } else {
+                    extra / count as f32
+                };
+                (floor + share).max(1.0)
+            })
+            .collect()
     }
 
     /// 画一个候选：词（云端词前带云朵），整块在 `(x, 宽)` 的格子里居中。
@@ -373,7 +431,7 @@ fn candidate_row_height(theme: &Theme) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{BarHitId, ELLIPSIS, Metrics, Renderer};
+    use super::{BarHitId, ELLIPSIS, MIN_CELL_WIDTH, Metrics, Renderer};
     use crate::fonts::FontLibrary;
     use crate::frame::{Frame, Preedit, Row};
     use crate::theme::Theme;
@@ -459,8 +517,12 @@ mod tests {
         assert!(Renderer::bar_height(&theme, true) > 0.0, "组句时该有高度");
     }
 
+    /// 下排候选：格与格之间留一条缝，整排**正好铺满**（左右各一个 padding）。
+    ///
+    /// **不再断言「每格一样宽」**——2026-09-20 起格宽按内容分（见 `draw_bar_rows`），
+    /// 长的词占得宽。这条只管「排得开、缝对、铺满」。
     #[test]
-    fn candidate_slots_are_evenly_spaced_and_leave_a_gap() {
+    fn candidate_slots_leave_a_gap_and_fill_the_row() {
         let Some(mut renderer) = renderer() else {
             return;
         };
@@ -470,28 +532,109 @@ mod tests {
             .unwrap();
         let slots = candidates(&out);
         assert_eq!(slots.len(), 6);
+
+        let padding = theme.padding * SCALE;
         let gap = theme.column_gap * SCALE;
+        let first = slots.first().unwrap();
+        let last = slots.last().unwrap();
+        let right = out.rendered.content_width as f32 - padding;
+        assert!(
+            (first.x - padding).abs() < 0.01,
+            "左边距该正好一个 padding，实际 {}",
+            first.x
+        );
+        assert!(
+            (last.x + last.width - right).abs() < 0.01,
+            "右边距该正好一个 padding，实际 {}",
+            right - (last.x + last.width)
+        );
         for pair in slots.windows(2) {
             assert!(pair[0].x < pair[1].x, "格子要按从左到右排");
             let space = pair[1].x - (pair[0].x + pair[0].width);
             assert!(
                 (space - gap).abs() < 0.01,
-                "格与格之间要正好留一条 {}，实际 {space}",
-                gap
+                "格与格之间要正好留一条 {gap}，实际 {space}"
             );
         }
-        // 每格一样宽：手指点的时候不用瞄
-        let width = slots[0].width;
-        assert!(slots.iter().all(|slot| (slot.width - width).abs() < 0.01));
-        // 整排在对齐的左右边距里居中
-        let padding = theme.padding * SCALE;
-        let left = slots.first().unwrap().x;
-        let right = slots.last().unwrap().x + slots.last().unwrap().width;
-        assert!((left - padding - gap / 2.0).abs() < 0.01, "左边距");
-        assert!(
-            (right - (out.rendered.content_width as f32 - padding - gap / 2.0)).abs() < 0.01,
-            "右边距"
+    }
+
+    /// **四个汉字的词不该被截断**——用户报的「超过三个字就省略」。
+    ///
+    /// 格宽原先等分：360 点宽、一页 5 个，一格 60.8 点，而四个汉字要 64 点，**逢四字必截**。
+    /// 现在按内容分——短词让出来的宽度补给长词。
+    #[test]
+    fn a_four_character_candidate_is_not_cut_short() {
+        let Some(mut renderer) = renderer() else {
+            return;
+        };
+        let theme = Theme::light();
+        let m = Metrics {
+            theme: &theme,
+            scale: SCALE,
+        };
+        let style = m.text_style();
+
+        // 长短混着来：四字词夹在单字、两字之间
+        let mixed = Frame {
+            preedit: Some(Preedit::plain("ni'hao", 6)),
+            rows: vec![
+                Row::plain(0, "你"),
+                Row::plain(1, "你好"),
+                Row::plain(2, "你好你好"),
+                Row::plain(3, "你"),
+                Row::plain(4, "你好"),
+            ],
+            highlighted: Some(0),
+            footer: None,
+            sentence: None,
+            status: None,
+        };
+        let out = renderer.render_bar(&mixed, WIDTH, &theme, SCALE).unwrap();
+        let slots = candidates(&out);
+
+        let long = "你好你好";
+        let needs = renderer.measure(long, &style).width;
+        assert_eq!(
+            renderer.fit(long, &style, slots[2].width),
+            long,
+            "四字词那格 {} 点该装得下（词本身要 {needs} 点）",
+            slots[2].width
         );
+        assert!(
+            slots[2].width > slots[0].width,
+            "长词那格该比单字那格宽：{} vs {}",
+            slots[2].width,
+            slots[0].width
+        );
+    }
+
+    /// 每格都不低于底线——单字候选的自然宽度只有二十来点，没这条底线就成了点不着的针。
+    #[test]
+    fn every_slot_keeps_a_reachable_minimum() {
+        let Some(mut renderer) = renderer() else {
+            return;
+        };
+        let theme = Theme::light();
+        let all_short = Frame {
+            preedit: Some(Preedit::plain("ni", 2)),
+            rows: (0..5).map(|i| Row::plain(i, "你")).collect(),
+            highlighted: Some(0),
+            footer: None,
+            sentence: None,
+            status: None,
+        };
+        let out = renderer
+            .render_bar(&all_short, WIDTH, &theme, SCALE)
+            .unwrap();
+
+        let floor = MIN_CELL_WIDTH * SCALE;
+        for hit in candidates(&out) {
+            assert!(
+                hit.width >= floor - 0.01,
+                "每格都不该低于底线 {floor}，实际 {}",
+                hit.width
+            );
+        }
     }
 
     #[test]
