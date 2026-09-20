@@ -8,7 +8,7 @@
 //! 这里只回答「抬起来时兑现的是哪个键」；翻成动作在 `crate::action`，执行在 `Session`。
 
 use qingjian_render::{
-    InputMode, Key, KeyHit, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Rendered,
+    InputMode, Key, KeyHit, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Popup, Rendered,
     RenderedKeyboard, Renderer, ShiftState,
 };
 
@@ -45,6 +45,12 @@ const CURSOR_MAX_STEPS: isize = 400;
 /// 复用 [`SWIPE`] 那个阈值：两处都是「手指挪够了，这是手势不是点击」。
 /// 12 点约合键高的三分之一，正常敲字的手指抖动到不了。
 const CLEAR_SWIPE: f32 = SWIPE;
+
+/// ⌫ 上往上滑之后，气泡上写这句话。
+///
+/// 键上那个退格图标说不出「松手会怎样」——滑上去之后这一下已经不是「删一个字」了，
+/// 气泡得把话讲清楚，不然用户不知道松手会发生什么。
+const CLEAR_HINT: &str = "松手清空";
 
 /// 抬起来时兑现的东西。
 ///
@@ -163,6 +169,9 @@ pub struct Keyboard {
     /// 正被按住的键，画成按下态。
     pressed: Option<KeyId>,
 
+    /// 那一根手指**已经往上滑了**：松手要把光标前面整段清掉。气泡照它改口。
+    pressed_clearing: bool,
+
     /// 那一根手指**已经下滑取角标了**：这一下最终打出的是角标那个字符，不是键帽上印的字。
     ///
     /// 气泡照它画——不然按住 `y` 往下滑，气泡写着 `y`、打出来却是 `6`，气泡在骗人。
@@ -172,7 +181,7 @@ pub struct Keyboard {
     ///
     /// 按住键那一下要弹；同一个键按着不动就不必重画（画一次 ~0.8ms，每拍重画白费）。
     popup: Option<Rendered>,
-    popup_for: Option<(KeyId, u32, u32)>,
+    popup_for: Option<(KeyId, u32, u32, bool)>,
 }
 
 /// 空格上横滑时，位移 `dx`（点）下**一拍**该走几格（正数往右）。
@@ -200,6 +209,7 @@ impl Keyboard {
             dirty: true,
             presses: Vec::new(),
             pressed: None,
+            pressed_clearing: false,
             pressed_hint: None,
             popup: None,
             popup_for: None,
@@ -468,15 +478,23 @@ impl Keyboard {
         }
         // **这一下会打出什么就画什么**：下滑取角标时，兑现的是角标那个字符。
         // 画成 `Literal` 与真正兑现时走的是同一个身份，气泡上的字与打出来的字必然一致
-        let key = match self.pressed_hint {
+        let shown = match self.pressed_hint {
             Some(hint) => Key::new(KeyId::Literal(hint), key.units().max(1.0)),
             None => key,
         };
+        // ⌫ 上往上滑之后这一下不是「删一个字」了，气泡改说「松手清空」——
+        // 退格图标说不出「松手会怎样」
+        let content = if self.pressed_clearing {
+            Popup::Text(CLEAR_HINT)
+        } else {
+            Popup::Key(&shown)
+        };
 
         let mark = (
-            key.id,
+            shown.id,
             rect.width.round() as u32,
             rect.height.round() as u32,
+            self.pressed_clearing,
         );
         if self.popup_for != Some(mark) || self.popup.is_none() {
             let theme = self.theme();
@@ -489,7 +507,7 @@ impl Keyboard {
             let rendered = renderer.and_then(|renderer| {
                 renderer
                     .render_key_popup(
-                        &key,
+                        content,
                         &state,
                         rect.width / density,
                         rect.height / density,
@@ -606,7 +624,7 @@ impl Keyboard {
     /// 气泡此刻是**按哪个身份**画的——测试用，验证下滑之后画的是角标而不是字母。
     #[cfg(test)]
     pub(crate) fn popup_id(&self) -> Option<KeyId> {
-        self.popup_for.map(|(id, _, _)| id)
+        self.popup_for.map(|(id, _, _, _)| id)
     }
 
     /// 命中哪个键。落在键之间的缝上、或者还没画过时是 `None`。
@@ -644,9 +662,11 @@ impl Keyboard {
         let hint = held
             .filter(|press| press.hinted)
             .and_then(|press| press.hint);
-        if self.pressed != key || self.pressed_hint != hint {
+        let clearing = held.is_some_and(|press| press.clearing);
+        if self.pressed != key || self.pressed_hint != hint || self.pressed_clearing != clearing {
             self.pressed = key;
             self.pressed_hint = hint;
+            self.pressed_clearing = clearing;
             self.dirty = true;
         }
     }

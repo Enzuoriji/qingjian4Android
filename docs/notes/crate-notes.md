@@ -165,6 +165,8 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 **⌫ 上滑清空**（2026-09-20，K7）：⌫ 上**往上滑**（滑上去只是预备）、**松手**把光标前面整段清掉。
 `Keyboard::touch` 多报一种 `Fired::ClearToStart` → `Command::ClearToStart`，
 壳用一条 `deleteSurroundingText(光标前面有几个字, 0)` 兑现。组句当中不理。
+**滑上去之后气泡改口**：`Popup::Text("松手清空")`——气泡本来就能画一句提示
+（`Popup::Key` / `Popup::Text`），提示按文字宽度撑开、用键帽那个字号。
 **`Keyboard::held` 排掉了正在做手势的手指**——不然长按连发会和滑动手势抢同一个键。
 （第一版做的是「往左滑选字、松手删选中的」，用户说不好用，整块换掉了。）
 

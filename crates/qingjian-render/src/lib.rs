@@ -32,8 +32,8 @@ pub use keyboard::{
 };
 pub use layout::Layout;
 pub use renderer::{
-    BarHit, BarHitId, KeyHit, Rendered, RenderedBar, RenderedKeyboard, RenderedStatus, Renderer,
-    StatusCell,
+    BarHit, BarHitId, KeyHit, Popup, Rendered, RenderedBar, RenderedKeyboard, RenderedStatus,
+    Renderer, StatusCell,
 };
 pub use shadow::Shadow;
 pub use theme::{FontSpec, KeyboardTheme, Palette, Theme};

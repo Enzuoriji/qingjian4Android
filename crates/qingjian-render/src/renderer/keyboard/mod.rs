@@ -9,6 +9,7 @@ mod popup;
 mod rendered;
 
 pub use hit::KeyHit;
+pub use popup::Popup;
 pub use rendered::RenderedKeyboard;
 
 use super::{Rendered, Renderer};

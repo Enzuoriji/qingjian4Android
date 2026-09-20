@@ -7,8 +7,9 @@ use std::time::Instant;
 
 use clap::Parser;
 use qingjian_render::{
-    FontLibrary, Frame, Key, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Layout, Preedit,
-    PreeditSegment, PreeditStyle, Renderer, Row, Shadow, ShiftState, StatusCell, Theme, Tone,
+    FontLibrary, Frame, Key, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Layout, Popup,
+    Preedit, PreeditSegment, PreeditStyle, Renderer, Row, Shadow, ShiftState, StatusCell, Theme,
+    Tone,
 };
 
 /// 预览键盘用的宽度（点）——按一台常见手机的竖屏宽。
@@ -145,14 +146,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("light", KeyboardTheme::light()),
         ("dark", KeyboardTheme::dark()),
     ] {
-        for (name, key) in [
-            ("letter", Key::letter('A', '1')),
-            ("narrow", Key::new(KeyId::Period, 1.0)),
-            ("icon", Key::new(KeyId::Backspace, 1.5)),
+        for (name, key, content) in [
+            ("letter", Key::letter('A', '1'), None),
+            ("narrow", Key::new(KeyId::Period, 1.0), None),
+            ("icon", Key::new(KeyId::Backspace, 1.5), None),
+            // ⌫ 往上滑之后气泡改说的那句话
+            ("clear", Key::new(KeyId::Backspace, 1.5), Some("松手清空")),
         ] {
             let started = Instant::now();
+            let popup = match content {
+                Some(text) => Popup::Text(text),
+                None => Popup::Key(&key),
+            };
             let rendered = renderer.render_key_popup(
-                &key,
+                popup,
                 &KeyboardState::default(),
                 29.7,
                 42.25,

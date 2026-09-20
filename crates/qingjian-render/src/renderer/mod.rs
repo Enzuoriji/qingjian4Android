@@ -24,7 +24,7 @@ use crate::text::{TextPainter, TextSize, TextStyle};
 use crate::theme::{FontSpec, Theme};
 
 pub use bar::{BarHit, BarHitId, RenderedBar};
-pub use keyboard::{KeyHit, RenderedKeyboard};
+pub use keyboard::{KeyHit, Popup, RenderedKeyboard};
 pub use rendered::Rendered;
 pub use status::{RenderedStatus, StatusCell};
 

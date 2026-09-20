@@ -1276,6 +1276,27 @@ fn clearing_suppresses_the_backspace_repeat() {
     );
 }
 
+/// ⌫ 滑上去之后**气泡要改口**——退格图标说不出「松手会怎样」。
+#[test]
+fn the_backspace_popup_warns_before_clearing() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Backspace);
+    let up = crate::keyboard::SWIPE * DENSITY * 1.5;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    let plain = session.popup_surface();
+    assert!(plain.len() > 8, "按住 ⌫ 该出气泡");
+
+    session.touch(MotionAction::Move, POINTER, x, y - up);
+    let warned = session.popup_surface();
+
+    assert!(warned.len() > 8, "滑上去也该有气泡");
+    assert_ne!(plain, warned, "滑上去之后气泡该改口说「松手清空」");
+    assert!(warned.len() > plain.len(), "提示是句话，位图该比一个图标大");
+}
+
 /// 空格没有字可显示，按住也不弹——弹一个空框子只是晃眼。
 #[test]
 fn the_space_key_has_no_popup() {

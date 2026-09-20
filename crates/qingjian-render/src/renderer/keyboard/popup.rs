@@ -7,6 +7,7 @@
 
 use super::{Rendered, Renderer};
 use crate::canvas::Canvas;
+use crate::color::Color;
 use crate::error::RenderError;
 use crate::keyboard::{Key, KeyId, KeyboardState};
 use crate::shadow::Shadow;
@@ -30,6 +31,34 @@ const MIN_WIDTH: f32 = 36.0;
 /// 气泡的最大宽度（点）。回车那种宽键乘完倍率会撑成一张大饼。
 const MAX_WIDTH: f32 = 72.0;
 
+/// 提示文字两侧各留的空白（点）。
+const TEXT_PADDING: f32 = 10.0;
+
+/// 提示文字的外宽上限（点）。比键帽宽是应该的——说不清就白提示了；
+/// 但也不能宽到盖掉半块键盘。
+const MAX_TEXT_WIDTH: f32 = 120.0;
+
+/// 气泡里画什么。
+pub enum Popup<'a> {
+    /// 画这个键的样子——字母 / 字词画字，图标键（⇧ / ⌫）画图标。
+    Key(&'a Key),
+
+    /// 画一句提示。键上那个图标说不清「松手会怎样」这种事，得用话讲。
+    Text(&'a str),
+}
+
+/// 画一个图标的函数签名（⇧ 与 ⌫ 各一个）。
+type IconPainter = fn(&mut Canvas, f32, f32, f32, f32, Color);
+
+/// 图标键要画哪个图标（画法与键帽上那个是同一份）。其余键没有图标，画字。
+fn icon_of(id: KeyId) -> Option<IconPainter> {
+    match id {
+        KeyId::Shift => Some(super::icon::draw_shift),
+        KeyId::Backspace => Some(super::icon::draw_backspace),
+        _ => None,
+    }
+}
+
 impl Renderer {
     /// 画一个键的预览气泡。`key_width` / `key_height` 是这个键的尺寸（点）。
     ///
@@ -37,7 +66,7 @@ impl Renderer {
     /// 壳照着算摆放位置时要把这段留白减掉（照 `render_status` 的规矩）。
     pub fn render_key_popup(
         &mut self,
-        key: &Key,
+        content: Popup<'_>,
         state: &KeyboardState,
         key_width: f32,
         key_height: f32,
@@ -45,8 +74,21 @@ impl Renderer {
         scale: f32,
     ) -> Result<Rendered, RenderError> {
         let shadow = Shadow::mac_panel();
-        let content_width = (key_width * WIDTH_RATIO).clamp(MIN_WIDTH, MAX_WIDTH);
         let content_height = key_height * HEIGHT_RATIO;
+        let content_width = match &content {
+            Popup::Key(_) => (key_width * WIDTH_RATIO).clamp(MIN_WIDTH, MAX_WIDTH),
+            // 提示**按文字撑开**：说不清就白提示了。用键帽那个字号，别用气泡里那个放大的
+            Popup::Text(text) => {
+                let style = TextStyle::new(
+                    theme.font.scaled(scale),
+                    theme.font.size,
+                    theme.label,
+                    theme.text_gamma,
+                );
+                let size = self.measure(text, &style);
+                (size.width / scale + TEXT_PADDING * 2.0).clamp(MIN_WIDTH, MAX_TEXT_WIDTH)
+            }
+        };
         let margin = shadow.margin();
         let width = ((content_width + margin * 2.0) * scale).ceil();
         let height = ((content_height + margin * 2.0) * scale).ceil();
@@ -62,29 +104,28 @@ impl Renderer {
         canvas.fill_round_rect(left, top, w, h, radius, theme.popup);
 
         let (cx, cy) = (left + w / 2.0, top + h / 2.0);
-        match key.id {
-            // 图标键没有字，把图标放大画上去（画法与键帽上那个是同一份）
-            KeyId::Shift => super::icon::draw_shift(&mut canvas, cx, cy, h, scale, theme.label),
-            KeyId::Backspace => {
-                super::icon::draw_backspace(&mut canvas, cx, cy, h, scale, theme.label)
-            }
-            _ => {
-                let text = super::label(key, state);
-                let style = TextStyle::new(
-                    theme.popup_font.scaled(scale),
-                    theme.popup_font.size,
-                    theme.label,
-                    theme.text_gamma,
-                );
-                let size = self.measure(&text, &style);
-                self.draw_text(
-                    &mut canvas,
-                    &text,
-                    &style,
-                    cx - size.width / 2.0,
-                    cy - size.height / 2.0,
-                );
-            }
+        let (text, icon) = match &content {
+            Popup::Text(text) => (text.to_string(), None),
+            Popup::Key(key) => (super::label(key, state), icon_of(key.id)),
+        };
+        // 提示文字用键帽那个字号（小一档），键自己的字用气泡那个放大的
+        let font = if matches!(content, Popup::Text(_)) {
+            theme.font
+        } else {
+            theme.popup_font
+        };
+        let style = TextStyle::new(font.scaled(scale), font.size, theme.label, theme.text_gamma);
+        if let Some(draw) = icon {
+            draw(&mut canvas, cx, cy, h, scale, theme.label);
+        } else {
+            let size = self.measure(&text, &style);
+            self.draw_text(
+                &mut canvas,
+                &text,
+                &style,
+                cx - size.width / 2.0,
+                cy - size.height / 2.0,
+            );
         }
 
         Ok(Rendered {
