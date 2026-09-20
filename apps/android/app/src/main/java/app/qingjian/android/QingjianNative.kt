@@ -113,6 +113,9 @@ object QingjianNative {
     /** [takeCommands] 里的编号：光标右移一格。 */
     const val COMMAND_MOVE_RIGHT = 4
 
+    /** [takeCommands] 里的编号：把选区往左扩一个字。 */
+    const val COMMAND_SELECT_LEFT = 5
+
     /** 候选条变了。 */
     const val FLAG_BAR = 1
 

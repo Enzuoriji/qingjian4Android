@@ -17,9 +17,13 @@ pub enum Command {
 
     /// 光标右移一格。
     ///
-    /// 移光标**只能用方向键**：输入法不知道光标前后有什么，也没有「把光标挪一格」的 API，
-    /// 交给应用自己按它那边的规矩走（文本框、网页输入框、代码编辑器反应都不一样）。
+    /// 移光标**不能用方向键**（`KEYCODE_DPAD_*` 在安卓上是**焦点导航**用的，光标到头时
+    /// 会把焦点挪到界面按钮上），得走 `InputConnection.setSelection`——
+    /// 这两个编号是给「往哪边挪」用的，具体挪法在壳那边。
     MoveRight,
+
+    /// 把选区往左扩一个字。退格键上往左滑出来的，松手会删掉选中的那段。
+    SelectLeft,
 }
 
 impl Command {
@@ -30,6 +34,7 @@ impl Command {
             Self::Enter => 2,
             Self::MoveLeft => 3,
             Self::MoveRight => 4,
+            Self::SelectLeft => 5,
         }
     }
 }

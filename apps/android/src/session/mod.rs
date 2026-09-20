@@ -413,6 +413,7 @@ impl Session {
         match fired {
             Some(Fired::Key(key)) => self.apply(action::on_key(key)),
             Some(Fired::MoveCursor(steps)) => self.move_cursor(steps),
+            Some(Fired::SelectLeft(steps)) => self.select_left(steps),
             None => {}
         }
         self.touch_bar(action, pointer, x, y);
@@ -452,6 +453,19 @@ impl Session {
             self.move_cursor(steps);
         }
         self.mask()
+    }
+
+    /// 退格上往左滑：把选区往左扩 `steps` 个字（**增量**）。
+    ///
+    /// 这里只报「这次多扩几个」，真正的选区由壳按「手势起点的光标位置 + 它自己攒的累计」设。
+    /// 组句当中不理——那会儿输入框里是我们的拼音，退格该删拼音（引擎那条路）。
+    fn select_left(&mut self, steps: isize) {
+        if self.composing() {
+            return;
+        }
+        for _ in 0..steps.max(0) {
+            self.pending_commands.push(Command::SelectLeft);
+        }
     }
 
     /// 长按连发：壳的计时器到点了，问一次「按住的那个键要不要再来一次」。

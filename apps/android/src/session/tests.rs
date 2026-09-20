@@ -1175,6 +1175,135 @@ fn the_keyboard_is_shorter_in_landscape() {
     );
 }
 
+/// ⌫ 上往左滑 = 选字（跟着手指走），松手把选中的删掉。
+#[test]
+fn swiping_left_on_backspace_selects_then_deletes() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Backspace);
+    let step = crate::keyboard::SELECT_STEP * DENSITY;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - step * 3.0, y);
+
+    assert_eq!(
+        session.take_commands(),
+        vec![Command::SelectLeft.code(); 3],
+        "往左滑三格该选三个字"
+    );
+    assert_eq!(session.take_commit(), None, "选字当中不该上屏");
+
+    // 继续往左滑：报的是**累计**格数，这边只补多出来的那两格
+    session.touch(MotionAction::Move, POINTER, x - step * 5.0, y);
+    assert_eq!(
+        session.take_commands(),
+        vec![Command::SelectLeft.code(); 2],
+        "再滑两格该接着补两格，不是重报五格"
+    );
+
+    // 松手：走退格那条身份，交给应用删掉选中的那段
+    session.touch(MotionAction::Up, POINTER, x - step * 5.0, y);
+    assert_eq!(
+        session.take_commands(),
+        vec![Command::Backspace.code()],
+        "松手该把选中的删掉"
+    );
+}
+
+/// **滑得慢也不能被连发删**：选字手势一开始，那个键就不再算「按住」。
+///
+/// 实测踩到过——手指按住 ⌫ 慢慢往左滑（超过连发门槛 400ms），连发把字全删了，
+/// 选出来的那段反而没剩。
+#[test]
+fn selecting_suppresses_the_backspace_repeat() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Backspace);
+    let step = crate::keyboard::SELECT_STEP * DENSITY;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - step * 3.0, y);
+    session.take_commands();
+
+    // 壳那边按够 400ms 会开始敲连发
+    for _ in 0..10 {
+        session.repeat(POINTER);
+    }
+
+    assert_eq!(
+        session.take_commands(),
+        Vec::<i32>::new(),
+        "正在选字，连发不该再删"
+    );
+}
+
+/// ⌫ 上只挪一点点还是「按一下退格」——删一个字，不是选字。
+#[test]
+fn a_small_drag_on_backspace_is_still_one_backspace() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Backspace);
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - 5.0, y);
+    session.touch(MotionAction::Up, POINTER, x - 5.0, y);
+
+    assert_eq!(
+        session.take_commands(),
+        vec![Command::Backspace.code()],
+        "只挪 5 像素该还是普通退格"
+    );
+}
+
+/// **往右滑不选字**：退格删的是光标前面的字，往右选再删那是「删」不是「退格」。
+#[test]
+fn swiping_right_on_backspace_does_not_select() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Backspace);
+    // 挪得**还留在 ⌫ 键里**（滑出键外那一下本来就按取消处理，那是另一条规矩）
+    let step = crate::keyboard::SELECT_STEP * DENSITY;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x + step * 1.2, y);
+    session.touch(MotionAction::Up, POINTER, x + step * 1.2, y);
+
+    assert_eq!(
+        session.take_commands(),
+        vec![Command::Backspace.code()],
+        "往右滑该还是普通退格"
+    );
+}
+
+/// 组句当中退格该删拼音，不是选字。
+#[test]
+fn backspace_does_not_select_while_composing() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let (x, y) = key_centre(&session, KeyId::Backspace);
+    let step = crate::keyboard::SELECT_STEP * DENSITY;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - step * 3.0, y);
+
+    assert_eq!(
+        session.take_commands(),
+        Vec::<i32>::new(),
+        "还在组句，不该选字"
+    );
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("ni'hao"),
+        "拼音该原样留着"
+    );
+}
+
 /// 空格没有字可显示，按住也不弹——弹一个空框子只是晃眼。
 #[test]
 fn the_space_key_has_no_popup() {
