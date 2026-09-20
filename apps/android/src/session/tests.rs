@@ -1297,6 +1297,62 @@ fn the_backspace_popup_warns_before_clearing() {
     assert!(warned.len() > plain.len(), "提示是句话，位图该比一个图标大");
 }
 
+/// 候选项**长按 = 删词**：引擎删完会说一句「删了什么」，交给壳报给用户。
+///
+/// 节点是壳的心跳：这根手指按够久了就问一次，跟退格连发同一个节拍。
+#[test]
+fn long_pressing_a_candidate_forgets_it() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let (x, y) = bar_centre(&session, BarHitId::Candidate(0));
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    assert_eq!(session.take_message(), None, "刚按住还没到点，不该说话");
+
+    // 壳那边按够 400ms 会开始敲节拍
+    session.repeat(POINTER);
+
+    let message = session.take_message().expect("长按候选该删词、并说一句");
+    assert!(message.contains('「'), "那句话该带上词本身：{message}");
+}
+
+/// **一次长按只删一次**：节拍会一直敲，不记一笔就会删了又删、还反复弹提示。
+#[test]
+fn the_long_press_only_forgets_once() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let (x, y) = bar_centre(&session, BarHitId::Candidate(0));
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.repeat(POINTER);
+    let first = session.take_message().expect("第一次该删");
+
+    for _ in 0..5 {
+        session.repeat(POINTER);
+    }
+
+    assert_eq!(session.take_message(), None, "同一次长按不该再删：{first}");
+}
+
+/// 候选条上按住翻页 / 清空那些块，不删词。
+#[test]
+fn long_pressing_the_page_buttons_does_not_forget() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    let (x, y) = bar_centre(&session, BarHitId::PageNext);
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.repeat(POINTER);
+
+    assert_eq!(session.take_message(), None, "翻页键上长按不该删词");
+}
+
 /// 空格没有字可显示，按住也不弹——弹一个空框子只是晃眼。
 #[test]
 fn the_space_key_has_no_popup() {

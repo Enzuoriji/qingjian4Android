@@ -98,6 +98,9 @@ object QingjianNative {
     /** 取走要上屏的文本（并清掉）；这次没有返回 null。 */
     external fun takeCommit(handle: Long): String?
 
+    /** 取走要给用户看的一句话（并清掉）；这次没有返回 null。比如删词之后说删了什么。 */
+    external fun takeMessage(handle: Long): String?
+
     /** 取走要原样交给应用的按键编号（并清掉）；这次没有返回空数组。编号见 [COMMAND_BACKSPACE]。 */
     external fun takeCommands(handle: Long): IntArray?
 

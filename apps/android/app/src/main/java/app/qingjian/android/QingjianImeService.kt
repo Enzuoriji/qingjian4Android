@@ -5,6 +5,7 @@ import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
 import android.os.Build
 import android.os.SystemClock
+import android.widget.Toast
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
@@ -152,6 +153,11 @@ class QingjianImeService : InputMethodService() {
             refreshKeyboard(view)
         }
         refreshPopup(view)
+        // 删词之后引擎会说一句「删了什么」，用系统的吐司报给用户——
+        // 那是**系统级的一句话**（跟通知一类），不是键盘那块显示面，用原生的正合适
+        QingjianNative.takeMessage(handle)?.let {
+            Toast.makeText(this, it, Toast.LENGTH_SHORT).show()
+        }
         val elapsed = SystemClock.elapsedRealtime() - started
         if (elapsed >= SLOW_TOUCH_MS) {
             Log.w(TAG, "这一下花了 ${elapsed}ms，打字会跟不上手感")
