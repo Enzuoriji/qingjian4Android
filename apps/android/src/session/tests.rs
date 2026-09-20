@@ -415,17 +415,18 @@ fn a_drag_on_the_keyboard_does_not_page() {
     session.touch(MotionAction::Move, POINTER, x - 120.0, y);
     session.touch(MotionAction::Up, POINTER, x - 120.0, y);
 
-    // 横着划走够远，现在也算「在键上滑了一下」，出的是角标 `@` 而不是字母 `a`。
-    // 组句当中打标点会先把高亮候选上屏，所以上屏的是「候选 + @」
-    let committed = session.take_commit().expect("该有东西上屏");
+    // 横着划走够远：手指出了键，这一下**作废**——既不出字母也不出角标
+    // （角标现在只认往下滑，见 `the_hint_only_comes_out_when_you_swipe_down`）。
+    assert_eq!(session.take_commit(), None, "键盘上横划不该上屏任何东西");
     assert!(
-        committed.ends_with('@'),
-        "横着划走够远算滑动，出的是角标 @：{committed}"
-    );
-    assert!(!committed.contains('a'), "不该把字母 a 打出去：{committed}");
-    assert!(
-        drawn(&session).is_empty(),
-        "上屏之后候选该清空——**翻页是候选条的手势**，在键盘上划不该翻它的页"
+        session
+            .frame
+            .footer
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("1/"),
+        "**翻页是候选条的手势**，在键盘上横划不该翻它的页，实际 {:?}",
+        session.frame.footer
     );
 }
 
@@ -697,9 +698,18 @@ fn swipe_down(session: &mut Session, id: KeyId, dy: f32) {
     drag(session, id, 0.0, dy);
 }
 
-/// 够滑动阈值那么多像素（**不看方向**，离按下那点这么远就算）。
+/// 够滑动阈值那么多像素。**比的是纵向**——往下的位移到这儿才兑现角标。
+///
+/// 测试里**别正好用这个数去要求出角标**：位移是 `(y + d) - y` 算出来的，f32 下未必正好
+/// 等于 `d`，卡在阈值上就成了浮点运气（实测同一批里两个键一个过一个不过）。
+/// 要「这一下该出角标」就用 [`swipe_past`]；要「差一点、不该出」就用它减一。
 fn swipe_distance() -> f32 {
     crate::keyboard::SWIPE * DENSITY
+}
+
+/// 稳稳超过阈值——「这一下要出角标」的用例用它。
+fn swipe_past() -> f32 {
+    swipe_distance() * 1.2
 }
 
 /// 字母键往下滑，打出来的是键帽角上那个小字，不是字母本身。
@@ -710,8 +720,8 @@ fn swiping_down_on_a_letter_key_types_its_hint() {
     };
 
     // q 的角标是 1，n 的角标是 ~（中文模式下 `~` 转全角，跟符号页一个规矩）
-    swipe_down(&mut session, KeyId::Letter('q'), swipe_distance());
-    swipe_down(&mut session, KeyId::Letter('n'), swipe_distance());
+    swipe_down(&mut session, KeyId::Letter('q'), swipe_past());
+    swipe_down(&mut session, KeyId::Letter('n'), swipe_past());
 
     assert_eq!(
         session.take_commit().as_deref(),
@@ -751,15 +761,13 @@ fn a_swipe_that_leaves_the_key_still_counts() {
 
 /// 手指挪几个像素不算滑动——快敲时手指本来就会歪一点。
 ///
-/// 阈值定小了这条就会挂：正常打字全变成打符号，那是灾难。**四个方向都试**，
-/// 因为滑动现在不看方向了。
+/// 阈值定小了这条就会挂：正常打字全变成打符号，那是灾难。
 #[test]
 fn a_wobble_still_types_the_letter() {
     let drift = swipe_distance() - 1.0;
     // **横向只能挪到键里边为止**：挪出键外这一下就作废了（滑到隔壁键上要能反悔，
     // 见 `sliding_over_to_another_key_cancels`），而键只有三十来点宽——半键还不到 `drift`。
-    // 纵向余量够（键高 42 点），直接用到阈值。这条同时也是给 `SWIPE` 的上限提个醒：
-    // 阈值一超过半键宽，横向快敲就会滑出键外，变成既不出符号、也不掉字。
+    // 纵向宽松得多：阈值现在比的是**键高**（角标只认往下滑），22 点仍落在键内。
     let half_key = {
         let Some(session) = ready() else {
             return;
@@ -796,7 +804,7 @@ fn a_wobble_still_types_the_letter() {
 ///
 /// 阈值原先定在 12 点，而快敲时手指随手滚一下正好够得着，于是正常打字时不时冒出个 `1`、`@`。
 /// 这条把**旧阈值那么大的位移**钉死在「还是字母」上：谁把 [`SWIPE`](crate::keyboard::SWIPE)
-/// 调回去，这里先炸。四个方向都试，因为滑动现在不看方向。
+/// 调回去，这里先炸。四个方向都试——哪个方向滚回来都该还是字母。
 #[test]
 fn a_drift_the_size_of_the_old_threshold_no_longer_types_a_symbol() {
     // 改小之前那个阈值（点 → 像素）
@@ -815,36 +823,48 @@ fn a_drift_the_size_of_the_old_threshold_no_longer_types_a_symbol() {
     }
 }
 
-/// **四个方向滑都出角标**，不只是往下。
+/// **只有往下滑才出角标**（2026-09-20 改，原先四个方向都算）。
 ///
-/// 以前只认往下滑，得特意朝下瞄；快打时手指歪一点就什么也没出。
+/// 改的理由是真机上快打会误蹦符号：四方向时往哪滚都可能撞上，而横向那条路**结构上救不了**
+/// ——「手指出了键 = 这一下作废」与阈值线重合（都在半个键宽上），往上加只会变成
+/// 「符号不出、字母也一起丢」。收回成一个方向之后误触面砍到四分之一，
+/// 阈值也才敢从 16 提到 22（比的是键高，不是半个键宽）。
+///
+/// 另外三个方向**不再是手势**：挪得少就还是这个字母，挪出键外这一下就作废——
+/// 都不是「打出一个符号」。
 #[test]
-fn the_hint_comes_out_whichever_way_you_swipe() {
+fn the_hint_only_comes_out_when_you_swipe_down() {
+    // 往上 / 往左 / 往右 / 斜着，**都超过阈值**（1.5 倍），也都不该出角标
     for (dx, dy) in [
-        (0.0, 1.0),
         (0.0, -1.0),
         (1.0, 0.0),
         (-1.0, 0.0),
-        (0.85, 0.85),
         (-0.85, -0.85),
+        (0.85, -0.85),
     ] {
         let Some(mut session) = ready() else {
             return;
         };
-        let distance = swipe_distance();
-        // q 的角标是 1
-        drag(
-            &mut session,
-            KeyId::Letter('q'),
-            dx * distance,
-            dy * distance,
-        );
+        let far = swipe_distance() * 1.5;
+        drag(&mut session, KeyId::Letter('q'), dx * far, dy * far);
         assert_eq!(
-            session.take_commit().as_deref(),
-            Some("1"),
-            "往 ({dx}, {dy}) 方向滑也该出角标 1"
+            session.take_commit(),
+            None,
+            "往 ({dx}, {dy}) 方向滑了 {far} 像素也不该出角标——只认往下"
         );
     }
+
+    // 往下：照旧出角标（q 的角标是 1）
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let down = swipe_distance() * 1.2;
+    drag(&mut session, KeyId::Letter('q'), 0.0, down);
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("1"),
+        "往下滑该出角标 1"
+    );
 }
 
 /// 没有角标的键（数字页、符号页、功能键）往下滑，仍按普通点击算。
@@ -1037,7 +1057,7 @@ fn the_popup_shows_what_will_actually_be_typed() {
     );
 
     // 往下滑够远 → 这一下改判成角标
-    session.touch(MotionAction::Move, POINTER, x, y + swipe_distance());
+    session.touch(MotionAction::Move, POINTER, x, y + swipe_past());
     session.popup_surface();
 
     assert_eq!(
@@ -1047,11 +1067,41 @@ fn the_popup_shows_what_will_actually_be_typed() {
     );
 
     // 抬起真的打出 6，跟气泡上写的一致
-    session.touch(MotionAction::Up, POINTER, x, y + swipe_distance());
+    session.touch(MotionAction::Up, POINTER, x, y + swipe_past());
     assert_eq!(
         session.take_commit().as_deref(),
         Some("6"),
         "打出来的该是 6"
+    );
+}
+
+/// 往下滑的过程里手指会**先滑出键**（键矮的屏上更明显），那一瞬间记下的「作废」
+/// 不该让气泡消失——手势既然认出来了，这一下就照角标兑现。
+///
+/// 与 ⌫ 上滑清空那次是同一个坑（见 `the_backspace_popup_warns_before_clearing`）：
+/// `sliding` 一置上，`refresh_pressed` 就不认这根手指，气泡当场没了。
+#[test]
+fn the_popup_survives_a_downward_swipe_that_leaves_the_key() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    // 换一台矮屏：键高降到 200 点，行高 41.75、半个键高约 21 点——
+    // **够到 22 点的阈值之前，手指已经出了键**，正好走到这条路上
+    session.configure(WIDTH, 640.0, DENSITY, 0.0, false, false);
+    session.keyboard_surface();
+
+    let (x, y) = key_centre(&session, KeyId::Letter('y'));
+    let out_of_key = 21.0 * DENSITY;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x, y + out_of_key);
+    session.touch(MotionAction::Move, POINTER, x, y + swipe_distance() * 1.2);
+    session.popup_surface();
+
+    assert_eq!(
+        session.keyboard.as_ref().unwrap().popup_id(),
+        Some(KeyId::Literal('6')),
+        "滑出键之后气泡该还在，且写的是真正会打出去的 6"
     );
 }
 
