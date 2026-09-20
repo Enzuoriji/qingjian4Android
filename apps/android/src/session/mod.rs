@@ -77,6 +77,9 @@ pub struct Session {
     /// 深色主题。
     dark: bool,
 
+    /// 横屏。转屏时壳会重新报一次，键跟着矮一截。
+    landscape: bool,
+
     /// 键盘那台前台。`None` 表示键盘不由这里画（将来改用安卓原生控件时就是它），
     /// 位图那条路随之断掉。
     keyboard: Option<Keyboard>,
@@ -182,6 +185,7 @@ impl Session {
             density: 1.0,
             bottom_inset: 0.0,
             dark: false,
+            landscape: false,
             keyboard: Some(Keyboard::new()),
             shift: ShiftState::default(),
             mode: InputMode::default(),
@@ -238,22 +242,31 @@ impl Session {
     ///
     /// 高度要回传是因为安卓只按视图量出来的尺寸给输入法窗口大小——壳得知道自己该占多高，
     /// 否则窗口会被撑满整屏。几项都没变时不重画。
-    pub fn configure(&mut self, width: f32, density: f32, bottom_inset: f32, dark: bool) -> f32 {
+    pub fn configure(
+        &mut self,
+        width: f32,
+        density: f32,
+        bottom_inset: f32,
+        dark: bool,
+        landscape: bool,
+    ) -> f32 {
         let density = if density > 0.0 { density } else { 1.0 };
         let bottom_inset = bottom_inset.max(0.0);
         if (self.width - width).abs() > 0.5
             || (self.density - density).abs() > 0.01
             || (self.bottom_inset - bottom_inset).abs() > 0.5
             || self.dark != dark
+            || self.landscape != landscape
         {
             self.width = width;
             self.density = density;
             self.bottom_inset = bottom_inset;
             self.dark = dark;
+            self.landscape = landscape;
             self.bar_dirty = true;
         }
         if let Some(keyboard) = self.keyboard.as_mut() {
-            keyboard.set_metrics(width, density, bottom_inset, dark);
+            keyboard.set_metrics(width, density, bottom_inset, dark, landscape);
         }
         self.bar_height() + self.keyboard_height() + self.bottom_inset
     }

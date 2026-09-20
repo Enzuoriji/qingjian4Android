@@ -75,7 +75,7 @@ fn type_text(session: &mut Session, text: &str) {
 
 fn ready() -> Option<Session> {
     let mut session = Session::open(&dictionary()?, "zh-CN", None).ok()?;
-    session.configure(WIDTH, DENSITY, 0.0, false);
+    session.configure(WIDTH, DENSITY, 0.0, false, false);
     // 两块面都画一次，命中矩形才存在
     session.keyboard_surface();
     session.bar_surface();
@@ -592,7 +592,7 @@ fn the_bundled_emoji_table_puts_emoji_in_the_candidates() {
         return;
     };
     let mut session = Session::open(&dictionary, "zh-CN", Some(&bundle)).expect("会话该能打开");
-    session.configure(WIDTH, DENSITY, 0.0, false);
+    session.configure(WIDTH, DENSITY, 0.0, false, false);
     session.keyboard_surface();
     session.bar_surface();
 
@@ -1151,6 +1151,27 @@ fn the_cursor_does_not_move_while_composing() {
         preedit(&session).as_deref(),
         Some("ni'hao"),
         "拼音该原样留着"
+    );
+}
+
+/// **横屏的键盘矮一截**——横屏竖向空间少，还用竖屏那个高度会占掉半个屏幕。
+#[test]
+fn the_keyboard_is_shorter_in_landscape() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    let portrait = session.configure(WIDTH, DENSITY, 0.0, false, false);
+    let landscape = session.configure(WIDTH, DENSITY, 0.0, false, true);
+
+    assert!(
+        landscape < portrait,
+        "横屏整块输入视图该矮一些：竖屏 {portrait}、横屏 {landscape}"
+    );
+    assert!(
+        portrait - landscape >= 20.0,
+        "矮得太少了，只差 {} 点",
+        portrait - landscape
     );
 }
 

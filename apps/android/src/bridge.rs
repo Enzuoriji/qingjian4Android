@@ -108,10 +108,11 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_configure(
     density: jfloat,
     bottom_inset: jfloat,
     dark: jboolean,
+    landscape: jboolean,
 ) -> jfloat {
     match unsafe { from_handle(handle) } {
         Some(session) => catch_unwind(AssertUnwindSafe(|| {
-            session.configure(width, density, bottom_inset, dark != 0)
+            session.configure(width, density, bottom_inset, dark != 0, landscape != 0)
         }))
         .unwrap_or(0.0),
         None => 0.0,

@@ -39,6 +39,7 @@ object QingjianNative {
         density: Float,
         bottomInset: Float,
         dark: Boolean,
+        landscape: Boolean,
     ): Float
 
     /** 候选条的位图（8 字节头 + 预乘 RGBA）。没配过宽度时是空数组。 */

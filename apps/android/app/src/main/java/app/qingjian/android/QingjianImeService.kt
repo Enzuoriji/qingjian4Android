@@ -274,19 +274,30 @@ class QingjianImeService : InputMethodService() {
         mirrorPreedit()
     }
 
-    /** 按当前屏幕宽度告诉 Rust 该画多宽，并把整块输入视图的高度要回来。 */
     /** 键预览气泡的浮动小窗。位图由 Rust 画，这里只贴上去。 */
     private var popup: KeyPopup? = null
 
+    /**
+     * 告诉 Rust 该画多宽，并把整块输入视图的高度要回来。
+     *
+     * 宽度**优先用视图量出来的那个**，不是屏幕宽：输入法窗口不一定占满屏幕——
+     * 横屏时系统会给挖孔 / 手势区让出边上一条（实测 720×1280 的机器横过来之后
+     * 窗口只从 x=136 起、宽 1144）。照屏幕宽画，键盘会宽出窗口、右边被切掉。
+     *
+     * 视图还没量出来时（首次调用）才退回屏幕宽；量出来之后 `onSizeChanged`
+     * 会再叫一次这里，那时就是准的。
+     */
     private fun configure(view: QingjianSurfaceView) {
         if (handle == 0L) return
         val metrics = resources.displayMetrics
+        val width = if (view.width > 0) view.width else metrics.widthPixels
         QingjianNative.configure(
             handle,
-            metrics.widthPixels / metrics.density,
+            width / metrics.density,
             metrics.density,
             view.bottomInsetPoints,
             isDark(),
+            isLandscape(),
         )
         // 高度不用自己算：视图按两张位图加起来的像素高自己量
         refreshBar(view)
@@ -321,6 +332,10 @@ class QingjianImeService : InputMethodService() {
     }
 
     /** 系统现在是深色吗。 */
+    /** 横屏。键要矮一截——横屏竖向空间少，还用竖屏那个高度会占掉半个屏幕。 */
+    private fun isLandscape(): Boolean =
+        resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     private fun isDark(): Boolean =
         (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES

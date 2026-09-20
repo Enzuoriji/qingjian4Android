@@ -67,6 +67,9 @@ struct Metrics {
 
     /// 深色主题。
     dark: bool,
+
+    /// 横屏。键矮一截，免得占掉半个屏幕。
+    landscape: bool,
 }
 
 impl Default for Metrics {
@@ -76,6 +79,7 @@ impl Default for Metrics {
             density: 1.0,
             bottom_inset: 0.0,
             dark: false,
+            landscape: false,
         }
     }
 }
@@ -192,17 +196,26 @@ impl Keyboard {
     ///
     /// 脏标记由这里自己管：几项都没变就不重画。`Session` 那边不必再判一次——
     /// 各判各的，省得谁忘了同步谁。
-    pub fn set_metrics(&mut self, width: f32, density: f32, bottom_inset: f32, dark: bool) {
+    pub fn set_metrics(
+        &mut self,
+        width: f32,
+        density: f32,
+        bottom_inset: f32,
+        dark: bool,
+        landscape: bool,
+    ) {
         if (self.metrics.width - width).abs() > 0.5
             || (self.metrics.density - density).abs() > 0.01
             || (self.metrics.bottom_inset - bottom_inset).abs() > 0.5
             || self.metrics.dark != dark
+            || self.metrics.landscape != landscape
         {
             self.metrics = Metrics {
                 width,
                 density,
                 bottom_inset,
                 dark,
+                landscape,
             };
             self.dirty = true;
         }
@@ -608,10 +621,15 @@ impl Keyboard {
 
     /// 当前该用的键盘主题。
     fn theme(&self) -> KeyboardTheme {
-        if self.metrics.dark {
+        let base = if self.metrics.dark {
             KeyboardTheme::dark()
         } else {
             KeyboardTheme::light()
+        };
+        if self.metrics.landscape {
+            base.landscape()
+        } else {
+            base
         }
     }
 }
