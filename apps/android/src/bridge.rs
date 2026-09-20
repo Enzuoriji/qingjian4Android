@@ -282,29 +282,6 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_cursorTick(
     }
 }
 
-/// 取走要给用户看的一句话（并清掉）；这次没有就返回 null。比如删词之后说删了什么。
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_app_qingjian_android_QingjianNative_takeMessage(
-    env: JNIEnv,
-    _this: JObject,
-    handle: jlong,
-) -> jstring {
-    let text = match unsafe { from_handle(handle) } {
-        Some(session) => {
-            catch_unwind(AssertUnwindSafe(|| session.take_message())).unwrap_or_default()
-        }
-        None => None,
-    };
-    let Some(text) = text else {
-        return std::ptr::null_mut();
-    };
-
-    match env.new_string(text) {
-        Ok(value) => value.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
-}
-
 /// 该镜像给应用的拼音行（取走并清掉脏标记）。空串表示没在组句，壳应当 `finishComposingText`。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_takePreedit(

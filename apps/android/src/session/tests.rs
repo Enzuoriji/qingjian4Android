@@ -1332,94 +1332,39 @@ fn the_backspace_popup_warns_before_clearing() {
     assert!(warned.len() > plain.len(), "提示是句话，位图该比一个图标大");
 }
 
-/// 候选项**长按 = 删词**：引擎删完会说一句「删了什么」，交给壳报给用户。
+/// **候选条上按住不放不做任何事**——长按就是「慢慢点一下」。
 ///
-/// 节点是壳的心跳：这根手指按够久了就问一次，跟退格连发同一个节拍。
+/// 原先是「长按候选 = 删词」（K8），2026-09-20 用户说这功能没用，摘掉了：
+/// 删词走的是 `Engine::forget`，而引擎缺省那个 `NoLearner` 什么都删不动，
+/// 纯词库词更是本来就没学习记录可清——接上 `Learner` 才有意义，见
+/// `docs/plan/android-keyboard.md` 的 K8 与 K8+。
 ///
-/// **这条只验「有话要说」，不验「词真的没了」**——三句提示（删了用户词 / 忘了学习 /
-/// 词库里的词没有学习记录）里任何一句都算过。之所以只能验到这一步：安卓壳**没有接
-/// `Learner`**（`Session::open` 没调 `Engine::with_learner`，引擎缺省是 `NoLearner`），
-/// 所以 `forget` 永远返回「什么都没删」，任何一个候选都删不动。要真验「词没了」，
-/// 得先把这个接上，再用用户词（而不是纯词库词）写用例。
+/// 这条守着两件事：心跳一直敲（壳每 50ms 一次）时**不删任何东西**，
+/// 以及**松手仍然照常选中那个候选**——长按不该变成一个「按了没反应」的黑洞。
 #[test]
-fn long_pressing_a_candidate_forgets_it() {
+fn holding_a_candidate_does_nothing_but_still_selects_on_release() {
     let Some(mut session) = ready() else {
         return;
     };
     type_text(&mut session, "nihao");
+    let first = drawn(&session).first().map(|text| (*text).to_owned());
     let (x, y) = bar_centre(&session, BarHitId::Candidate(0));
 
     session.touch(MotionAction::Down, POINTER, x, y);
-    assert_eq!(session.take_message(), None, "刚按住还没到点，不该说话");
-
-    // 壳那边按够 400ms 会开始敲节拍
-    session.repeat(POINTER);
-
-    let message = session.take_message().expect("长按候选该删词、并说一句");
-    assert!(message.contains('「'), "那句话该带上词本身：{message}");
-}
-
-/// **一次长按只删一次**：节拍会一直敲，不记一笔就会删了又删、还反复弹提示。
-#[test]
-fn the_long_press_only_forgets_once() {
-    let Some(mut session) = ready() else {
-        return;
-    };
-    type_text(&mut session, "nihao");
-    let (x, y) = bar_centre(&session, BarHitId::Candidate(0));
-
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.repeat(POINTER);
-    let first = session.take_message().expect("第一次该删");
-
-    for _ in 0..5 {
+    for _ in 0..10 {
         session.repeat(POINTER);
     }
-
-    assert_eq!(session.take_message(), None, "同一次长按不该再删：{first}");
-}
-
-/// 长按删过词之后，**抬手不再把候选打出去**。
-///
-/// 删完会 `recompose` 重查候选，同一格上已经是**另一个词**了——照旧当点击，
-/// 等于把刚删掉的那个位置上顶起来的新词打出去。真机上这就是「长按了、词没删掉、
-/// 反倒多打了一个词」。
-#[test]
-fn releasing_after_a_long_press_commits_nothing() {
-    let Some(mut session) = ready() else {
-        return;
-    };
-    type_text(&mut session, "nihao");
-    let (x, y) = bar_centre(&session, BarHitId::Candidate(0));
-
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.repeat(POINTER);
-    assert!(session.take_message().is_some(), "长按该删词");
-    // 删完候选变了，壳会重取一次位图（抬手前的那一次重画）
     session.bar_surface();
+
+    assert_eq!(
+        drawn(&session).first().map(|text| (*text).to_owned()),
+        first,
+        "按住不放不该动候选"
+    );
 
     session.touch(MotionAction::Up, POINTER, x, y);
 
-    assert_eq!(
-        session.take_commit(),
-        None,
-        "长按删词之后抬手不该上屏任何候选"
-    );
-}
-
-/// 候选条上按住翻页 / 清空那些块，不删词。
-#[test]
-fn long_pressing_the_page_buttons_does_not_forget() {
-    let Some(mut session) = ready() else {
-        return;
-    };
-    type_text(&mut session, "shi");
-    let (x, y) = bar_centre(&session, BarHitId::PageNext);
-
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.repeat(POINTER);
-
-    assert_eq!(session.take_message(), None, "翻页键上长按不该删词");
+    assert_eq!(session.take_commit(), first, "松手该照常选中按住的那个候选");
 }
 
 /// 空格没有字可显示，按住也不弹——弹一个空框子只是晃眼。

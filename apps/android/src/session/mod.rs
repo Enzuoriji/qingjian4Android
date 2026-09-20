@@ -120,9 +120,6 @@ pub struct Session {
     /// 攒着要原样交给应用的按键。壳用 `take_commands` 取走。
     pending_commands: Vec<Command>,
 
-    /// 攒着要给用户看的一句话（删词之后说删了什么）。壳用 `take_message` 取走。
-    pending_message: Option<String>,
-
     /// 此刻按着的、**起手落在候选条上**的手指们，按根记。
     ///
     /// 键盘那半边的手指记在 [`Keyboard`] 自己手里，两边各记各的：一根手指属于谁，
@@ -147,10 +144,6 @@ struct BarPress {
     /// **不能直接把记录删掉**——删了抬起时就不知道刚才从哪儿按的、划了多远，
     /// 翻页手势也就跟着没了。留个标记，抬起时按「不是点击」处理，还够判是不是在划。
     sliding: bool,
-
-    /// 这一下已经把候选删过了（长按删词）。**只能删一次**——
-    /// 连发的节拍会一直敲，不记一笔就会删了又删、还反复弹提示。
-    forgotten: bool,
 }
 
 impl Session {
@@ -206,7 +199,6 @@ impl Session {
             preedit_dirty: true,
             pending_commit: None,
             pending_commands: Vec::new(),
-            pending_message: None,
             pressed: Vec::new(),
         })
     }
@@ -479,6 +471,10 @@ impl Session {
     /// 计时器在壳那边（安卓有现成的 `Handler`，Rust 这边为此引线程或定时器不划算），
     /// 这里只回答**该不该触发**——哪个键连发是输入语义，不该让壳知道。
     /// 按住的键不该连发、或者那根手指已经松了，就什么也不做。
+    ///
+    /// **只有键盘上的键会连发**（现在就是退格）。候选条上按住不放不做任何事——
+    /// 原先这儿挂着「长按候选 = 删词」，2026-09-20 摘掉了，理由见
+    /// `docs/plan/android-keyboard.md` 的 K8。
     pub fn repeat(&mut self, pointer: i32) -> i32 {
         let key = self.keyboard.as_mut().and_then(|keyboard| {
             let key = keyboard.held(pointer).filter(|key| action::repeats(*key))?;
@@ -488,56 +484,8 @@ impl Session {
         });
         if let Some(key) = key {
             self.apply(action::on_key(key));
-            return self.mask();
-        }
-        // 键盘那头没按着要连发的键，就看看候选条这头：**按住候选 = 删词**
-        if let Some(message) = self.forget_held_candidate(pointer) {
-            self.pending_message = Some(message);
         }
         self.mask()
-    }
-
-    /// 这根手指在候选条上按住某个候选够久了 → 删掉它。返回给用户看的一句话。
-    ///
-    /// 删的是**这个候选**：用户词整个删掉、词库词清掉学习记录，
-    /// 引擎那边一条 `forget` 全办了（见 `Engine::forget`）。
-    fn forget_held_candidate(&mut self, pointer: i32) -> Option<String> {
-        let index = self.pressed.iter_mut().find_map(|held| {
-            if held.pointer != pointer || held.forgotten {
-                return None;
-            }
-            let hit = held.hit?;
-            held.forgotten = true;
-            match hit {
-                BarHitId::Candidate(index) => Some(index),
-                _ => None,
-            }
-        })?;
-        // 页内下标 → 跨页下标
-        let candidate = self.candidates.get(self.page * PAGE_SIZE + index)?.clone();
-
-        let forgotten = self.engine.forget(&candidate);
-        let text = &candidate.text;
-        // 这行特意留在 INFO：release 包只发 INFO，而 `Engine::forget` 与 `FrequencyLearner::forget`
-        // 打的都是 debug——真机上那两行等于没有。以后再说「长按候选没反应」，
-        // 看 logcat 有没有这行就能分清是**根本没走到这儿**，还是**走到了但没删动**
-        // （安卓壳没接 Learner 时就是后者：`forgotten` 两个字段都是 false）。
-        tracing::info!(%text, ?forgotten, "长按候选：请求删词");
-        let message = if forgotten.user_word {
-            format!("已删除用户词「{text}」")
-        } else if forgotten.learning {
-            format!("已忘掉对「{text}」的学习记录")
-        } else {
-            format!("「{text}」是词库里的词，没有学习记录")
-        };
-        // 删完候选就变了，重查一遍（页码也回第一页）
-        self.recompose();
-        Some(message)
-    }
-
-    /// 取走要给用户看的那句话（并清掉）。这次没有就返回 `None`。
-    pub fn take_message(&mut self) -> Option<String> {
-        self.pending_message.take()
     }
 
     /// 候选条那半边：按下记一笔、滑出去算取消、抬起时判是点了候选还是划着翻页。
@@ -557,7 +505,6 @@ impl Session {
                 self.pressed.push(BarPress {
                     pointer,
                     hit,
-                    forgotten: false,
                     at: (x, y),
                     sliding: false,
                 });
@@ -575,14 +522,6 @@ impl Session {
                 let Some(ended) = index.map(|index| self.pressed.remove(index)) else {
                     return;
                 };
-                // 这一下已经在长按里删过词了：抬手**什么都不做**。
-                //
-                // 不能照旧当点击——删完 `recompose` 过，同一格上现在是**另一个词**了，
-                // 照原下标上屏等于把刚删的那个位置上的新词打出去。翻页也要一起排掉：
-                // 长按当中手指难免横着漂一点，不该顺手把页翻了。
-                if ended.forgotten {
-                    return;
-                }
                 let hit = self.bar.as_ref().and_then(|bar| bar.hit(x, y));
                 let fired = match ended.hit {
                     Some(id)
