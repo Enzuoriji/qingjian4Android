@@ -36,13 +36,14 @@ impl Renderer {
         let content_height = (theme.height + bottom_inset) * scale;
         // 键只摆到底部那条之前，下面留给系统
         let rows_height = theme.height * scale;
-        let gap = theme.gap * scale;
+        let gap_x = theme.gap_x * scale;
+        let gap_y = theme.gap_y * scale;
         let pixels_wide = content_width.round().max(1.0) as u32;
         let pixels_high = content_height.round().max(1.0) as u32;
 
-        let unit = layout.unit_width(content_width, gap);
+        let unit = layout.unit_width(content_width, gap_x);
         let row_count = layout.rows().len().max(1) as f32;
-        let row_height = (rows_height - gap * (row_count - 1.0)) / row_count;
+        let row_height = (rows_height - gap_y * (row_count - 1.0)) / row_count;
 
         let mut canvas = Canvas::new(pixels_wide, pixels_high)?;
         canvas.fill_rect(0.0, 0.0, content_width, content_height, theme.background);
@@ -51,7 +52,7 @@ impl Renderer {
         let mut y = 0.0;
         for row in layout.rows() {
             // 每行按自己的总宽居中，第 2 行自然得到半键错位
-            let mut x = (content_width - KeyboardLayout::row_width(row, unit, gap)) / 2.0;
+            let mut x = (content_width - KeyboardLayout::row_width(row, unit, gap_x)) / 2.0;
             for key in &row.keys {
                 let key_width = unit * key.weight;
                 self.draw_key(
@@ -69,9 +70,9 @@ impl Renderer {
                     width: key_width,
                     height: row_height,
                 });
-                x += key_width + gap;
+                x += key_width + gap_x;
             }
-            y += row_height + gap;
+            y += row_height + gap_y;
         }
 
         Ok(RenderedKeyboard {
@@ -108,9 +109,36 @@ impl Renderer {
         canvas.fill_round_rect(x, y, width, height, radius, cap);
 
         let (cx, cy) = (x + width / 2.0, y + height / 2.0);
+
+        // 角标先画，它在键帽上方偏上那一条
+        if let Some(hint) = key.hint {
+            let text = hint.to_string();
+            let style = TextStyle::new(
+                theme.hint_font.scaled(scale),
+                theme.hint_font.size,
+                theme.label_hint,
+                theme.text_gamma,
+            );
+            let size = self.measure(&text, &style);
+            self.draw_text(
+                canvas,
+                &text,
+                &style,
+                cx - size.width / 2.0,
+                y + height * HINT_CENTER_Y - size.height / 2.0,
+            );
+        }
+
+        // 有角标的键，主字往下让开那一条；没角标的键照旧居中，跟以前一样
+        let main_cy = if key.hint.is_some() {
+            cy + height * MAIN_SHIFT
+        } else {
+            cy
+        };
+
         match key.id {
-            KeyId::Shift => icon::draw_shift(canvas, cx, cy, height, theme.label),
-            KeyId::Backspace => icon::draw_backspace(canvas, cx, cy, height, theme.label),
+            KeyId::Shift => icon::draw_shift(canvas, cx, main_cy, height, theme.label),
+            KeyId::Backspace => icon::draw_backspace(canvas, cx, main_cy, height, theme.label),
             _ => {
                 let text = label(key, state);
                 let style = TextStyle::new(
@@ -125,12 +153,20 @@ impl Renderer {
                     &text,
                     &style,
                     cx - size.width / 2.0,
-                    cy - size.height / 2.0,
+                    main_cy - size.height / 2.0,
                 );
             }
         }
     }
 }
+
+/// 角标中心落在键帽高度（从顶边算）的这个比例处。
+///
+/// 与 [`MAIN_SHIFT`] 是一对，照实机截图量的：角标压在键帽上沿、主字落在中线下一点。
+const HINT_CENTER_Y: f32 = 0.22;
+
+/// 有角标时主字往下挪的比例——不挪会和角标叠在一起。
+const MAIN_SHIFT: f32 = 0.10;
 
 /// 键帽上写什么字。图标键（Shift / 退格）由 [`Renderer::draw_key`] 提前分走，不会走到这里。
 fn label(key: &Key, state: &KeyboardState) -> String {

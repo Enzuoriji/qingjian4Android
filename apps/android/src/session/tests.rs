@@ -652,6 +652,107 @@ fn lifting_a_hair_past_the_key_edge_still_counts() {
     );
 }
 
+/// 在 `id` 这个键上按下，往下滑 `dy` 像素，再抬起。
+fn swipe_down(session: &mut Session, id: KeyId, dy: f32) {
+    let (x, y) = key_centre(session, id);
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x, y + dy);
+    session.touch(MotionAction::Up, POINTER, x, y + dy);
+    session.bar_surface();
+    session.keyboard_surface();
+}
+
+/// 够下滑阈值那么多像素。
+fn swipe_distance() -> f32 {
+    crate::keyboard::SWIPE_DOWN * DENSITY
+}
+
+/// 字母键往下滑，打出来的是键帽角上那个小字，不是字母本身。
+#[test]
+fn swiping_down_on_a_letter_key_types_its_hint() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    // q 的角标是 1，n 的角标是 ~（中文模式下 `~` 转全角，跟符号页一个规矩）
+    swipe_down(&mut session, KeyId::Letter('q'), swipe_distance());
+    swipe_down(&mut session, KeyId::Letter('n'), swipe_distance());
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("1～"),
+        "下滑该打出角标（中文模式下照引擎的标点表转全角），且不该混进字母"
+    );
+    assert_eq!(
+        preedit(&session),
+        None,
+        "下滑是打符号，不该往拼音缓冲区里塞东西"
+    );
+}
+
+/// 下滑是一记**手势**：手指滑出键外（甚至滑过界）也照样兑现角标。
+///
+/// 这一点和点击相反——点击滑出键外就作废了，下滑滑出去反而说明这手势是真的。
+#[test]
+fn a_swipe_that_leaves_the_key_still_counts() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Letter('q'));
+    // 一路滑进下面那一行键里
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x, y + swipe_distance());
+    session.touch(MotionAction::Move, POINTER, x, y + swipe_distance() * 2.0);
+    session.touch(MotionAction::Up, POINTER, x, y + swipe_distance() * 2.0);
+    session.bar_surface();
+    session.keyboard_surface();
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("1"),
+        "下滑判定之后手指滑到哪儿都该算数"
+    );
+}
+
+/// 手指往下挪几个像素不算下滑——快敲时手指本来就会往下沉一点。
+///
+/// 阈值定小了这条就会挂：正常打字全变成打符号，那是灾难。
+#[test]
+fn a_downward_wobble_still_types_the_letter() {
+    // 每个距离都重开一台，上一次敲进去的字母不会串到下一次
+    for drift in [1.0, 3.0, 6.0, 10.0, swipe_distance() - 1.0] {
+        let Some(mut session) = ready() else {
+            return;
+        };
+        swipe_down(&mut session, KeyId::Letter('q'), drift);
+        assert_eq!(
+            preedit(&session).as_deref(),
+            Some("q"),
+            "只往下挪 {drift} 像素，这一下该还是字母 q"
+        );
+        assert_eq!(session.take_commit(), None, "不该打出角标");
+    }
+}
+
+/// 没有角标的键（数字页、符号页、功能键）往下滑，仍按普通点击算。
+///
+/// 那些键的键帽上写的就是它自己，没有第二层含义可给。
+#[test]
+fn a_key_without_a_hint_treats_the_swipe_as_a_plain_tap() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    tap_key(&mut session, KeyId::Panel(Panel::Digits));
+    swipe_down(&mut session, KeyId::Literal('7'), swipe_distance());
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("7"),
+        "没角标的键下滑该还是它自己"
+    );
+}
+
 #[test]
 fn sliding_over_to_another_key_cancels() {
     let Some(mut session) = ready() else {

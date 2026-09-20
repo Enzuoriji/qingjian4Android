@@ -42,13 +42,13 @@ pub enum KeyId {
 /// 按键的样式。只影响配色，不影响行为。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyStyle {
-    /// 字母键。
+    /// 内容键：字母、数字、符号、空格。白的。
     Letter,
 
-    /// 功能键：Shift、退格、中 / 英、逗号。
+    /// 功能键：Shift、退格、中 / 英、逗号、切页。灰的。
     Function,
 
-    /// 主键：空格、回车。
+    /// 回车。整块键盘上唯一的饱和色。
     Primary,
 }
 
@@ -59,24 +59,38 @@ pub struct Key {
 
     /// 宽度占几个标准单位。普通键 1.0，Shift 与回车 1.5，空格 5.0。
     pub weight: f32,
+
+    /// 键帽上方那个小字：**在键上往下滑**打出来的字符。没有角标就是 `None`。
+    ///
+    /// 存的是**半角原字符**，与 [`KeyId::Literal`] 同一条路——全角与否交给引擎按设置转。
+    pub hint: Option<char>,
 }
 
 impl Key {
     pub const fn new(id: KeyId, weight: f32) -> Self {
-        Self { id, weight }
+        Self {
+            id,
+            weight,
+            hint: None,
+        }
     }
 
-    /// 一个标准宽的字母键。
-    pub const fn letter(c: char) -> Self {
-        Self::new(KeyId::Letter(c), 1.0)
+    /// 一个标准宽的字母键，键帽上角标着 `hint`。
+    pub const fn letter(c: char, hint: char) -> Self {
+        Self {
+            id: KeyId::Letter(c),
+            weight: 1.0,
+            hint: Some(hint),
+        }
     }
 
     /// 这个键按哪种样子画。
     pub const fn style(&self) -> KeyStyle {
         match self.id {
-            // 数字与符号跟字母一样是「内容键」，白的
-            KeyId::Letter(_) | KeyId::Literal(_) => KeyStyle::Letter,
-            KeyId::Space | KeyId::Enter => KeyStyle::Primary,
+            // 数字、符号与空格跟字母一样是「内容键」，白的
+            KeyId::Letter(_) | KeyId::Literal(_) | KeyId::Space => KeyStyle::Letter,
+            // 回车是唯一的强调键
+            KeyId::Enter => KeyStyle::Primary,
             KeyId::Shift | KeyId::Backspace | KeyId::Mode | KeyId::Comma | KeyId::Panel(_) => {
                 KeyStyle::Function
             }

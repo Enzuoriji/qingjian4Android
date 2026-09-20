@@ -16,6 +16,31 @@ fn literals(chars: &str) -> KeyRow {
     }
 }
 
+/// 字母页那三行：字母一行，对应的角标一行。
+///
+/// 角标照 [fcitx5-android 的 `TextKeyboard`] 抄——它把每个键的「下滑打什么」直接写在布局里
+/// （`AlphabetKey(字母, 角标)`），是现成的、被人用过的答案，比我们自己编一套强。
+/// 数字行顶在字母上面；剩下两行是打标点最常用的那些，**不是** US 键盘 Shift 上档的全表
+/// （那套里 `!`、`"` 这些在中文输入里用不上，占着角标反而难记）。
+///
+/// [fcitx5-android 的 `TextKeyboard`]: https://github.com/fcitx5-android/fcitx5-android/blob/master/app/src/main/java/org/fcitx/fcitx5/android/input/keyboard/TextKeyboard.kt
+const LETTER_ROWS: [(&str, &str); 3] = [
+    ("QWERTYUIOP", "1234567890"),
+    ("ASDFGHJKL", "@*+-=/#()"),
+    ("ZXCVBNM", "':\"?!~\\"),
+];
+
+/// 一行字母键，角标跟着一起摆。
+fn letter_row(letters: &str, hints: &str) -> KeyRow {
+    KeyRow {
+        keys: letters
+            .chars()
+            .zip(hints.chars())
+            .map(|(letter, hint)| Key::letter(letter, hint))
+            .collect(),
+    }
+}
+
 /// 一行按键。
 #[derive(Debug, Clone)]
 pub struct KeyRow {
@@ -36,26 +61,21 @@ pub struct KeyboardLayout {
 }
 
 impl KeyboardLayout {
-    /// 字母页：26 键全键盘。
+    /// 字母页：26 键全键盘，每个字母键上都带一个角标（见 [`LETTER_ROWS`]）。
     ///
     /// 最下一行左边多了个 `123`（去数字页），空格的宽度是从它那儿让出来的，这一行还是 9 个单位宽。
-    /// 不含 `'`（隔音符号）：字母排不下，它现在住在符号页。见 `docs/design/keyboard.md`。
+    /// 隔音符号 `'` 没有独立键位，现在挂在 `Z` 的角标上——它原先住符号页，符号页改版后没了着落。
     pub fn letters() -> Self {
-        let row = |letters: &str| KeyRow {
-            keys: letters
-                .chars()
-                .map(|c| Key::letter(c.to_ascii_uppercase()))
-                .collect(),
-        };
+        let [qwerty, home, bottom] = LETTER_ROWS.map(|(letters, hints)| letter_row(letters, hints));
 
         Self {
             rows: vec![
-                row("qwertyuiop"),
-                row("asdfghjkl"),
+                qwerty,
+                home,
                 KeyRow {
                     keys: [
                         vec![Key::new(KeyId::Shift, 1.5)],
-                        row("zxcvbnm").keys,
+                        bottom.keys,
                         vec![Key::new(KeyId::Backspace, 1.5)],
                     ]
                     .concat(),
@@ -196,6 +216,39 @@ mod tests {
         // 26 字母 + Shift / 退格 / 中英 / 空格 / 逗号 / 回车 / 123 / 符（第 3、4 行共 8 个功能键）
         assert_eq!(total, 26 + 8);
         assert_eq!(layout.rows().len(), 4);
+    }
+
+    /// 26 个字母键**个个都带角标**，一个不多一个不少。
+    ///
+    /// 漏一个就是「这个键滑了没反应」，用户只会觉得是坏的；角标重复则是两个键滑出同一个字符，
+    /// 也是错的。
+    #[test]
+    fn every_letter_key_carries_its_own_hint() {
+        let layout = KeyboardLayout::letters();
+        let hints: Vec<char> = layout
+            .rows()
+            .iter()
+            .flat_map(|row| row.keys.iter())
+            .filter(|key| matches!(key.id, KeyId::Letter(_)))
+            .map(|key| key.hint.expect("字母键缺角标"))
+            .collect();
+
+        assert_eq!(hints.len(), 26, "角标数对不上：{hints:?}");
+        let unique: std::collections::HashSet<char> = hints.iter().copied().collect();
+        assert_eq!(unique.len(), 26, "有角标重复了：{hints:?}");
+    }
+
+    /// 有角标的只能是字母键——数字页、符号页那些键的键帽上写的就是它自己，
+    /// 再挂个角标只会让人以为那个键能出两种字符。
+    #[test]
+    fn only_letter_keys_carry_hints() {
+        for panel in [Panel::Digits, Panel::Symbols] {
+            for row in KeyboardLayout::of(panel).rows() {
+                for key in &row.keys {
+                    assert!(key.hint.is_none(), "{panel:?} 上有键带了角标：{:?}", key.id);
+                }
+            }
+        }
     }
 
     /// 每一页都得是四行——**键盘高度是定死的**，页与页行数不一样就会把上面的应用顶一下。

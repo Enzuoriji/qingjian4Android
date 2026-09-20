@@ -17,6 +17,11 @@ use qingjian_render::{
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 
+/// 在键上往下滑这么远（点），兑现的就是键帽角上那个小字而不是字母本身。
+///
+/// 键高 42 点上下，这个阈值约合三分之一——手指正常抖一下到不了，特意滑一下就到了。
+pub(crate) const SWIPE_DOWN: f32 = 12.0;
+
 /// 尺寸与外观。壳在 `Session::configure` 时给一份。
 #[derive(Debug, Clone, Copy)]
 struct Metrics {
@@ -61,6 +66,15 @@ struct Press {
     /// **不能直接把记录删掉**——删了抬起时就不知道刚才是从哪个键按下去的，
     /// 也就判不出「滑出去又滑回来」这一下还算不算。留个标记就够。
     sliding: bool,
+
+    /// 这个键下滑能打出来的字符（键帽角上那个小字）。没有角标就是 `None`。
+    hint: Option<char>,
+
+    /// 已经往下滑够远了，这一下兑现的是角标那个字符。
+    ///
+    /// 与 [`Self::sliding`] 是两回事：下滑是**手势**，手指离开这个键照样算数；
+    /// `sliding` 说的是「点击作废」。
+    hinted: bool,
 }
 
 /// 自绘的键盘前台。
@@ -206,20 +220,28 @@ impl Keyboard {
                     key: self.hit(x, y),
                     at: (x, y),
                     sliding: false,
+                    hint: self.hint_at(x, y),
+                    hinted: false,
                 });
                 self.refresh_pressed();
                 None
             }
             MotionAction::Move => {
                 let hit = self.hit(x, y);
+                let threshold = SWIPE_DOWN * self.metrics.density;
                 if let Some(press) = self
                     .presses
                     .iter_mut()
                     .find(|press| press.pointer == pointer)
                 {
+                    // 往下滑够远就是「要打角标那个字符」。判定了就不再改回去——
+                    // 手指滑到键外面也还算数，这是手势不是点击。
+                    if !press.hinted && press.hint.is_some() && y - press.at.1 >= threshold {
+                        press.hinted = true;
+                    }
                     // 键很大（三十多点宽），手指抖一抖不该掉字，所以「还落在这个键上」就一直算按着；
                     // 滑到别的键或键之间的缝上才取消。候选条那边不是这个判法，得挪出触摸阈值。
-                    if press.key.is_none() || hit != press.key {
+                    if !press.hinted && (press.key.is_none() || hit != press.key) {
                         press.sliding = true;
                     }
                 }
@@ -233,6 +255,11 @@ impl Keyboard {
                     .position(|press| press.pointer == pointer);
                 let ended = index.map(|index| self.presses.remove(index))?;
                 self.refresh_pressed();
+                // 下滑出来的字符走 `Literal`：与数字页、符号页同一个身份，
+                // 翻成动作、全角与否都走已经有的那条路
+                if ended.hinted {
+                    return ended.hint.map(KeyId::Literal);
+                }
                 // 抬起时只要还在那个键上、或者只挪了触摸阈值那么点距离，都算这一下按着了
                 match ended.key {
                     Some(key)
@@ -271,6 +298,19 @@ impl Keyboard {
         self.rendered
             .as_ref()
             .and_then(|keyboard| keyboard.hit(x, y))
+    }
+
+    /// 这个位置上的键，往下滑能打出什么字符。键没有角标（或没命中键）就是 `None`。
+    ///
+    /// 角标是**布局**里的数据，不在命中矩形里——命中矩形只记「这一格是哪个键」。
+    fn hint_at(&self, x: f32, y: f32) -> Option<char> {
+        let id = self.hit(x, y)?;
+        self.layout
+            .rows()
+            .iter()
+            .flat_map(|row| row.keys.iter())
+            .find(|key| key.id == id)
+            .and_then(|key| key.hint)
     }
 
     /// 把「有没有键按着」记下来，只影响键帽的颜色。
