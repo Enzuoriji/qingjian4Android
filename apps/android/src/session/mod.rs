@@ -518,6 +518,11 @@ impl Session {
 
         let forgotten = self.engine.forget(&candidate);
         let text = &candidate.text;
+        // 这行特意留在 INFO：release 包只发 INFO，而 `Engine::forget` 与 `FrequencyLearner::forget`
+        // 打的都是 debug——真机上那两行等于没有。以后再说「长按候选没反应」，
+        // 看 logcat 有没有这行就能分清是**根本没走到这儿**，还是**走到了但没删动**
+        // （安卓壳没接 Learner 时就是后者：`forgotten` 两个字段都是 false）。
+        tracing::info!(%text, ?forgotten, "长按候选：请求删词");
         let message = if forgotten.user_word {
             format!("已删除用户词「{text}」")
         } else if forgotten.learning {
@@ -570,6 +575,14 @@ impl Session {
                 let Some(ended) = index.map(|index| self.pressed.remove(index)) else {
                     return;
                 };
+                // 这一下已经在长按里删过词了：抬手**什么都不做**。
+                //
+                // 不能照旧当点击——删完 `recompose` 过，同一格上现在是**另一个词**了，
+                // 照原下标上屏等于把刚删的那个位置上的新词打出去。翻页也要一起排掉：
+                // 长按当中手指难免横着漂一点，不该顺手把页翻了。
+                if ended.forgotten {
+                    return;
+                }
                 let hit = self.bar.as_ref().and_then(|bar| bar.hit(x, y));
                 let fired = match ended.hit {
                     Some(id)

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.SystemClock
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
@@ -68,6 +69,9 @@ class QingjianSurfaceView(context: Context) : View(context) {
     /** 每根手指按下的时刻，用来判够不够久。 */
     private val downAt = HashMap<Int, Long>()
 
+    /** 已经报过「按住够久了」的手指。每个按下只报一次，免得每 50ms 刷一行日志。 */
+    private val reported = HashSet<Int>()
+
     /**
      * 连发 / 移光标共用的一拍：每 50ms 把所有按着的手指各报一次，再排下一拍。
      *
@@ -78,7 +82,13 @@ class QingjianSurfaceView(context: Context) : View(context) {
         override fun run() {
             val now = SystemClock.uptimeMillis()
             for ((pointer, at) in downAt) {
-                if (now - at >= REPEAT_DELAY_MS) onRepeat?.invoke(pointer)
+                if (now - at >= REPEAT_DELAY_MS) {
+                    // 每个按下报一次。**这是「心跳真跳起来了」的唯一证据**——长按连删、
+                    // 空格拖光标、长按删词三条路都挂在这个心跳上，而它们在模拟器上都验过、
+                    // 真机上出过「按了没反应」。有这行才分得清是心跳没跳，还是心跳跳了但后面没反应。
+                    if (reported.add(pointer)) Log.i(TAG, "按住够久了，开始走长按（pointer=$pointer）")
+                    onRepeat?.invoke(pointer)
+                }
                 onCursorTick?.invoke(pointer)
             }
             // 手指还按着就接着排；全松了的话 UP 那边已经把回调撤了
@@ -146,13 +156,16 @@ class QingjianSurfaceView(context: Context) : View(context) {
                 // 第一根手指落下时才起计时器，后面几根跟着一起算
                 if (downAt.isEmpty()) postDelayed(ticker, REPEAT_DELAY_MS)
                 downAt[pointer] = SystemClock.uptimeMillis()
+                reported.remove(pointer)
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
                 downAt.remove(pointer)
+                reported.remove(pointer)
                 if (downAt.isEmpty()) removeCallbacks(ticker)
             }
             MotionEvent.ACTION_CANCEL -> {
                 downAt.clear()
+                reported.clear()
                 removeCallbacks(ticker)
             }
         }
@@ -178,5 +191,10 @@ class QingjianSurfaceView(context: Context) : View(context) {
             y += it.height
         }
         keyboard?.let { canvas.drawBitmap(it, 0f, y, null) }
+    }
+
+    private companion object {
+        /** 与 Rust 侧 logcat 标签、[QingjianImeService] 一致：`adb logcat -s Qingjian` 一网打尽。 */
+        const val TAG = "Qingjian"
     }
 }

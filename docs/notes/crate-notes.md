@@ -258,6 +258,13 @@ Server 每次轮询比对用户 `dicts\` 的路径 / mtime / 长度快照，配�
 JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `QingjianNative.kt` 一一对应（类名与包名参与符号名），**改一边必须同时改另一边**。
 设计与取舍见 `docs/design/keyboard.md`。
 
+**已知缺口：安卓壳没接 `Learner`**（2026-09-20 查 K8 真机无效时发现）。`Engine::new` 缺省挂的是 `NoLearner`，
+macOS / Windows / CLI 都显式 `with_learner(FrequencyLearner)`，只有 `Session::open` 光调了 `with_emoji`。后果两条：
+一是**安卓上完全不学习**——用户词、词频、个人 n-gram 一条都不记，打过很多遍的词不会往前排；
+二是**长按删候选（K8）删不动**：`Engine::forget` 走的就是 Learner，没有它永远返回「什么都没删」
+（纯词库词本来也只是清学习记录，一并落空）。要接得先给 `open` 一个可写的用户目录（`filesDir`），
+再把 `flush_learning` 挂到 `onFinishInput` / `onDestroy`。**接上之前，别在真机上试 K8 然后怀疑触摸链路。**
+
 - **位图过 JNI**：`surface::encode` 出「8 字节头（宽高，各 u32 大端）+ 预乘 RGBA」，Kotlin 侧 `Bitmap.createBitmap(w, h, ARGB_8888)` + `copyPixelsFromBuffer` 原样吃下——
   `ARGB_8888` 的**内存布局**就是预乘 RGBA（`ARGB` 只是 `getPixel` 那套打包的说法），既不换通道也不重新预乘。这条当初用一次性探针在本机与设备上实测确认过（探针已删，结论留着），别靠记忆。
   **不要用 `setPixels(int[])`**，那条路径假定非预乘。
@@ -274,6 +281,18 @@ JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `Qin
   **多指那套状态机也跟着分成两份**（`keyboard/presses` 与 `Session::pressed`），两边的判定**不一样**：
   键「还落在同一个键上」就一直算按着（键大，抖几像素不该掉字），候选条「挪出触摸阈值」才算没挪窝（横向拖是翻页手势）；
   共用的 `within_slop` 在 `src/touch.rs`，阈值那点事只留一个版本。
+- **手势阈值是 16 点**（`SWIPE`，2026-09-20）：键上往**任意方向**滑够这么远 = 兑现角标那个字符，
+  ⌫ 往上滑够这么远 = 松手清空。原先定的 12 点**太近**——拇指快敲落地时会滚一下，随手就是十来点，
+  于是正常打字时不时蹦出个角标符号（用户报的「快打误打符号」）。16 取的是**两倍 `TOUCH_SLOP`**，
+  安卓自己那把尺子也是 8dp。
+  **横向的天花板是半个键宽**（360pt 屏上约 15 点）：「手指离开按下的键 = 这一下作废」是另一条规矩
+  （滑到隔壁键上要能反悔），阈值一越过这条线，横向快敲就变成**既不出符号、也不掉字**。键高 42 点给的是纵向余量。
+  手感常数，只能靠真机调；`session/tests.rs::a_wobble_still_types_the_letter` 按半键宽截了横向位移，就是在提醒这条上限。
+- **认成手势的手指不再因「滑出键外」作废**：`hinted` / `cursor_started` / `clearing` 三个都排掉了。
+  `clearing` 是补的——⌫ 一往上滑手指就出键，原先 `sliding` 一置上，`refresh_pressed` 就不认这根手指，
+  气泡当场消失，而用户正是靠气泡上那句「松手清空」才知道自己在干什么。
+- **长按删词之后抬手不能再算点击**（`BarPress::forgotten`）：删完 `recompose` 过，同一格上已经是**另一个词**了，
+  照原下标上屏等于把刚删掉的位置上顶起来的新词打出去；翻页也一并排掉（长按当中手指难免横着漂一点）。
 - **按键震动（`KeyFeedback.kt`，2026-09-18）**：**直连马达**（`VibrationEffect.createOneShot`，20 ms），
   **不走 `View.performHapticFeedback`**——那条路要经「视图 → 窗口 → 系统」三层转手，任何一层不买账都是
   **静默不震**：真机上带着 `VIRTUAL_KEY` + `FLAG_IGNORE_GLOBAL_SETTING` + `VIBRATE` 权限照样不震，

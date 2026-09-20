@@ -156,6 +156,9 @@ class QingjianImeService : InputMethodService() {
         // 删词之后引擎会说一句「删了什么」，用系统的吐司报给用户——
         // 那是**系统级的一句话**（跟通知一类），不是键盘那块显示面，用原生的正合适
         QingjianNative.takeMessage(handle)?.let {
+            // 先记一行再弹：吐司是系统画的，厂商 ROM 拦掉、或者压在键盘底下都是可能的，
+            // 那样「弹没弹」就说不清了。日志在，至少能分清**没话说**和**说了但没看见**
+            Log.i(TAG, "要说一句：$it")
             Toast.makeText(this, it, Toast.LENGTH_SHORT).show()
         }
         val elapsed = SystemClock.elapsedRealtime() - started

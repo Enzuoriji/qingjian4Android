@@ -749,14 +749,26 @@ fn a_swipe_that_leaves_the_key_still_counts() {
 #[test]
 fn a_wobble_still_types_the_letter() {
     let drift = swipe_distance() - 1.0;
+    // **横向只能挪到键里边为止**：挪出键外这一下就作废了（滑到隔壁键上要能反悔，
+    // 见 `sliding_over_to_another_key_cancels`），而键只有三十来点宽——半键还不到 `drift`。
+    // 纵向余量够（键高 42 点），直接用到阈值。这条同时也是给 `SWIPE` 的上限提个醒：
+    // 阈值一超过半键宽，横向快敲就会滑出键外，变成既不出符号、也不掉字。
+    let half_key = {
+        let Some(session) = ready() else {
+            return;
+        };
+        let (_, _, width, _) = key_rect(&session, KeyId::Letter('q'));
+        width / 2.0 - 2.0
+    };
+    let across = drift.min(half_key);
     // 每个方向、每个距离都重开一台，上一次敲进去的字母不会串到下一次
     for (dx, dy) in [
         (0.0, 1.0),
         (0.0, 3.0),
         (-6.0, 0.0),
         (0.0, 10.0),
-        (drift, 0.0),
-        (-drift, 0.0),
+        (across, 0.0),
+        (-across, 0.0),
         (0.0, -drift),
         (0.0, drift),
     ] {
@@ -768,6 +780,29 @@ fn a_wobble_still_types_the_letter() {
             preedit(&session).as_deref(),
             Some("q"),
             "只挪 ({dx}, {dy}) 像素（不够阈值），这一下该还是字母 q"
+        );
+        assert_eq!(session.take_commit(), None, "不该打出角标");
+    }
+}
+
+/// **拇指快敲落地时滚一下，不该蹦出角标符号**——用户报的「快打误打符号」。
+///
+/// 阈值原先定在 12 点，而快敲时手指随手滚一下正好够得着，于是正常打字时不时冒出个 `1`、`@`。
+/// 这条把**旧阈值那么大的位移**钉死在「还是字母」上：谁把 [`SWIPE`](crate::keyboard::SWIPE)
+/// 调回去，这里先炸。四个方向都试，因为滑动现在不看方向。
+#[test]
+fn a_drift_the_size_of_the_old_threshold_no_longer_types_a_symbol() {
+    // 改小之前那个阈值（点 → 像素）
+    let old = 12.0 * DENSITY;
+    for (dx, dy) in [(0.0, 1.0), (1.0, 0.0), (0.7, 0.7), (-0.7, 0.7), (0.0, -1.0)] {
+        let Some(mut session) = ready() else {
+            return;
+        };
+        drag(&mut session, KeyId::Letter('q'), dx * old, dy * old);
+        assert_eq!(
+            preedit(&session).as_deref(),
+            Some("q"),
+            "往 ({dx}, {dy}) 挪 {old} 像素（旧阈值那么大）该还是字母 q"
         );
         assert_eq!(session.take_commit(), None, "不该打出角标");
     }
@@ -1300,6 +1335,12 @@ fn the_backspace_popup_warns_before_clearing() {
 /// 候选项**长按 = 删词**：引擎删完会说一句「删了什么」，交给壳报给用户。
 ///
 /// 节点是壳的心跳：这根手指按够久了就问一次，跟退格连发同一个节拍。
+///
+/// **这条只验「有话要说」，不验「词真的没了」**——三句提示（删了用户词 / 忘了学习 /
+/// 词库里的词没有学习记录）里任何一句都算过。之所以只能验到这一步：安卓壳**没有接
+/// `Learner`**（`Session::open` 没调 `Engine::with_learner`，引擎缺省是 `NoLearner`），
+/// 所以 `forget` 永远返回「什么都没删」，任何一个候选都删不动。要真验「词没了」，
+/// 得先把这个接上，再用用户词（而不是纯词库词）写用例。
 #[test]
 fn long_pressing_a_candidate_forgets_it() {
     let Some(mut session) = ready() else {
@@ -1336,6 +1377,34 @@ fn the_long_press_only_forgets_once() {
     }
 
     assert_eq!(session.take_message(), None, "同一次长按不该再删：{first}");
+}
+
+/// 长按删过词之后，**抬手不再把候选打出去**。
+///
+/// 删完会 `recompose` 重查候选，同一格上已经是**另一个词**了——照旧当点击，
+/// 等于把刚删掉的那个位置上顶起来的新词打出去。真机上这就是「长按了、词没删掉、
+/// 反倒多打了一个词」。
+#[test]
+fn releasing_after_a_long_press_commits_nothing() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let (x, y) = bar_centre(&session, BarHitId::Candidate(0));
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.repeat(POINTER);
+    assert!(session.take_message().is_some(), "长按该删词");
+    // 删完候选变了，壳会重取一次位图（抬手前的那一次重画）
+    session.bar_surface();
+
+    session.touch(MotionAction::Up, POINTER, x, y);
+
+    assert_eq!(
+        session.take_commit(),
+        None,
+        "长按删词之后抬手不该上屏任何候选"
+    );
 }
 
 /// 候选条上按住翻页 / 清空那些块，不删词。
