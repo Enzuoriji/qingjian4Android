@@ -68,6 +68,24 @@ fn swipe_vertically(session: &mut Session, dy: f32) {
     session.keyboard_surface();
 }
 
+/// 在剪贴板记录区拖一段、松手、**再报一个抬手速度**——一次「甩」。
+///
+/// 速度要在 UP **之后**报（与壳那边一致）：Rust 靠「刚才是谁在滚」判该不该接着滑，
+/// 而那个记录是移动时记下的。
+fn flick_up(session: &mut Session, distance: f32, velocity: f32) {
+    let (x, y) = key_centre(session, KeyId::Clipboard(0));
+    session.touch(MotionAction::Down, POINTER, x, y);
+    let step = 10.0 * DENSITY;
+    let mut moved = 0.0;
+    while moved < distance {
+        moved = (moved + step).min(distance);
+        session.touch(MotionAction::Move, POINTER, x, y - moved);
+    }
+    session.touch(MotionAction::Up, POINTER, x, y - moved);
+    session.start_fling(POINTER, 0.0, velocity);
+    session.keyboard_surface();
+}
+
 /// 往上拖：看后面的条目。
 fn scroll_up(session: &mut Session, distance: f32) {
     swipe_vertically(session, -distance);
@@ -504,7 +522,7 @@ fn a_flick_glides_on_after_the_finger_leaves() {
     drag_then_lift(&mut session, viewport * 0.2);
 
     // 抬手速度 2000 像素/秒、往左甩（向右为正，所以是负的）
-    let flags = session.start_fling(POINTER, -2000.0);
+    let flags = session.start_fling(POINTER, -2000.0, 0.0);
     assert_eq!(flags & flags::FLING, flags::FLING, "够快就该甩起来");
     assert!(
         session
@@ -544,7 +562,7 @@ fn a_slow_lift_does_not_glide() {
     drag_then_lift(&mut session, 120.0);
 
     // 100 像素/秒：比「甩」那条线（200）低
-    let flags = session.start_fling(POINTER, -100.0);
+    let flags = session.start_fling(POINTER, -100.0, 0.0);
     assert_eq!(flags & flags::FLING, 0, "慢慢松手不该自己跑起来");
     let before = drawn(&session)
         .iter()
@@ -573,7 +591,7 @@ fn a_tap_on_the_bar_does_not_glide() {
     session.touch(MotionAction::Down, POINTER, 120.0, y);
     session.touch(MotionAction::Up, POINTER, 120.0, y);
 
-    let flags = session.start_fling(POINTER, -3000.0);
+    let flags = session.start_fling(POINTER, -3000.0, 0.0);
     assert_eq!(flags & flags::FLING, 0, "点一下不是甩，速度再快也不算");
 }
 
@@ -586,7 +604,7 @@ fn a_new_touch_stops_the_glide() {
     type_text(&mut session, "shi");
     drag_then_lift(&mut session, 120.0);
     assert_ne!(
-        session.start_fling(POINTER, -2000.0) & flags::FLING,
+        session.start_fling(POINTER, -2000.0, 0.0) & flags::FLING,
         0,
         "先得甩起来"
     );
@@ -610,7 +628,7 @@ fn a_new_composition_stops_the_glide() {
     type_text(&mut session, "shi");
     drag_then_lift(&mut session, 120.0);
     assert_ne!(
-        session.start_fling(POINTER, -2000.0) & flags::FLING,
+        session.start_fling(POINTER, -2000.0, 0.0) & flags::FLING,
         0,
         "先得甩起来"
     );
@@ -635,7 +653,7 @@ fn the_glide_stops_at_the_end_of_the_strip() {
     drag_then_lift(&mut session, 120.0);
     // 比安卓能给的最大速度还快：一定要够到带子尾巴
     assert_ne!(
-        session.start_fling(POINTER, -200_000.0) & flags::FLING,
+        session.start_fling(POINTER, -200_000.0, 0.0) & flags::FLING,
         0,
         "先得甩起来"
     );
@@ -2351,6 +2369,75 @@ fn a_long_drag_stops_at_the_end_of_the_list() {
         "六条比一屏多一条，只该滚一格"
     );
     assert_eq!(session.clipboard_first(), 1, "滚一格就该从第二条起");
+}
+
+/// 剪贴板列表**甩一下会自己接着滑**——与候选条那条带子同一套惯性，只是方向竖着。
+#[test]
+fn a_flick_keeps_the_clipboard_list_gliding() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    for index in 0..12 {
+        session.note_clipboard(&format!("第 {index} 条"));
+    }
+    open_clipboard(&mut session);
+    let pitch = session.clipboard_pitch();
+
+    // 轻轻拖半格、往上甩一把（速度是像素/秒，安卓的 y 向下为正，所以往上是负数）
+    flick_up(&mut session, pitch * DENSITY * 0.4, -2500.0);
+    let lifted = session.clipboard_scroll;
+    assert!(lifted > 0.0, "拖那一下本身也该滚一点，实际 {lifted}");
+
+    // 手抬走了，列表还带着速度在走
+    for _ in 0..8 {
+        let flags_after = session.fling_step(16.0);
+        assert!(
+            flags_after & flags::FLING != 0,
+            "还在滑就该举着 FLING 的牌子（壳照它接着敲帧）"
+        );
+    }
+    let glided = session.clipboard_scroll;
+    assert!(
+        glided > lifted,
+        "甩出去之后该自己滑一段：{lifted} → {glided}"
+    );
+
+    // 一直敲到停：不会永远滑下去，也不会滑过界
+    let mut frames = 0;
+    while session.fling_step(16.0) & flags::FLING != 0 {
+        frames += 1;
+        assert!(frames < 600, "十秒还没停，衰减写错了");
+    }
+    let max = (12 - CLIPBOARD_CELLS) as f32 * pitch;
+    assert!(
+        session.clipboard_scroll <= max + 0.01,
+        "甩到头就该停住，实际 {}（上限 {max}）",
+        session.clipboard_scroll
+    );
+}
+
+/// 剪贴板列表上慢慢拖到一半松手**不接着滑**——那不是「甩」。
+///
+/// 与候选条那条带子同一个门槛（`Fling::MIN_START`），所以这里只验它接上了、没接反。
+#[test]
+fn a_slow_lift_on_the_clipboard_does_not_glide() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    for index in 0..12 {
+        session.note_clipboard(&format!("第 {index} 条"));
+    }
+    open_clipboard(&mut session);
+
+    flick_up(&mut session, 40.0 * DENSITY, -50.0);
+    let lifted = session.clipboard_scroll;
+    for _ in 0..8 {
+        session.fling_step(16.0);
+    }
+    assert_eq!(
+        session.clipboard_scroll, lifted,
+        "慢慢地松手，手指停在哪儿就是哪儿"
+    );
 }
 
 /// 滚下去之后**点的是屏幕上那一格对着的那条**，不是整份第一条。

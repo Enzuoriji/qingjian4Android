@@ -314,9 +314,11 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_clipboardChanged
     }
 }
 
-/// 一根手指抬起了，报上它的横向速度（**像素/秒，向右为正**，`VelocityTracker` 的单位与方向）。
+/// 一根手指抬起了，报上它的速度（**像素/秒**，横向向右为正、纵向向下为正，
+/// 都是 `VelocityTracker` 的单位与方向）。
 ///
-/// 够快就让候选条接着滑一段——甩不甩、甩多远由 Rust 定（[`crate::session::Session::start_fling`]），
+/// 够快就让刚才滚的那个接着滑一段——候选条横着滑、剪贴板列表竖着滑，两个分量各归各的。
+/// 甩不甩、甩多远由 Rust 定（[`crate::session::Session::start_fling`]），
 /// 壳只管量速度（安卓自带 `VelocityTracker`，自己算得再去摸时间戳）。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_fling(
@@ -325,10 +327,11 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_fling(
     handle: jlong,
     pointer: jint,
     velocity_x: jfloat,
+    velocity_y: jfloat,
 ) -> jint {
     match unsafe { from_handle(handle) } {
         Some(session) => catch_unwind(AssertUnwindSafe(|| {
-            session.start_fling(pointer, velocity_x)
+            session.start_fling(pointer, velocity_x, velocity_y)
         }))
         .unwrap_or(0),
         None => 0,

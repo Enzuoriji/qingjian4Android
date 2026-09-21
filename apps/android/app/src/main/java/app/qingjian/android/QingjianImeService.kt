@@ -173,9 +173,9 @@ class QingjianImeService : InputMethodService() {
             afterInput(view, flags, started)
         }
         // 抬手速度：壳只管把安卓量到的速度报上去，甩不甩、甩多远是 Rust 的事。
-        view.onFling = { pointer, velocityX ->
+        view.onFling = { pointer, velocityX, velocityY ->
             val started = SystemClock.elapsedRealtime()
-            val flags = QingjianNative.fling(handle, pointer, velocityX)
+            val flags = QingjianNative.fling(handle, pointer, velocityX, velocityY)
             afterInput(view, flags, started)
         }
         // 惯性的一帧：走多少由 Rust 按「过去多久」算。掩码里还有 FLAG_FLING 就接着敲。

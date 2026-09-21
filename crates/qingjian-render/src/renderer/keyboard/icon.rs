@@ -1,18 +1,30 @@
-//! 键帽上的图标：上档箭头与退格。
+//! 键盘上那几个图标：⇧ 大小写、⌫ 退格，还有工具页那一格上的剪贴板。
 //!
-//! 画路径不画字形——`U+21E7`（⇧）与 `U+232B`（⌫）这类符号在某些设备上会落进彩色 emoji
-//! 字体或被回退链吃掉，画出来不可控。理由与 `gear.rs` 相同。
+//! **路径是生成的**，来自 `assets/icon/material/` 里那几张 Google **Material Symbols** 的 svg
+//! （Apache-2.0）：
 //!
-//! 画法也照 `gear.rs`：先画进一张独立的小图，需要挖空的部分用 `BlendMode::Clear` 打透
-//! （打透处透明，贴到键帽上就露出键帽自己的颜色），最后整张贴上去。直接在键盘画布上 Clear
-//! 会把键盘挖出一个透明的洞，露出后面的应用。
+//! ```sh
+//! python assets/icon/render-key-icon-path.py
+//! ```
+//!
+//! 写出 [`path`]，生成物随仓库提交。**别手写坐标**——2026-09-21 之前这几个图标是手写的
+//! `move_to` / `line_to`，用户看了说「不要这样做去网上找可以用的」，于是换成现成的。
+//!
+//! 这里只做一件事：把那段路径按**它自己的包围盒**缩成目标边长、挪到要画的位置、填色。
+//! 与 [`crate::logo`] 那套同一个路数。Material 的图标靠**子路径方向**挖空（外轮廓顺时针、
+//! 内轮廓逆时针），所以直接按默认的非零规则填就行，不必自己打孔。
+//!
+//! 画路径不画字形这条理由与 [`crate::gear`] 一样：`U+21E7`（⇧）这类符号在某些设备上会落进
+//! 彩色 emoji 字体或被回退链吃掉，画出来不可控。
 
-use tiny_skia::{BlendMode, PathBuilder};
+mod path;
 
-use crate::canvas::{Canvas, round_rect};
+use tiny_skia::{BlendMode, Transform};
+
+use crate::canvas::Canvas;
 use crate::color::Color;
 
-/// 图标边长相对键高的比例。
+/// 图标边长相对**键高**的比例。
 ///
 /// **0.46 是照实机截图反推的**：参考图上 ⌫ 那个图标高占键高 0.33，而画法里图标
 /// 只占这张方块的 0.72，0.33 ÷ 0.72 ≈ 0.46。
@@ -28,142 +40,70 @@ const MAX_SIZE: f32 = 26.0;
 /// 图标边长的下限（**点**）。键再小也别小到看不清。
 const MIN_SIZE: f32 = 6.0;
 
-/// 画上档箭头 ⇧，居中在 `(cx, cy)`。
-pub(crate) fn draw_shift(
-    canvas: &mut Canvas,
-    cx: f32,
-    cy: f32,
-    key_height: f32,
-    scale: f32,
-    color: Color,
-) {
-    let Some((mut layer, size)) = layer(key_height, scale) else {
-        return;
-    };
-    let s = size;
-    let mut path = PathBuilder::new();
-    path.move_to(s * 0.50, s * 0.10);
-    path.line_to(s * 0.96, s * 0.52);
-    path.line_to(s * 0.70, s * 0.52);
-    path.line_to(s * 0.70, s * 0.90);
-    path.line_to(s * 0.30, s * 0.90);
-    path.line_to(s * 0.30, s * 0.52);
-    path.line_to(s * 0.04, s * 0.52);
-    path.close();
-    if let Some(path) = path.finish() {
-        layer.fill_path(&path, color, BlendMode::SourceOver);
-    }
-    canvas.blend_pixmap(
-        (cx - s / 2.0) as i32,
-        (cy - s / 2.0) as i32,
-        &layer.into_pixmap(),
+/// 键帽上那个图标该画多大（像素）。`key_height` 是键高（像素），`scale` 是屏幕密度。
+pub(super) fn size_on_key(key_height: f32, scale: f32) -> f32 {
+    (key_height * SIZE_RATIO).clamp(MIN_SIZE * scale, MAX_SIZE * scale)
+}
+
+/// 画上档（大小写）图标，居中在 `(cx, cy)`，边长 `size` 像素。
+pub(crate) fn draw_shift(canvas: &mut Canvas, cx: f32, cy: f32, size: f32, color: Color) {
+    draw(canvas, path::shift(), path::BOXES[0], cx, cy, size, color);
+}
+
+/// 画退格 ⌫，居中在 `(cx, cy)`，边长 `size` 像素。
+pub(crate) fn draw_backspace(canvas: &mut Canvas, cx: f32, cy: f32, size: f32, color: Color) {
+    draw(
+        canvas,
+        path::backspace(),
+        path::BOXES[1],
+        cx,
+        cy,
+        size,
+        color,
     );
 }
 
-/// 画退格 ⌫，居中在 `(cx, cy)`。
-pub(crate) fn draw_backspace(
-    canvas: &mut Canvas,
-    cx: f32,
-    cy: f32,
-    key_height: f32,
-    scale: f32,
-    color: Color,
-) {
-    let Some((mut layer, size)) = layer(key_height, scale) else {
-        return;
-    };
-    let s = size;
-
-    // 左端带尖角的五边形
-    let mut path = PathBuilder::new();
-    path.move_to(s * 0.04, s * 0.50);
-    path.line_to(s * 0.34, s * 0.14);
-    path.line_to(s * 0.96, s * 0.14);
-    path.line_to(s * 0.96, s * 0.86);
-    path.line_to(s * 0.34, s * 0.86);
-    path.close();
-    if let Some(path) = path.finish() {
-        layer.fill_path(&path, color, BlendMode::SourceOver);
-    }
-
-    // 打透一个叉
-    let (x, y) = (s * 0.65, s * 0.50);
-    let (arm, thick) = (s * 0.13, s * 0.055);
-    for flip in [1.0, -1.0] {
-        let mut path = PathBuilder::new();
-        path.move_to(x - arm * flip, y - arm);
-        path.line_to(x - arm * flip + thick, y - arm);
-        path.line_to(x + arm * flip + thick, y + arm);
-        path.line_to(x + arm * flip, y + arm);
-        path.close();
-        if let Some(path) = path.finish() {
-            layer.fill_path(&path, Color::rgb(0, 0, 0), BlendMode::Clear);
-        }
-    }
-    canvas.blend_pixmap(
-        (cx - s / 2.0) as i32,
-        (cy - s / 2.0) as i32,
-        &layer.into_pixmap(),
-    );
-}
-
-/// 画剪贴板（工具页那个格子上的图标），居中在 `(cx, cy)`，边长 `size` 像素。
-///
-/// 一块**板**加顶上一个**夹子**：板身画满再打透里面（剩一圈边，与 [`draw_backspace`]
-/// 打那个叉同一个路数），夹子盖在顶边上，中间那两条短线是「一页字」。
-///
-/// 与另外两个图标不同，这个收的是**边长**而不是键高：工具页那种格子是「图标 + 名字」
-/// 两行，图标多大由那儿算好，不是按「键高 × 比例」来的。
+/// 画剪贴板（工具页那一格），居中在 `(cx, cy)`，边长 `size` 像素。
 pub(crate) fn draw_clipboard(canvas: &mut Canvas, cx: f32, cy: f32, size: f32, color: Color) {
-    let size = size.ceil().max(1.0);
-    let Some(mut layer) = Canvas::new(size as u32, size as u32).ok() else {
-        return;
-    };
-    let s = size;
-    let stroke = (s * 0.11).max(1.0);
-    let radius = s * 0.10;
-    let (bx, by, bw, bh) = (s * 0.16, s * 0.12, s * 0.68, s * 0.84);
-
-    // 板身：先整个画满
-    if let Some(path) = round_rect(bx, by, bw, bh, radius) {
-        layer.fill_path(&path, color, BlendMode::SourceOver);
-    }
-    // 再把里面打透，剩下一圈边
-    if let Some(path) = round_rect(
-        bx + stroke,
-        by + stroke,
-        bw - stroke * 2.0,
-        bh - stroke * 2.0,
-        (radius - stroke).max(0.0),
-    ) {
-        layer.fill_path(&path, Color::rgb(0, 0, 0), BlendMode::Clear);
-    }
-    // 顶上的夹子：压住上边那一段，看着才是「夹着的板」而不是一个空框
-    if let Some(path) = round_rect(s * 0.35, s * 0.02, s * 0.30, s * 0.22, s * 0.05) {
-        layer.fill_path(&path, color, BlendMode::SourceOver);
-    }
-    // 板子上那两行字
-    for row in 0..2 {
-        let y = s * (0.46 + row as f32 * 0.18);
-        if let Some(path) = round_rect(s * 0.29, y, s * 0.42, stroke * 0.85, stroke * 0.4) {
-            layer.fill_path(&path, color, BlendMode::SourceOver);
-        }
-    }
-
-    canvas.blend_pixmap(
-        (cx - s / 2.0) as i32,
-        (cy - s / 2.0) as i32,
-        &layer.into_pixmap(),
+    draw(
+        canvas,
+        path::clipboard(),
+        path::BOXES[2],
+        cx,
+        cy,
+        size,
+        color,
     );
 }
 
-/// 建一张空的小画布与它的边长（像素），给图标用。
+/// 把一段路径缩到**最长边 = `size`** 并居中在 `(cx, cy)`，然后填色。
 ///
-/// `key_height` 是像素，`scale` 是屏幕密度——上下限按点写，乘上 `scale` 才跟键高同一个量纲。
-fn layer(key_height: f32, scale: f32) -> Option<(Canvas, f32)> {
-    let size = (key_height * SIZE_RATIO)
-        .clamp(MIN_SIZE * scale, MAX_SIZE * scale)
-        .ceil();
-    let canvas = Canvas::new(size as u32, size as u32).ok()?;
-    Some((canvas, size))
+/// 按最长边而不是按高：这几个图标有宽扁的（⌫ 的包围盒是 800×640），按高缩会顶出格子。
+/// 按**各自包围盒**而不是 Material 那个 960 的网格缩：网格四周是 Google 留的呼吸位，
+/// 照网格缩的话画出来比要的尺寸小一圈。
+fn draw(
+    canvas: &mut Canvas,
+    path: Option<tiny_skia::Path>,
+    bbox: (f32, f32, f32, f32),
+    cx: f32,
+    cy: f32,
+    size: f32,
+    color: Color,
+) {
+    let Some(path) = path else {
+        return;
+    };
+    let (left, top, right, bottom) = bbox;
+    let (width, height) = (right - left, bottom - top);
+    if width <= 0.0 || height <= 0.0 || size <= 0.0 {
+        return;
+    }
+    let scale = size / width.max(height);
+    let transform = Transform::from_scale(scale, scale).post_translate(
+        cx - (left + right) / 2.0 * scale,
+        cy - (top + bottom) / 2.0 * scale,
+    );
+    if let Some(path) = path.transform(transform) {
+        canvas.fill_path(&path, color, BlendMode::SourceOver);
+    }
 }

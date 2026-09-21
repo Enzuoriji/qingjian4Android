@@ -138,6 +138,12 @@ pub struct Session {
     /// 剪贴板本来就是「刚刚复制的那几样」，先看用起来顺不顺。
     clipboard: Vec<String>,
 
+    /// 剪贴板列表甩出去之后的那一段滑行（与候选条那条带子各走各的）。
+    clipboard_fling: Option<Fling>,
+
+    /// 刚才**真的滚过剪贴板列表**的那根手指（与 [`Self::scrolled`] 同一个用途）。
+    clipboard_scrolled: Option<i32>,
+
     /// 剪贴板列表被拉上去多少（点）。0 是最新那条贴着记录区顶边。
     ///
     /// **不是「第几屏」**：列表是跟手滚的，随手停在哪儿都行——所以是个连续的位移，
@@ -243,6 +249,8 @@ impl Session {
             fling: None,
             scrolled: None,
             clipboard: Vec::new(),
+            clipboard_fling: None,
+            clipboard_scrolled: None,
             clipboard_scroll: 0.0,
             frame: Frame::default(),
             bar: None,
@@ -290,6 +298,9 @@ impl Session {
         if panel == Panel::Clipboard {
             self.clipboard_scroll = 0.0;
         }
+        // 换页了，正在跑的那段滑行按的是上一页的视口，停掉
+        self.clipboard_fling = None;
+        self.clipboard_scrolled = None;
         self.refresh();
     }
 
@@ -480,6 +491,8 @@ impl Session {
             // 不这么做的话按下去的那一下会和正在跑的惯性互相抢
             self.fling = None;
             self.scrolled = None;
+            self.clipboard_fling = None;
+            self.clipboard_scrolled = None;
         }
         let bar_pixels = self.bar_pixels();
         let fired = self
@@ -491,7 +504,11 @@ impl Session {
             Some(Fired::MoveCursor(steps)) => self.move_cursor(steps),
             Some(Fired::ClearToStart) => self.clear_to_start(),
             Some(Fired::DeleteClipboard(index)) => self.apply(Act::DeleteClipboard(index)),
-            Some(Fired::ClipboardScroll(delta)) => self.scroll_clipboard(delta),
+            Some(Fired::ClipboardScroll(delta)) => {
+                // 记下是这根手指在滚——抬手时靠它判该不该甩（那时 `presses` 里已经没有它了）
+                self.clipboard_scrolled = Some(pointer);
+                self.scroll_clipboard(delta)
+            }
             None => {}
         }
         self.touch_bar(action, pointer, x, y);
@@ -660,7 +677,7 @@ impl Session {
         if self.pending_commit.is_some() || !self.pending_commands.is_empty() {
             mask |= flags::COMMIT;
         }
-        if self.fling.is_some() {
+        if self.fling.is_some() || self.clipboard_fling.is_some() {
             mask |= flags::FLING;
         }
         mask
@@ -986,16 +1003,23 @@ impl Session {
         self.refresh();
     }
 
-    /// 一根手指抬起了：报上它的横向速度（**像素/秒，向右为正**，`VelocityTracker` 的单位与方向），
-    /// 够快就让带子接着滑一段。
+    /// 一根手指抬起了：报上它的速度（**像素/秒**，横向向右为正、纵向向下为正，
+    /// 都是 `VelocityTracker` 的单位与方向），够快就让刚才滚的那个接着滑一段。
     ///
     /// **速度由壳量**（安卓自带 `VelocityTracker`，自己算得再去摸时间戳），
-    /// 甩不甩、甩多远由这里定（[`Fling`]）。只有刚才**真的滚过这条带子**的那根手指才算数——
+    /// 甩不甩、甩多远由这里定（[`Fling`]）。只有刚才**真的滚过**的那根手指才算数——
     /// 点候选、敲键盘时壳同样会报速度上来，那不是「甩」。
-    pub fn start_fling(&mut self, pointer: i32, velocity_x: f32) -> i32 {
-        if self.scrolled == Some(pointer) {
-            // 手指往左甩（速度为负）= 带子往后滚，与 `scroll_by` 的正方向一致，所以取负；
-            // 再除以 1000 换成 `Fling` 用的像素/毫秒
+    ///
+    /// 横竖两个分量是**两回事**：候选条那条带子横着滚（用 [`Self::scroll_by`] 的方向），
+    /// 剪贴板列表竖着滚（用 [`Self::scroll_clipboard`] 的方向，符号正好相反）。
+    pub fn start_fling(&mut self, pointer: i32, velocity_x: f32, velocity_y: f32) -> i32 {
+        if self.clipboard_scrolled == Some(pointer) {
+            // 手指往上甩（速度为负）= 列表往下看 = `clipboard_scroll` 变大，
+            // 而 `scroll_clipboard` 收的是「手指挪了多少」，所以符号**不取反**；
+            // 除以 1000 换成 `Fling` 用的像素/毫秒
+            self.clipboard_fling = Fling::new(velocity_y / 1000.0);
+        } else if self.scrolled == Some(pointer) {
+            // 手指往左甩（速度为负）= 带子往后滚，与 `scroll_by` 的正方向一致，所以取负
             self.fling = Fling::new(-velocity_x / 1000.0);
         }
         self.mask()
@@ -1020,6 +1044,8 @@ impl Session {
     ///
     /// 删到没那么多条了可能就滚过头了，先夹回来——不然会停在一段空白上。
     fn after_clipboard_change(&mut self) {
+        // 列表都变了，正在跑的那段滑行按的是老列表，停掉
+        self.clipboard_fling = None;
         self.clipboard_scroll = self
             .clipboard_scroll
             .clamp(0.0, self.clipboard_max_scroll());
@@ -1149,15 +1175,27 @@ impl Session {
     /// 节拍在壳（安卓有现成的 `Handler`，还有真帧率）、手感在这——与长按连发、移光标同一个分工。
     /// 滚到头、或者慢到看不出在动，就停（掩码里不再有 [`flags::FLING`]，壳那边跟着不再敲帧）。
     pub fn fling_step(&mut self, dt: f32) -> i32 {
-        let Some(fling) = self.fling.as_mut() else {
-            return self.mask();
-        };
-        let step = fling.step(dt);
-        let finished = fling.finished();
-        let before = self.scroll;
-        self.scroll_by(step);
-        if finished || self.scroll == before {
-            self.fling = None;
+        // 候选条那条带子（横着滚）
+        if let Some(fling) = self.fling.as_mut() {
+            let step = fling.step(dt);
+            let finished = fling.finished();
+            let before = self.scroll;
+            self.scroll_by(step);
+            // 「想走却一步没动」= 滚到头了，停；`step` 本来就是 0 的（这一拍没时间）不算
+            if finished || (step != 0.0 && self.scroll == before) {
+                self.fling = None;
+            }
+        }
+        // 剪贴板那份列表（竖着滚）。两套各记各的速度，但只有一套会在跑——
+        // 剪贴板页开着时没有候选条，反过来也一样
+        if let Some(fling) = self.clipboard_fling.as_mut() {
+            let step = fling.step(dt);
+            let finished = fling.finished();
+            let before = self.clipboard_scroll;
+            self.scroll_clipboard(step);
+            if finished || (step != 0.0 && self.clipboard_scroll == before) {
+                self.clipboard_fling = None;
+            }
         }
         self.mask()
     }

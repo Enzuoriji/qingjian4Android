@@ -111,6 +111,21 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 不直接用 `displayMetrics` 的高度——有的 ROM 转屏后它还是报竖屏那个值
 （`QingjianImeService.screenHeightPoints`）。横竖屏也由壳判断后一起报。
 
+**键盘上那几个图标（2026-09-21 换成现成的）**：⇧ 大小写、⌫ 退格、工具页那格的剪贴板，
+路径来自 `assets/icon/material/` 里那几张 Google **Material Symbols**（Apache-2.0）的 svg，
+由 `python assets/icon/render-key-icon-path.py` 转成 Rust 代码（生成物
+`renderer/keyboard/icon/path.rs` 随仓库提交，画法在 `renderer/keyboard/icon.rs`）。
+
+- **别手写坐标**：在这之前这几个图标是我自己 `move_to` / `line_to` 拼的，用户看了说
+  「不要这样做去网上找可以用的」。选 Material 是因为它在安卓上随处可见、许可干净。
+- 路径是 **960×960、y 轴朝上为负**那套坐标系，原样搬过来；渲染时按**每个图标自己的包围盒**
+  缩到「最长边 = 目标边长」（`path::BOXES`）——960 网格四周是 Google 留的呼吸位，
+  照网格缩会比要的尺寸小一圈。
+- 图标靠**子路径方向**挖空（外轮廓一个方向、内轮廓相反），非零填充规则自动出镂空，
+  不必再自己用 `BlendMode::Clear` 打孔。
+- 解析 svg 的是 `assets/icon/svgpath.py`（`M L H V C Q T Z` + 相对命令 + 隐式重复 +
+  `Z` 之后当前点回到子路径起点），与 `render-logo-path.py` 共用一份。
+
 **候选条那个标（2026-09-21）**：没组句时那条细的最左边，画的是青简的标——`src/logo/`。
 路径数据是生成的（`assets/icon/render-logo-path.py` ← `assets/icon/menu.svg`，见那个 README），
 画法与 `gear.rs` 一样：**画路径不画字形**，先画在一张独立小图上再整张叠到画布。
@@ -168,6 +183,13 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
   非前台读剪贴板会让系统弹「某某读取了剪贴板」的提示（Android 12 起）。
 - **删一条是「往左滑、松手」**（`Press.deleting`，`DELETE_SWIPE` = 16 点，比 ⌫ 上滑那个 22 点小）：
   格子本来就靠左边按下去，往左一划就到头了。与 ⌫ 上滑清空同一个手感，气泡也改口说「松手删除」。
+- **甩一下会接着滑**（`Session::clipboard_fling`）：与候选条那条带子同一套 [`Fling`]
+  （衰减曲线、起手门槛都一样），只是方向竖着——候选条收的是 `velocityX`、
+  剪贴板收的是 `velocityY`，`start_fling` 里按「刚才是谁在滚」二选一。
+  两个方向的分量是两回事，符号也相反（往上甩要让 `clipboard_scroll` 变大）。
+- **「这一拍没动」有两种，别混**：一种是滚到头了（该停），一种是 `dt = 0`（不该停）。
+  判断写成 `step != 0.0 && 位置没变`——只看「位置没变」的话，壳偶尔敲一个 0 毫秒的帧
+  就会把滑行掐断。
 - **滚动与左滑按方向分**（`Press.scrolling` / `SCROLL_SLOP` = 8 点）：**纵向占优的算滚**
   （跟手，每拍都要报 `Fired::ClipboardScroll`），横向往左的算删。认了滚之后这一下就一直是滚。
   滚动时**不弹气泡**（`pressed_scrolling`）——气泡正挡着要看的那份列表。

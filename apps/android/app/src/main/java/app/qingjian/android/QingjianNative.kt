@@ -102,12 +102,14 @@ object QingjianNative {
     external fun clipboardChanged(handle: Long, text: String): Int
 
     /**
-     * 一根手指抬起了，报上它的横向速度（**像素/秒，向右为正**，就是 `VelocityTracker` 的单位与方向）。
+     * 一根手指抬起了，报上它的速度（**像素/秒**，横向向右为正、纵向向下为正，
+     * 就是 `VelocityTracker` 的单位与方向）。
      *
      * 壳只管量（安卓自带 `VelocityTracker`，自己算得再去摸时间戳），
-     * **该不该接着滑、滑多远由 Rust 定**——只有刚才真的滚过候选条的那根手指才算数。
+     * **该不该接着滑、滑多远由 Rust 定**——只有刚才真的滚过的那根手指才算数。
+     * 横竖两个分量各归各的：候选条横着滑、剪贴板列表竖着滑。
      */
-    external fun fling(handle: Long, pointer: Int, velocityX: Float): Int
+    external fun fling(handle: Long, pointer: Int, velocityX: Float, velocityY: Float): Int
 
     /**
      * 惯性滑行的**一拍**：壳的帧到点了，问「过去 `dtMs` 毫秒，这一拍该挪多少」。

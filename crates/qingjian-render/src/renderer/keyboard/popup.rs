@@ -61,8 +61,11 @@ pub enum Popup<'a> {
     Choices { items: [char; 3], selected: usize },
 }
 
-/// 画一个图标的函数签名（⇧ 与 ⌫ 各一个）。
-type IconPainter = fn(&mut Canvas, f32, f32, f32, f32, Color);
+/// 画一个图标的函数签名：`(画布, 中心 x, 中心 y, 边长, 颜色)`，都是像素。
+///
+/// 键帽上那两个（⇧ / ⌫）与工具页那一格（剪贴板）是同一个签名——图标多大由调用方算好
+/// （键帽按 [`super::icon::size_on_key`]，工具格子按自己的比例）。
+pub(super) type IconPainter = fn(&mut Canvas, f32, f32, f32, Color);
 
 /// 图标键要画哪个图标（画法与键帽上那个是同一份）。其余键没有图标，画字。
 fn icon_of(id: KeyId) -> Option<IconPainter> {
@@ -175,7 +178,13 @@ impl Renderer {
                 Popup::Choices { .. } => unreachable!("上面那条分支已经处理过了"),
             };
             if let Some(draw) = icon {
-                draw(&mut canvas, cx, cy, h, scale, theme.label);
+                draw(
+                    &mut canvas,
+                    cx,
+                    cy,
+                    super::icon::size_on_key(h, scale),
+                    theme.label,
+                );
             } else {
                 let size = self.measure(&text, &style);
                 self.draw_text(

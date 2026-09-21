@@ -71,7 +71,7 @@ class QingjianSurfaceView(context: Context) : View(context) {
     var onCursorTick: ((Int) -> Unit)? = null
 
     /** 一根手指抬起时的横向速度（像素/秒，向右为正）——候选条据此接着滑一段。 */
-    var onFling: ((Int, Float) -> Unit)? = null
+    var onFling: ((Int, Float, Float) -> Unit)? = null
 
     /** 惯性滑行的一拍，参数是这一拍实际过去多少毫秒。 */
     var onFlingTick: ((Float) -> Unit)? = null
@@ -225,11 +225,11 @@ class QingjianSurfaceView(context: Context) : View(context) {
         val lifting = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP
         // **先量速度再加这一笔**：抬手那一笔一进 tracker，那根手指的历史就被清掉了，
         // 再取速度只会拿到 0（壳这边量不到，Rust 那边就永远甩不起来）
-        val velocityX = if (lifting) {
+        val (velocityX, velocityY) = if (lifting) {
             tracker.computeCurrentVelocity(1000)
-            tracker.getXVelocity(pointer)
+            tracker.getXVelocity(pointer) to tracker.getYVelocity(pointer)
         } else {
-            0f
+            0f to 0f
         }
         tracker.addMovement(event)
 
@@ -237,7 +237,7 @@ class QingjianSurfaceView(context: Context) : View(context) {
         // 抬手的这一下要**在 touch 之后报**：Rust 那边靠「刚才是谁在滚这条带子」判该不该甩，
         // 而那个记录是移动时记下的，抬手时已经无用了（见 `Session::start_fling`）
         if (lifting) {
-            onFling?.invoke(pointer, velocityX)
+            onFling?.invoke(pointer, velocityX, velocityY)
         }
         if (action == MotionEvent.ACTION_UP) {
             performClick()

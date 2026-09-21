@@ -8,13 +8,14 @@ mod icon;
 mod popup;
 mod rendered;
 
+use popup::IconPainter;
+
 pub use hit::KeyHit;
 pub use popup::Popup;
 pub use rendered::RenderedKeyboard;
 
 use super::{Rendered, Renderer};
 use crate::canvas::Canvas;
-use crate::color::Color;
 use crate::error::RenderError;
 use crate::keyboard::{
     CLIPBOARD_CELLS, InputMode, Key, KeyId, KeyWidth, KeyboardLayout, KeyboardState, Panel,
@@ -244,10 +245,20 @@ impl Renderer {
         };
 
         match key.id {
-            KeyId::Shift => icon::draw_shift(canvas, cx, main_cy, height, scale, theme.label),
-            KeyId::Backspace => {
-                icon::draw_backspace(canvas, cx, main_cy, height, scale, theme.label)
-            }
+            KeyId::Shift => icon::draw_shift(
+                canvas,
+                cx,
+                main_cy,
+                icon::size_on_key(height, scale),
+                theme.label,
+            ),
+            KeyId::Backspace => icon::draw_backspace(
+                canvas,
+                cx,
+                main_cy,
+                icon::size_on_key(height, scale),
+                theme.label,
+            ),
             // 工具页的格子：**图标在上、名字在下**（搜狗那个面板就是这个样子），
             // 跟「一个大字居中」的键帽不是一回事，所以整个格子自己画
             KeyId::Tool(index) => {
@@ -343,16 +354,10 @@ const BLANK_CLIPBOARD: &str = "暂无剪贴板内容";
 /// 图标给到 0.42 就够显眼了，再大就把名字挤出去。
 const TOOL_ICON_RATIO: f32 = 0.42;
 
-/// 工具格子上那个图标的画法：`(画布, 中心 x, 中心 y, 边长, 颜色)`，都是像素。
-///
-/// 与 `popup.rs` 里那个 `IconPainter` 不是一回事——那个按**键高**算大小（键帽上的 ⇧ / ⌫），
-/// 这个收的是**边长**：工具格子是「图标 + 名字」两行，图标多大由那儿算好。
-type ToolIcon = fn(&mut Canvas, f32, f32, f32, Color);
-
 /// 工具页第 `index` 格画哪个图标（与 `TOOLS` 一一对应）。
 ///
 /// 没排工具的格子是 `None`——那种格子上的字也是空的（见 `label`），整个不画。
-fn tool_icon(index: usize) -> Option<ToolIcon> {
+fn tool_icon(index: usize) -> Option<IconPainter> {
     match index {
         0 => Some(icon::draw_clipboard),
         _ => None,
