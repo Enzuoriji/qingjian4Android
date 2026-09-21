@@ -2632,6 +2632,7 @@ dependencies = [
  "jni 0.21.1",
  "qingjian-core",
  "qingjian-dictionary",
+ "qingjian-learning",
  "qingjian-render",
  "thiserror 2.0.20",
  "tracing",

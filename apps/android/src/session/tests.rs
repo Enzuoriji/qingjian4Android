@@ -142,7 +142,7 @@ fn type_text(session: &mut Session, text: &str) {
 }
 
 fn ready() -> Option<Session> {
-    let mut session = Session::open(&dictionary()?, "zh-CN", None).ok()?;
+    let mut session = Session::open(&dictionary()?, "zh-CN", None, None).ok()?;
     session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
     // 两块面都画一次，命中矩形才存在
     session.keyboard_surface();
@@ -1020,7 +1020,8 @@ fn the_bundled_emoji_table_puts_emoji_in_the_candidates() {
     let (Some(dictionary), Some(bundle)) = (dictionary(), bundle()) else {
         return;
     };
-    let mut session = Session::open(&dictionary, "zh-CN", Some(&bundle)).expect("会话该能打开");
+    let mut session =
+        Session::open(&dictionary, "zh-CN", Some(&bundle), None).expect("会话该能打开");
     session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
     session.keyboard_surface();
     session.bar_surface();
@@ -2146,12 +2147,12 @@ fn the_clipboard_keeps_the_newest_first() {
 
     session.note_clipboard("第一段");
     session.note_clipboard("第二段");
-    assert_eq!(session.clipboard, ["第二段", "第一段"]);
+    assert_eq!(session.clipboard.entries(), ["第二段", "第一段"]);
 
     // 再复制一次「第一段」：不新记一条，把它挪到最前
     session.note_clipboard("第一段");
     assert_eq!(
-        session.clipboard,
+        session.clipboard.entries(),
         ["第一段", "第二段"],
         "同一条只留一条，而且挪到最前"
     );
@@ -2173,8 +2174,12 @@ fn the_clipboard_forgets_the_oldest() {
     }
 
     assert_eq!(session.clipboard.len(), 50, "最多留 50 条");
-    assert_eq!(session.clipboard[0], "第 59 条", "最新的在最前");
-    assert_eq!(session.clipboard[49], "第 10 条", "最旧的那十条被挤掉了");
+    assert_eq!(session.clipboard.entries()[0], "第 59 条", "最新的在最前");
+    assert_eq!(
+        session.clipboard.entries()[49],
+        "第 10 条",
+        "最旧的那十条被挤掉了"
+    );
 }
 
 /// 点一条记录就把那段文本交给壳上屏（**插在光标处**），然后收回字母页。
@@ -2223,7 +2228,11 @@ fn swiping_an_entry_left_deletes_it() {
     // 最新在最前：第一格是「新的」
     swipe_left(&mut session, KeyId::Clipboard(0));
 
-    assert_eq!(session.clipboard, ["旧的"], "往左滑过就该删掉那一条");
+    assert_eq!(
+        session.clipboard.entries(),
+        ["旧的"],
+        "往左滑过就该删掉那一条"
+    );
     assert_eq!(session.take_commit(), None, "删不是上屏");
 }
 
@@ -2238,7 +2247,7 @@ fn a_tap_on_an_entry_does_not_delete_it() {
     open_clipboard(&mut session);
     tap_key(&mut session, KeyId::Clipboard(0));
 
-    assert_eq!(session.clipboard, ["点一下"], "点一下不是删");
+    assert_eq!(session.clipboard.entries(), ["点一下"], "点一下不是删");
     assert_eq!(session.take_commit().as_deref(), Some("点一下"));
 }
 
@@ -2264,7 +2273,7 @@ fn swiping_back_cancels_the_delete() {
     session.touch(MotionAction::Up, POINTER, x, y);
     session.keyboard_surface();
 
-    assert_eq!(session.clipboard, ["别删我"], "拖回来了就不该删");
+    assert_eq!(session.clipboard.entries(), ["别删我"], "拖回来了就不该删");
     assert_eq!(session.take_commit(), None, "反悔之后也不该顺手粘出去");
     assert_eq!(session.panel, Panel::Clipboard, "还留在这页");
 }
@@ -2369,6 +2378,48 @@ fn a_long_drag_stops_at_the_end_of_the_list() {
         "六条比一屏多一条，只该滚一格"
     );
     assert_eq!(session.clipboard_first(), 1, "滚一格就该从第二条起");
+}
+
+/// 剪贴板历史**落盘**：换一个会话（＝进程重启）它还在。
+///
+/// 别的剪贴板测试都用内存态（`ready()` 的数据目录传 `None`），这条特意走一遍真文件。
+#[test]
+fn the_clipboard_survives_a_restart() {
+    let Some(dictionary) = dictionary() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("qingjian-clipboard-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let open = |dir: &std::path::Path| {
+        let mut session =
+            Session::open(&dictionary, "zh-CN", None, Some(dir)).expect("会话该能打开");
+        session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
+        session.keyboard_surface();
+        session.bar_surface();
+        session
+    };
+
+    {
+        let mut session = open(&dir);
+        session.note_clipboard("第一段");
+        session.note_clipboard("第二段");
+    }
+
+    // 换一个会话——输入法进程被杀掉再起来就是这回事
+    let mut session = open(&dir);
+    assert_eq!(
+        session.clipboard.entries(),
+        ["第二段", "第一段"],
+        "重启之后该还在，且顺序不变"
+    );
+
+    // 清空也要落盘，别下次起来又冒出来
+    open_clipboard(&mut session);
+    tap_key(&mut session, KeyId::ClipboardClear);
+    drop(session);
+
+    assert!(open(&dir).clipboard.is_empty(), "清空之后重启也该是空的");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// 剪贴板列表**甩一下会自己接着滑**——与候选条那条带子同一套惯性，只是方向竖着。

@@ -54,6 +54,9 @@ class QingjianImeService : InputMethodService() {
             dictionary.absolutePath,
             Locale.getDefault().toLanguageTag(),
             ensureExtras()?.absolutePath ?: "",
+            // 可写的数据目录：剪贴板历史这类要留住的东西落在这儿（词库与 emoji 是解出来的，
+            // 读不到就重解一遍；这些丢了就真没了）
+            filesDir.absolutePath,
         )
         if (handle == 0L) {
             Log.e(TAG, "会话打开失败")

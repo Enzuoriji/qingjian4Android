@@ -13,6 +13,7 @@ use std::path::Path;
 
 use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
 use qingjian_dictionary::Dictionary;
+use qingjian_learning::Clipboard;
 use qingjian_render::{
     BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
     Preedit, PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme,
@@ -25,12 +26,6 @@ use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 use fling::Fling;
 
-/// 剪贴板最多记几条——超了丢最旧的。
-///
-/// 参考项目 fcitx5-android 是可配的（缺省 20，界面里能改），搜狗存 500 条。
-/// 我们**只存在内存里**，50 条够翻好几屏，也不至于让那一页翻不到头。
-const CLIPBOARD_LIMIT: usize = 50;
-
 /// 算「滚到第几条起」时给除法的一点补偿（单位是「格」，也就是一格的万分之一）。
 ///
 /// 见 [`Session::clipboard_first`]：不加它，滚到底时最后一格会因为浮点误差永远差一点。
@@ -38,6 +33,9 @@ const GRID_EPSILON: f32 = 1e-4;
 
 /// 随包资源目录里的 emoji 字体名（`assets/emoji/README.md` 写了为什么要带它）。
 const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
+
+/// 剪贴板历史落在数据目录里的文件名（同目录下还有解出来的词库与 emoji 表）。
+const CLIPBOARD_FILE: &str = "clipboard.tsv";
 
 /// 随包资源目录里的 emoji 表（中文、英文各一张，加载时合成一张）。
 const EMOJI_TABLES: [&str; 2] = ["emoji-zh.tsv", "emoji-en.tsv"];
@@ -134,9 +132,10 @@ pub struct Session {
 
     /// 剪贴板历史，**最新在最前**。壳每复制一次报一条进来（[`Self::note_clipboard`]）。
     ///
-    /// **只在内存里**：输入法进程重启就没了。fcitx5 是落库的（Room），我们这轮不做——
-    /// 剪贴板本来就是「刚刚复制的那几样」，先看用起来顺不顺。
-    clipboard: Vec<String>,
+    /// **落盘的**（`qingjian-learning` 的 [`Clipboard`]，数据目录里那个 `clipboard.tsv`）：
+    /// 输入法进程在安卓上被杀得很勤，只在内存里的话「刚复制的那条」说没就没。
+    /// 每次改动它自己就写盘，这里不用管。
+    clipboard: Clipboard,
 
     /// 剪贴板列表甩出去之后的那一段滑行（与候选条那条带子各走各的）。
     clipboard_fling: Option<Fling>,
@@ -208,6 +207,7 @@ impl Session {
         dictionary_path: &Path,
         locale: &str,
         bundle: Option<&Path>,
+        data_dir: Option<&Path>,
     ) -> Result<Self, SessionError> {
         let dictionary = Dictionary::from_path(dictionary_path)?;
         let emoji_font = bundle
@@ -248,7 +248,9 @@ impl Session {
             scroll: 0.0,
             fling: None,
             scrolled: None,
-            clipboard: Vec::new(),
+            clipboard: data_dir.map_or_else(Clipboard::default, |dir| {
+                Clipboard::open(dir.join(CLIPBOARD_FILE))
+            }),
             clipboard_fling: None,
             clipboard_scrolled: None,
             clipboard_scroll: 0.0,
@@ -423,7 +425,10 @@ impl Session {
     pub fn popup_surface(&mut self) -> Vec<u8> {
         let (shift, mode) = (self.shift, self.mode);
         let (first, end) = self.clipboard_range();
-        let (clipboard, offset) = (&self.clipboard[first..end], self.clipboard_offset());
+        let (clipboard, offset) = (
+            &self.clipboard.entries()[first..end],
+            self.clipboard_offset(),
+        );
         match self.keyboard.as_mut() {
             Some(keyboard) => {
                 keyboard.popup_surface(self.renderer.as_mut(), shift, mode, clipboard, offset)
@@ -446,7 +451,10 @@ impl Session {
     pub fn keyboard_surface(&mut self) -> Vec<u8> {
         let (shift, mode) = (self.shift, self.mode);
         let (first, end) = self.clipboard_range();
-        let (clipboard, offset) = (&self.clipboard[first..end], self.clipboard_offset());
+        let (clipboard, offset) = (
+            &self.clipboard.entries()[first..end],
+            self.clipboard_offset(),
+        );
         match self.keyboard.as_mut() {
             Some(keyboard) => {
                 keyboard.surface(self.renderer.as_mut(), shift, mode, clipboard, offset)
@@ -1030,13 +1038,9 @@ impl Session {
     /// 同一条文本再复制一次不重复记，只把它挪到最前——「刚复制的永远第一条」。
     /// 超过 [`CLIPBOARD_LIMIT`] 条丢最旧的。空白的壳那边就滤掉了，这里再挡一道。
     pub fn note_clipboard(&mut self, text: &str) -> i32 {
-        if text.trim().is_empty() {
-            return self.mask();
+        if self.clipboard.remember(text) {
+            self.after_clipboard_change();
         }
-        self.clipboard.retain(|entry| entry != text);
-        self.clipboard.insert(0, text.to_owned());
-        self.clipboard.truncate(CLIPBOARD_LIMIT);
-        self.after_clipboard_change();
         self.mask()
     }
 
@@ -1063,8 +1067,9 @@ impl Session {
     /// 返回的是两个数而不是切片——切片借的是 `self`，调用处还要同时借
     /// `self.keyboard` / `self.renderer`（可变），借不到一块儿去。
     fn clipboard_range(&self) -> (usize, usize) {
-        let first = self.clipboard_first().min(self.clipboard.len());
-        (first, (first + CLIPBOARD_CELLS).min(self.clipboard.len()))
+        let len = self.clipboard.len();
+        let first = self.clipboard_first().min(len);
+        (first, (first + CLIPBOARD_CELLS).min(len))
     }
 
     /// 列表顶边现在对着整份里的第几条。
@@ -1152,22 +1157,21 @@ impl Session {
         let Some(index) = self.clipboard_first().checked_add(index) else {
             return;
         };
-        if index >= self.clipboard.len() {
-            return;
+        if self.clipboard.remove(index) {
+            self.after_clipboard_change();
         }
-        self.clipboard.remove(index);
-        self.after_clipboard_change();
     }
 
     /// 屏幕上第 `index` 格对着整份里的哪一条。滚到头、这一格没内容时是 `None`。
     fn clipboard_entry(&self, index: usize) -> Option<&String> {
-        self.clipboard.get(self.clipboard_first() + index)
+        self.clipboard.entries().get(self.clipboard_first() + index)
     }
 
     /// 清空整份剪贴板历史。
     fn clear_clipboard(&mut self) {
-        self.clipboard.clear();
-        self.after_clipboard_change();
+        if self.clipboard.clear() {
+            self.after_clipboard_change();
+        }
     }
 
     /// 惯性的一拍：过去 `dt` 毫秒，这一拍该挪多少由 [`Fling`] 算。

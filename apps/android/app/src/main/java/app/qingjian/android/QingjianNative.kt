@@ -14,9 +14,16 @@ object QingjianNative {
      * 打开会话，返回句柄；失败返回 0。
      *
      * `locale` 决定中日同形字取哪家字形；`emojiFontPath` 是随包 emoji 字体的路径，
-     * 空串表示用系统里那张（系统那张安卓 15 起画不出来，见 `assets/emoji/README.md`）。
+     * 空串表示用系统里那张（系统那张安卓 15 起画不出来，见 `assets/emoji/README.md`）；
+     * `dataDir` 是**可写**的数据目录（`filesDir`），剪贴板历史这类要留住的东西落在那儿，
+     * 空串表示没有——那就只在内存里记。
      */
-    external fun open(dictionaryPath: String, locale: String, emojiFontPath: String): Long
+    external fun open(
+        dictionaryPath: String,
+        locale: String,
+        emojiFontPath: String,
+        dataDir: String,
+    ): Long
 
     /** 释放会话。 */
     external fun close(handle: Long)

@@ -284,9 +284,6 @@ pub struct Keyboard {
     /// 正按着的那根手指在剪贴板一条记录上往左滑过（气泡要说「松手删除」）。
     pressed_deleting: bool,
 
-    /// 正按着的那根手指在剪贴板记录区上下滚（这一下不弹气泡——气泡正挡着要看的那份列表）。
-    pressed_scrolling: bool,
-
     /// 那一根手指**长按开着那排选项**：气泡要画那一排，还得知道选中第几个。
     ///
     /// `None` = 没开着。有值时就是选中的下标（0 大写 / 1 符号 / 2 小写）。
@@ -328,7 +325,6 @@ impl Keyboard {
             pressed: None,
             pressed_clearing: false,
             pressed_deleting: false,
-            pressed_scrolling: false,
             pressed_choice: None,
             popup: None,
             popup_for: None,
@@ -670,8 +666,9 @@ impl Keyboard {
             self.forget_popup();
             return Vec::new();
         }
-        // 正滚着那份列表：气泡就压在要看的东西上，收起来
-        if self.pressed_scrolling {
+        // 剪贴板那几格**不弹气泡**（2026-09-21 用户要的）：气泡正好压在下面那几条上，
+        // 按住一条想看别的就碍事了；那儿也没什么要预览的——一条的内容本来就写在卡片上。
+        if matches!(key.id, KeyId::Clipboard(_)) {
             self.forget_popup();
             return Vec::new();
         }
@@ -900,7 +897,6 @@ impl Keyboard {
         let key = held.and_then(|press| press.key);
         let clearing = held.is_some_and(|press| press.clearing);
         let deleting = held.is_some_and(|press| press.deleting);
-        let scrolling = held.is_some_and(|press| press.scrolling);
         // 长按开着那排选项的那一根：气泡要画那一排，还得知道选中第几个
         let choice = held
             .filter(|press| press.choosing)
@@ -909,13 +905,11 @@ impl Keyboard {
             || self.pressed_choice != choice
             || self.pressed_clearing != clearing
             || self.pressed_deleting != deleting
-            || self.pressed_scrolling != scrolling
         {
             self.pressed = key;
             self.pressed_choice = choice;
             self.pressed_clearing = clearing;
             self.pressed_deleting = deleting;
-            self.pressed_scrolling = scrolling;
             self.dirty = true;
         }
     }

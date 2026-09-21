@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 qingjian-core.workspace = true
 qingjian-dictionary.workspace = true
+qingjian-learning.workspace = true
 qingjian-render.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
