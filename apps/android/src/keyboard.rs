@@ -17,19 +17,15 @@ use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 
 /// 手指从按下那点挪够这么远（点），就算「这是一记手势，不是点击」。
 ///
-/// 取角标只认**往下**滑、⌫ 清空只认**往上**滑——两处比的都是**纵向**位移，
-/// 所以这个阈值该跟**键高**比，不是跟键宽比。键高竖屏上有 42~55 点（跟着屏幕自适应，
-/// 见 `KeyboardTheme::fitted`），半步就有 21~27 点，22 落在**键内**：
-/// 手势认出来之前，这一下都还算「按着这个键」。
+/// **现在只剩一处用它**：⌫ 往上滑（松手把光标前面整段清掉）。比的是**纵向**位移，
+/// 所以这个阈值该跟**键高**比，不是跟键宽比——键高竖屏上有 42~55 点（跟着屏幕自适应，
+/// 见 `KeyboardTheme::fitted`），半步 21~27 点，22 落在**键内**：
+/// 手势认出来之前，这一下都还算「按着这个键」。往上一滑是**破坏性**的，阈值宁可高一点。
 ///
-/// **为什么只留往下**（2026-09-20 改，原先四个方向都算）：真机上快打会误蹦符号。
-/// 而横向那条路**结构上救不了**——「手指出了键 = 这一下作废」与阈值线是**重合**的
-/// （都卡在半个键宽，约 15 点），阈值往上加只会变成「符号不出、字母也一起丢」。
-/// 收回成一个方向之后两件事同时成立：①误触面砍到四分之一（只有**朝下滚**才可能撞上）；
-/// ②阈值改成跟键高比，才有余量从 16 提到 22。
-/// 代价是另外三个方向的角标只能去 `123` / 符 面板打——那些字符面板里都有。
-///
-/// 手感常数，只能靠真机调。判据：快打一段不蹦符号 = 行；还蹦就再往上加。
+/// **取角标不再走滑动**（2026-09-21 撤掉，见 [`Chooser`]）。那个手势治不好：
+/// 真机上快打会误蹦符号，而「手指出键 = 作废」与阈值线是**重合**的（都在半个键宽上），
+/// 横向结构上救不了，把方向收成只认往下也只是压概率。改成长按弹一排选项之后，
+/// 误触面直接归零——长按是有意的动作，快打根本按不到 400ms。
 pub(crate) const SWIPE: f32 = 22.0;
 
 /// 空格上横滑的**死区**（点）：位移不到这儿不算移光标，仍然是「按空格」。
@@ -59,6 +55,60 @@ const CLEAR_SWIPE: f32 = SWIPE;
 /// 键上那个退格图标说不出「松手会怎样」——滑上去之后这一下已经不是「删一个字」了，
 /// 气泡得把话讲清楚，不然用户不知道松手会发生什么。
 const CLEAR_HINT: &str = "松手清空";
+
+/// 长按字母键弹的那排选项：**三格 —— 大写 / 符号 / 小写**，默认停在中间那个（符号）。
+///
+/// 2026-09-21 定的，取代原先「在键上往下滑 22 点取角标」。换掉的理由是那个手势**治不好**：
+/// 真机上快打仍会误蹦符号（阈值降到 22 点、方向收成只认往下，都只是把概率压低），
+/// 而长按是**有意**的动作——快打根本按不到 400ms，误触面直接归零。
+/// 交互照搜狗那套：长按弹气泡、气泡里左右滑选、松手输入所选。
+struct Chooser;
+
+impl Chooser {
+    /// 一格。
+    const COUNT: usize = 3;
+
+    /// 默认停在第几个——中间那个「符号」，也就是原先滑动要打的那个。
+    const DEFAULT: usize = 1;
+
+    /// 手指横着离开按下那点多远（点）就换一格。
+    const STEP: f32 = 16.0;
+
+    /// 那排画什么字。没有角标的键不开这一排（见 [`Keyboard::begin_choice`]），所以 `hint` 一定有。
+    fn items(letter: char, hint: char) -> [char; Self::COUNT] {
+        [
+            letter.to_ascii_uppercase(),
+            hint,
+            letter.to_ascii_lowercase(),
+        ]
+    }
+
+    /// 手指横着离开按下那点 `dx`（点）之后该选第几个。
+    fn pick(dx: f32, density: f32) -> usize {
+        let step = Self::STEP * density;
+        if dx <= -step {
+            0
+        } else if dx >= step {
+            2
+        } else {
+            Self::DEFAULT
+        }
+    }
+
+    /// 选中那个兑现成哪个键。
+    ///
+    /// - **大写**走 `Literal`：要的是「中文模式下也直接打出一个大写字母」。
+    ///   那条路会先把高亮候选上屏、再把字符原样交出去；字母不在标点表里，引擎原样透传。
+    /// - **小写**走 `Letter`：就是「原来那个字母」，该进拼音缓冲区还进。
+    /// - **符号**也走 `Literal`，与原来的角标同一个身份。
+    fn fired(letter: char, hint: char, choice: usize) -> KeyId {
+        match choice {
+            0 => KeyId::Literal(letter.to_ascii_uppercase()),
+            2 => KeyId::Letter(letter),
+            _ => KeyId::Literal(hint),
+        }
+    }
+}
 
 /// 抬起来时兑现的东西。
 ///
@@ -131,14 +181,19 @@ struct Press {
     /// 也就判不出「滑出去又滑回来」这一下还算不算。留个标记就够。
     sliding: bool,
 
-    /// 这个键下滑能打出来的字符（键帽角上那个小字）。没有角标就是 `None`。
+    /// 这个键角上那个小字（符号）。没有角标就是 `None`。
     hint: Option<char>,
 
-    /// 已经往下滑够远了，这一下兑现的是角标那个字符。
+    /// **已经进「选一个」了**：长按字母键弹出的那排选项正开着。
     ///
-    /// 与 [`Self::sliding`] 是两回事：下滑是**手势**，手指离开这个键照样算数；
-    /// `sliding` 说的是「点击作废」。
-    hinted: bool,
+    /// 长按（壳按够 400ms 来问）从「连发」那条路上岔出来——字母键不连发，改开这一排。
+    /// 开着的时候手指左右滑是**在这排里选**（见 [`Self::choice`]），不是滑键。
+    choosing: bool,
+
+    /// 选中的是那排里的第几个：**0 大写 / 1 符号 / 2 小写**，默认中间那个（符号）。
+    ///
+    /// 往左滑一格就到大写、往右滑一格就回小写，见 [`Chooser::pick`]。
+    choice: usize,
 
     /// 这根手指此刻**横着离开了按下那点多远**（点，正数往右）。只有空格上移光标用得上。
     swipe: f32,
@@ -184,16 +239,18 @@ pub struct Keyboard {
     /// 那一根手指**已经往上滑了**：松手要把光标前面整段清掉。气泡照它改口。
     pressed_clearing: bool,
 
-    /// 那一根手指**已经下滑取角标了**：这一下最终打出的是角标那个字符，不是键帽上印的字。
+    /// 那一根手指**长按开着那排选项**：气泡要画那一排，还得知道选中第几个。
     ///
-    /// 气泡照它画——不然按住 `y` 往下滑，气泡写着 `y`、打出来却是 `6`，气泡在骗人。
-    pressed_hint: Option<char>,
+    /// `None` = 没开着。有值时就是选中的下标（0 大写 / 1 符号 / 2 小写）。
+    pressed_choice: Option<usize>,
 
-    /// 画好的键预览气泡，以及它是**给哪个键、多大尺寸**画的。
+    /// 画好的键预览气泡，以及它是**给哪个键、多大尺寸、什么形态**画的。
     ///
     /// 按住键那一下要弹；同一个键按着不动就不必重画（画一次 ~0.8ms，每拍重画白费）。
+    /// 最后那个数是形态：0 普通键、1 「松手清空」、2 起是那排选项的第几个——
+    /// 手指在选项里左右滑时它一直在变，靠它决定要不要重画。
     popup: Option<Rendered>,
-    popup_for: Option<(KeyId, u32, u32, bool)>,
+    popup_for: Option<(KeyId, u32, u32, u32)>,
 }
 
 /// 空格上横滑时，位移 `dx`（点）下**一拍**该走几格（正数往右）。
@@ -222,7 +279,7 @@ impl Keyboard {
             presses: Vec::new(),
             pressed: None,
             pressed_clearing: false,
-            pressed_hint: None,
+            pressed_choice: None,
             popup: None,
             popup_for: None,
         }
@@ -355,7 +412,8 @@ impl Keyboard {
                     at: (x, y),
                     sliding: false,
                     hint: self.hint_at(x, y),
-                    hinted: false,
+                    choosing: false,
+                    choice: Chooser::DEFAULT,
                     swipe: 0.0,
                     cursor_started: false,
                     cursor_carry: 0.0,
@@ -367,7 +425,6 @@ impl Keyboard {
             }
             MotionAction::Move => {
                 let hit = self.hit(x, y);
-                let threshold = SWIPE * self.metrics.density;
                 let dead_zone = CURSOR_DEAD_ZONE * self.metrics.density;
                 let clear_swipe = CLEAR_SWIPE * self.metrics.density;
                 if let Some(press) = self
@@ -375,15 +432,17 @@ impl Keyboard {
                     .iter_mut()
                     .find(|press| press.pointer == pointer)
                 {
-                    // 取角标**只认往下滑**（2026-09-20 改，原先四个方向都算；为什么见 [`SWIPE`]）。
-                    // 判定了就不再改回去：手指滑到键外面也还算数，这是手势不是点击。
                     let dy = y - press.at.1;
-                    if !press.hinted && press.hint.is_some() && dy >= threshold {
-                        press.hinted = true;
-                        // 之前因为「手指出了键」记下的作废，到这儿一笔勾销——手势既然认出来了，
-                        // 这一下就照角标兑现。不清掉的话 `refresh_pressed` 会把手指排除在外，
-                        // 气泡和键帽按下态会在手势认出的那一刻**当场消失**（`clearing` 踩过同一个坑）。
-                        press.sliding = false;
+                    // **开着那排选项时，左右滑是在排里选**，不是滑键也不是点击。
+                    // 手指滑出键外也不作废（这一下早就不在按键了），所以直接返回，
+                    // 免得下面那条「出了键 = 作废」把气泡弄没。
+                    if press.choosing {
+                        let picked = Chooser::pick(x - press.at.0, self.metrics.density);
+                        if picked != press.choice {
+                            press.choice = picked;
+                        }
+                        self.refresh_pressed();
+                        return None;
                     }
                     // ⌫ 上**往上滑** = 要清掉光标前面整段（**松手才清**，滑上去只是「预备」）。
                     // 挑往上而不是往左：往左是「退格」本来的方向，容易跟普通退格混；
@@ -408,12 +467,12 @@ impl Keyboard {
                     // 滑到别的键或键之间的缝上才取消。候选条那边不是这个判法，得挪出触摸阈值。
                     //
                     // **已经认成手势的那几根一律不取消**，哪怕手指滑出了键：
-                    // - 取角标（`hinted`）：手势本来就是滑出去
+                    // - 选一个（`choosing`）：上面那条已经 `return` 了，这里只是再保一道
                     // - 移光标（`cursor_started`）：空格键宽，划着划着就出去了，那不是「这一下不要了」
                     // - ⌫ 上滑清空（`clearing`）：**这条是补的**——往上一滑手指就出了 ⌫，
                     //   原先这里没排掉它，于是 `sliding` 一置上，`refresh_pressed` 就不认这根手指了，
                     //   气泡当场消失——用户正是靠气泡上那句「松手清空」才知道自己在干什么
-                    if !press.hinted
+                    if !press.choosing
                         && !press.cursor_started
                         && !press.clearing
                         && (press.key.is_none() || hit != press.key)
@@ -431,10 +490,12 @@ impl Keyboard {
                     .position(|press| press.pointer == pointer);
                 let ended = index.map(|index| self.presses.remove(index))?;
                 self.refresh_pressed();
-                // 滑出来的字符走 `Literal`：与数字页、符号页同一个身份，
-                // 翻成动作、全角与否都走已经有的那条路
-                if ended.hinted {
-                    return ended.hint.map(|hint| Fired::Key(KeyId::Literal(hint)));
+                // 长按开的那排：松手兑现选中的那个（大写 / 符号 / 小写）
+                if ended.choosing {
+                    let (Some(KeyId::Letter(letter)), Some(hint)) = (ended.key, ended.hint) else {
+                        return None;
+                    };
+                    return Some(Fired::Key(Chooser::fired(letter, hint, ended.choice)));
                 }
                 // 按住连发过的，抬手不再补一下——不然后面总是多删一个字
                 if ended.repeated {
@@ -499,25 +560,36 @@ impl Keyboard {
             self.forget_popup();
             return Vec::new();
         }
-        // **这一下会打出什么就画什么**：下滑取角标时，兑现的是角标那个字符。
-        // 画成 `Literal` 与真正兑现时走的是同一个身份，气泡上的字与打出来的字必然一致
-        let shown = match self.pressed_hint {
-            Some(hint) => Key::new(KeyId::Literal(hint), key.units().max(1.0)),
-            None => key,
+        // 气泡画什么，按这一下**实际会干什么**来：
+        // - 长按开着那排选项（只有带角标的字母键会开）→ 画那一排，选中的垫底
+        // - ⌫ 上滑过 → 那句「松手清空」（退格图标说不出「松手会怎样」）
+        // - 其余 → 这个键自己的样子
+        let chooser = match (self.pressed_choice, key.id, key.hint) {
+            (Some(index), KeyId::Letter(letter), Some(hint)) => {
+                Some((Chooser::items(letter, hint), index))
+            }
+            _ => None,
         };
-        // ⌫ 上往上滑之后这一下不是「删一个字」了，气泡改说「松手清空」——
-        // 退格图标说不出「松手会怎样」
-        let content = if self.pressed_clearing {
-            Popup::Text(CLEAR_HINT)
-        } else {
-            Popup::Key(&shown)
+        let content = match &chooser {
+            Some((items, index)) => Popup::Choices {
+                items: *items,
+                selected: *index,
+            },
+            None if self.pressed_clearing => Popup::Text(CLEAR_HINT),
+            None => Popup::Key(&key),
+        };
+        // 形态：0 普通 / 1 松手清空 / 2 起是那排选项的第几个
+        let shape = match &chooser {
+            Some((_, index)) => 2 + *index as u32,
+            None if self.pressed_clearing => 1,
+            None => 0,
         };
 
         let mark = (
-            shown.id,
+            key.id,
             rect.width.round() as u32,
             rect.height.round() as u32,
-            self.pressed_clearing,
+            shape,
         );
         if self.popup_for != Some(mark) || self.popup.is_none() {
             let theme = self.theme();
@@ -602,11 +674,40 @@ impl Keyboard {
             .find(|press| {
                 press.pointer == pointer
                     && !press.sliding
-                    && !press.hinted
+                    && !press.choosing
                     && !press.cursor_started
                     && !press.clearing
             })
             .and_then(|press| press.key)
+    }
+
+    /// 这根手指在**带角标的字母键**上按够久了：开那排选项（大写 / 符号 / 小写）。
+    ///
+    /// 返回是否开着——按的不是这种键就不开，长按对它没有额外意义。
+    /// 已经开着就返回 `true`（壳的心跳会一直来问）。
+    pub fn begin_choice(&mut self, pointer: i32) -> bool {
+        let Some(press) = self
+            .presses
+            .iter_mut()
+            .find(|press| press.pointer == pointer)
+        else {
+            return false;
+        };
+        if press.choosing {
+            return true;
+        }
+        // 只有「带角标的字母键」开着才有意义：别的键要么没有第二层含义，
+        // 要么已经在走自己的手势（⌫ 上滑清空、空格拖光标）
+        let Some(KeyId::Letter(_)) = press.key else {
+            return false;
+        };
+        if press.hint.is_none() || press.sliding || press.cursor_started || press.clearing {
+            return false;
+        }
+        press.choosing = true;
+        press.choice = Chooser::DEFAULT;
+        self.refresh_pressed();
+        true
     }
 
     /// 记下这根手指已经连发过了。抬起时就不再按「点击」兑现一次——
@@ -644,12 +745,6 @@ impl Keyboard {
         steps as isize
     }
 
-    /// 气泡此刻是**按哪个身份**画的——测试用，验证下滑之后画的是角标而不是字母。
-    #[cfg(test)]
-    pub(crate) fn popup_id(&self) -> Option<KeyId> {
-        self.popup_for.map(|(id, _, _, _)| id)
-    }
-
     /// 命中哪个键。落在键之间的缝上、或者还没画过时是 `None`。
     fn hit(&self, x: f32, y: f32) -> Option<KeyId> {
         self.rendered
@@ -681,14 +776,15 @@ impl Keyboard {
             .rev()
             .find(|press| !press.sliding && press.key.is_some());
         let key = held.and_then(|press| press.key);
-        // 下滑取角标的那一根：这一下兑现的是角标，不是键帽上的字
-        let hint = held
-            .filter(|press| press.hinted)
-            .and_then(|press| press.hint);
         let clearing = held.is_some_and(|press| press.clearing);
-        if self.pressed != key || self.pressed_hint != hint || self.pressed_clearing != clearing {
+        // 长按开着那排选项的那一根：气泡要画那一排，还得知道选中第几个
+        let choice = held
+            .filter(|press| press.choosing)
+            .map(|press| press.choice);
+        if self.pressed != key || self.pressed_choice != choice || self.pressed_clearing != clearing
+        {
             self.pressed = key;
-            self.pressed_hint = hint;
+            self.pressed_choice = choice;
             self.pressed_clearing = clearing;
             self.dirty = true;
         }

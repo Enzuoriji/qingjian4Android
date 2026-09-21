@@ -38,6 +38,15 @@ const TEXT_PADDING: f32 = 10.0;
 /// 但也不能宽到盖掉半块键盘。
 const MAX_TEXT_WIDTH: f32 = 120.0;
 
+/// 选项格子里字符两侧各留的空白（点）。
+const CHOICE_PADDING: f32 = 8.0;
+
+/// 一排选项的总宽上限（点）。三个格子再宽也不能盖掉半块键盘。
+const MAX_CHOICES_WIDTH: f32 = 160.0;
+
+/// 选项高亮垫底往格子里收多少（点）——不收就正好顶满，看着像格子粘在一起。
+const CHOICE_INSET: f32 = 2.0;
+
 /// 气泡里画什么。
 pub enum Popup<'a> {
     /// 画这个键的样子——字母 / 字词画字，图标键（⇧ / ⌫）画图标。
@@ -45,6 +54,11 @@ pub enum Popup<'a> {
 
     /// 画一句提示。键上那个图标说不清「松手会怎样」这种事，得用话讲。
     Text(&'a str),
+
+    /// **一排字符选项，`selected` 那个高亮**——长按字母键时弹的就是它。
+    ///
+    /// 三个格子等宽，往左滑选第一个、往右滑选最后一个（见 `docs/design/keyboard.md`）。
+    Choices { items: [char; 3], selected: usize },
 }
 
 /// 画一个图标的函数签名（⇧ 与 ⌫ 各一个）。
@@ -88,6 +102,22 @@ impl Renderer {
                 let size = self.measure(text, &style);
                 (size.width / scale + TEXT_PADDING * 2.0).clamp(MIN_WIDTH, MAX_TEXT_WIDTH)
             }
+            // 一排等宽的格子：按**最宽那个**算格宽，三个格子一样宽才像个滑动的轨道
+            Popup::Choices { items, .. } => {
+                // 与下面画的时候同一个字号（气泡里那个放大的）
+                let style = TextStyle::new(
+                    theme.popup_font.scaled(scale),
+                    theme.popup_font.size,
+                    theme.label,
+                    theme.text_gamma,
+                );
+                let widest = items
+                    .iter()
+                    .map(|c| self.measure(&c.to_string(), &style).width)
+                    .fold(0.0, f32::max);
+                let cell = widest / scale + CHOICE_PADDING * 2.0;
+                (cell * items.len() as f32).clamp(MIN_WIDTH, MAX_CHOICES_WIDTH)
+            }
         };
         let margin = shadow.margin();
         let width = ((content_width + margin * 2.0) * scale).ceil();
@@ -104,28 +134,58 @@ impl Renderer {
         canvas.fill_round_rect(left, top, w, h, radius, theme.popup);
 
         let (cx, cy) = (left + w / 2.0, top + h / 2.0);
-        let (text, icon) = match &content {
-            Popup::Text(text) => (text.to_string(), None),
-            Popup::Key(key) => (super::label(key, state), icon_of(key.id)),
-        };
-        // 提示文字用键帽那个字号（小一档），键自己的字用气泡那个放大的
+        // 提示文字用键帽那个字号（小一档），键自己的字与选项都用气泡那个放大的
         let font = if matches!(content, Popup::Text(_)) {
             theme.font
         } else {
             theme.popup_font
         };
         let style = TextStyle::new(font.scaled(scale), font.size, theme.label, theme.text_gamma);
-        if let Some(draw) = icon {
-            draw(&mut canvas, cx, cy, h, scale, theme.label);
+
+        if let Popup::Choices { items, selected } = &content {
+            // 一排等宽的格子，选中的那个垫一块底色——手指滑到哪儿一眼看得出来
+            let cell = w / items.len() as f32;
+            let inset = CHOICE_INSET * scale;
+            for (i, choice) in items.iter().enumerate() {
+                let cell_left = left + cell * i as f32;
+                if i == *selected {
+                    canvas.fill_round_rect(
+                        cell_left + inset,
+                        top + inset,
+                        cell - inset * 2.0,
+                        h - inset * 2.0,
+                        radius / 2.0,
+                        theme.key_pressed,
+                    );
+                }
+                let text = choice.to_string();
+                let size = self.measure(&text, &style);
+                self.draw_text(
+                    &mut canvas,
+                    &text,
+                    &style,
+                    cell_left + cell / 2.0 - size.width / 2.0,
+                    cy - size.height / 2.0,
+                );
+            }
         } else {
-            let size = self.measure(&text, &style);
-            self.draw_text(
-                &mut canvas,
-                &text,
-                &style,
-                cx - size.width / 2.0,
-                cy - size.height / 2.0,
-            );
+            let (text, icon) = match &content {
+                Popup::Text(text) => (text.to_string(), None),
+                Popup::Key(key) => (super::label(key, state), icon_of(key.id)),
+                Popup::Choices { .. } => unreachable!("上面那条分支已经处理过了"),
+            };
+            if let Some(draw) = icon {
+                draw(&mut canvas, cx, cy, h, scale, theme.label);
+            } else {
+                let size = self.measure(&text, &style);
+                self.draw_text(
+                    &mut canvas,
+                    &text,
+                    &style,
+                    cx - size.width / 2.0,
+                    cy - size.height / 2.0,
+                );
+            }
         }
 
         Ok(Rendered {

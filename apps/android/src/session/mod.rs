@@ -508,6 +508,12 @@ impl Session {
         });
         if let Some(key) = key {
             self.apply(action::on_key(key));
+            return self.mask();
+        }
+        // 键盘那头没按着要连发的键：**长按带角标的字母键就开那排选项**
+        // （大写 / 符号 / 小写，见 `keyboard::Chooser`）。别的键按够久什么也不做。
+        if let Some(keyboard) = self.keyboard.as_mut() {
+            keyboard.begin_choice(pointer);
         }
         self.mask()
     }

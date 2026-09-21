@@ -813,58 +813,6 @@ fn swipe_distance() -> f32 {
     crate::keyboard::SWIPE * DENSITY
 }
 
-/// 稳稳超过阈值——「这一下要出角标」的用例用它。
-fn swipe_past() -> f32 {
-    swipe_distance() * 1.2
-}
-
-/// 字母键往下滑，打出来的是键帽角上那个小字，不是字母本身。
-#[test]
-fn swiping_down_on_a_letter_key_types_its_hint() {
-    let Some(mut session) = ready() else {
-        return;
-    };
-
-    // q 的角标是 1，n 的角标是 ~（中文模式下 `~` 转全角，跟符号页一个规矩）
-    swipe_down(&mut session, KeyId::Letter('q'), swipe_past());
-    swipe_down(&mut session, KeyId::Letter('n'), swipe_past());
-
-    assert_eq!(
-        session.take_commit().as_deref(),
-        Some("1～"),
-        "下滑该打出角标（中文模式下照引擎的标点表转全角），且不该混进字母"
-    );
-    assert_eq!(
-        preedit(&session),
-        None,
-        "下滑是打符号，不该往拼音缓冲区里塞东西"
-    );
-}
-
-/// 下滑是一记**手势**：手指滑出键外（甚至滑过界）也照样兑现角标。
-///
-/// 这一点和点击相反——点击滑出键外就作废了，下滑滑出去反而说明这手势是真的。
-#[test]
-fn a_swipe_that_leaves_the_key_still_counts() {
-    let Some(mut session) = ready() else {
-        return;
-    };
-    let (x, y) = key_centre(&session, KeyId::Letter('q'));
-    // 一路滑进下面那一行键里
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x, y + swipe_distance());
-    session.touch(MotionAction::Move, POINTER, x, y + swipe_distance() * 2.0);
-    session.touch(MotionAction::Up, POINTER, x, y + swipe_distance() * 2.0);
-    session.bar_surface();
-    session.keyboard_surface();
-
-    assert_eq!(
-        session.take_commit().as_deref(),
-        Some("1"),
-        "下滑判定之后手指滑到哪儿都该算数"
-    );
-}
-
 /// 手指挪几个像素不算滑动——快敲时手指本来就会歪一点。
 ///
 /// 阈值定小了这条就会挂：正常打字全变成打符号，那是灾难。
@@ -927,50 +875,6 @@ fn a_drift_the_size_of_the_old_threshold_no_longer_types_a_symbol() {
         );
         assert_eq!(session.take_commit(), None, "不该打出角标");
     }
-}
-
-/// **只有往下滑才出角标**（2026-09-20 改，原先四个方向都算）。
-///
-/// 改的理由是真机上快打会误蹦符号：四方向时往哪滚都可能撞上，而横向那条路**结构上救不了**
-/// ——「手指出了键 = 这一下作废」与阈值线重合（都在半个键宽上），往上加只会变成
-/// 「符号不出、字母也一起丢」。收回成一个方向之后误触面砍到四分之一，
-/// 阈值也才敢从 16 提到 22（比的是键高，不是半个键宽）。
-///
-/// 另外三个方向**不再是手势**：挪得少就还是这个字母，挪出键外这一下就作废——
-/// 都不是「打出一个符号」。
-#[test]
-fn the_hint_only_comes_out_when_you_swipe_down() {
-    // 往上 / 往左 / 往右 / 斜着，**都超过阈值**（1.5 倍），也都不该出角标
-    for (dx, dy) in [
-        (0.0, -1.0),
-        (1.0, 0.0),
-        (-1.0, 0.0),
-        (-0.85, -0.85),
-        (0.85, -0.85),
-    ] {
-        let Some(mut session) = ready() else {
-            return;
-        };
-        let far = swipe_distance() * 1.5;
-        drag(&mut session, KeyId::Letter('q'), dx * far, dy * far);
-        assert_eq!(
-            session.take_commit(),
-            None,
-            "往 ({dx}, {dy}) 方向滑了 {far} 像素也不该出角标——只认往下"
-        );
-    }
-
-    // 往下：照旧出角标（q 的角标是 1）
-    let Some(mut session) = ready() else {
-        return;
-    };
-    let down = swipe_distance() * 1.2;
-    drag(&mut session, KeyId::Letter('q'), 0.0, down);
-    assert_eq!(
-        session.take_commit().as_deref(),
-        Some("1"),
-        "往下滑该出角标 1"
-    );
 }
 
 /// 没有角标的键（数字页、符号页、功能键）往下滑，仍按普通点击算。
@@ -1141,74 +1045,6 @@ fn the_popup_stays_on_screen_at_the_edges() {
 
         session.touch(MotionAction::Up, POINTER, x, y);
     }
-}
-
-/// **气泡上写的必须是这一下真正会打出去的东西。**
-///
-/// `y` 的角标是 `6`：按住 `y` 往下滑之后，兑现的是 `6` 而不是 `y`，
-/// 气泡要是还写着 `y`，那气泡就在骗人。
-#[test]
-fn the_popup_shows_what_will_actually_be_typed() {
-    let Some(mut session) = ready() else {
-        return;
-    };
-    let (x, y) = key_centre(&session, KeyId::Letter('y'));
-
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.popup_surface(); // 画一次才有「按哪个身份画的」可看
-    assert_eq!(
-        session.keyboard.as_ref().unwrap().popup_id(),
-        Some(KeyId::Letter('Y')),
-        "刚按住时气泡该显示这个字母"
-    );
-
-    // 往下滑够远 → 这一下改判成角标
-    session.touch(MotionAction::Move, POINTER, x, y + swipe_past());
-    session.popup_surface();
-
-    assert_eq!(
-        session.keyboard.as_ref().unwrap().popup_id(),
-        Some(KeyId::Literal('6')),
-        "下滑之后气泡该显示角标 6，不是字母 y"
-    );
-
-    // 抬起真的打出 6，跟气泡上写的一致
-    session.touch(MotionAction::Up, POINTER, x, y + swipe_past());
-    assert_eq!(
-        session.take_commit().as_deref(),
-        Some("6"),
-        "打出来的该是 6"
-    );
-}
-
-/// 往下滑的过程里手指会**先滑出键**（键矮的屏上更明显），那一瞬间记下的「作废」
-/// 不该让气泡消失——手势既然认出来了，这一下就照角标兑现。
-///
-/// 与 ⌫ 上滑清空那次是同一个坑（见 `the_backspace_popup_warns_before_clearing`）：
-/// `sliding` 一置上，`refresh_pressed` 就不认这根手指，气泡当场没了。
-#[test]
-fn the_popup_survives_a_downward_swipe_that_leaves_the_key() {
-    let Some(mut session) = ready() else {
-        return;
-    };
-    // 换一台矮屏：键高降到 200 点，行高 41.75、半个键高约 21 点——
-    // **够到 22 点的阈值之前，手指已经出了键**，正好走到这条路上
-    session.configure(WIDTH, 640.0, DENSITY, 0.0, false, false);
-    session.keyboard_surface();
-
-    let (x, y) = key_centre(&session, KeyId::Letter('y'));
-    let out_of_key = 21.0 * DENSITY;
-
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x, y + out_of_key);
-    session.touch(MotionAction::Move, POINTER, x, y + swipe_distance() * 1.2);
-    session.popup_surface();
-
-    assert_eq!(
-        session.keyboard.as_ref().unwrap().popup_id(),
-        Some(KeyId::Literal('6')),
-        "滑出键之后气泡该还在，且写的是真正会打出去的 6"
-    );
 }
 
 /// 在空格上横滑到 `dx` 处按着不动，敲 `ticks` 拍，返回这几拍总共走了几格。
@@ -1856,4 +1692,100 @@ fn showing_the_keyboard_again_goes_back_to_letters_without_dropping_the_pinyin()
         Some("ni'hao'n"),
         "回到字母页接着打（n 起了新音节，引擎自己补 '）"
     );
+}
+
+/// **长按字母键弹出那排选项，默认（没滑就松手）打的是符号。**
+///
+/// 2026-09-21 定的：取代原先「在键上往下滑取角标」。那个手势真机上快打仍会误蹦符号，
+/// 换成长按——快打按不到 400ms，误触面直接归零。
+/// 那排是 **大写 / 符号 / 小写**，默认停在中间那个。
+#[test]
+fn long_pressing_a_letter_key_types_its_symbol_by_default() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Letter('q'));
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    // 壳按够 400ms 来问一次——这一下开的不是连发，是那排选项
+    session.repeat(POINTER);
+    session.touch(MotionAction::Up, POINTER, x, y);
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("1"),
+        "默认选中中间那个：q 的符号是 1"
+    );
+}
+
+/// 那排里**往左滑选大写、往右滑选小写**；滑出去的距离要过 `Chooser::STEP`。
+#[test]
+fn sliding_in_the_choice_row_picks_upper_or_lower() {
+    let far = 60.0;
+
+    // 往左 → 大写：**直接打出一个大写字母**，不进拼音缓冲区
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Letter('q'));
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.repeat(POINTER);
+    session.touch(MotionAction::Move, POINTER, x - far, y);
+    session.touch(MotionAction::Up, POINTER, x - far, y);
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("Q"),
+        "往左滑该打成大写 Q"
+    );
+    assert_eq!(preedit(&session), None, "大写是直出的，不该进拼音");
+
+    // 往右 → 小写：与直接点一下那个键一样，进拼音缓冲区
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Letter('q'));
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.repeat(POINTER);
+    session.touch(MotionAction::Move, POINTER, x + far, y);
+    session.touch(MotionAction::Up, POINTER, x + far, y);
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("q"),
+        "往右滑该是小写 q，照常进拼音"
+    );
+}
+
+/// **键上滑动不再出符号**——手势整个撤了，符号改由长按那排给。
+#[test]
+fn swiping_on_a_letter_key_no_longer_types_a_symbol() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    // 往下滑一大截（原先这就是「取角标」）
+    drag(&mut session, KeyId::Letter('q'), 0.0, 40.0 * DENSITY);
+
+    assert_eq!(session.take_commit(), None, "下滑不该再吐符号");
+    assert_eq!(preedit(&session), None, "手指滑出键外，这一下也不算点了 q");
+}
+
+/// 长按**不带角标的键**不开那排：⇧ 按住还是 ⇧，不弹东西。
+#[test]
+fn long_pressing_a_key_without_a_hint_opens_nothing() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Shift);
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    for _ in 0..5 {
+        session.repeat(POINTER);
+    }
+    session.touch(MotionAction::Up, POINTER, x, y);
+
+    assert_eq!(
+        session.take_commit(),
+        None,
+        "⇧ 按住不该弹出那排、也不该打字"
+    );
+    assert!(!session.english(), "Shift 那一档也不该被长按弄乱");
 }
