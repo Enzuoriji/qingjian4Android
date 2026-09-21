@@ -14,8 +14,8 @@ use std::path::Path;
 use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
 use qingjian_dictionary::Dictionary;
 use qingjian_render::{
-    BarHitId, BarStrip, FontLibrary, Frame, InputMode, KeyboardLayout, Panel, Preedit,
-    PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme,
+    BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
+    Preedit, PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme,
 };
 
 use crate::action::{self, Act, Command};
@@ -24,6 +24,12 @@ use crate::keyboard::{Fired, Keyboard};
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 use fling::Fling;
+
+/// 剪贴板最多记几条——超了丢最旧的。
+///
+/// 参考项目 fcitx5-android 是可配的（缺省 20，界面里能改），搜狗存 500 条。
+/// 我们**只存在内存里**，50 条够翻好几屏，也不至于让那一页翻不到头。
+const CLIPBOARD_LIMIT: usize = 50;
 
 /// 随包资源目录里的 emoji 字体名（`assets/emoji/README.md` 写了为什么要带它）。
 const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
@@ -120,6 +126,15 @@ pub struct Session {
     /// 只有它抬起时才谈得上「甩」：抬手时每根手指都会报速度上来（点候选、敲键盘也报），
     /// 照单全收去滑带子就成了乱动。手指落下即清。
     scrolled: Option<i32>,
+
+    /// 剪贴板历史，**最新在最前**。壳每复制一次报一条进来（[`Self::note_clipboard`]）。
+    ///
+    /// **只在内存里**：输入法进程重启就没了。fcitx5 是落库的（Room），我们这轮不做——
+    /// 剪贴板本来就是「刚刚复制的那几样」，先看用起来顺不顺。
+    clipboard: Vec<String>,
+
+    /// 剪贴板页现在在第几屏（从 0 起）。
+    clipboard_page: usize,
 
     /// 当前该画的候选条那一帧。缓冲变化或翻页时由 [`Self::refresh`] 重建。
     frame: Frame,
@@ -219,6 +234,8 @@ impl Session {
             scroll: 0.0,
             fling: None,
             scrolled: None,
+            clipboard: Vec::new(),
+            clipboard_page: 0,
             frame: Frame::default(),
             bar: None,
             bar_dirty: true,
@@ -261,6 +278,12 @@ impl Session {
         if let Some(keyboard) = self.keyboard.as_mut() {
             keyboard.set_layout(KeyboardLayout::of(panel));
         }
+        // 剪贴板页从头看起（每次进来都回到最新的那几条）
+        if panel == Panel::Clipboard {
+            self.clipboard_page = 0;
+        }
+        // 页脚（剪贴板第几屏）挂在候选条那一帧上，换页得重算
+        self.refresh();
     }
 
     /// 壳报告输入视图的宽度（点）、**屏幕在当前方向上的高度**（点）、屏幕密度、
@@ -346,18 +369,13 @@ impl Session {
         }
     }
 
-    /// 候选条的位图（8 字节头 + 预乘 RGBA）。没配过宽度、渲染器不可用、**或者没在组句**时返回空。
+    /// 候选条的位图（8 字节头 + 预乘 RGBA）。没配过宽度或渲染器不可用时返回空。
     ///
-    /// 没在组句时把 `bar` 也清掉：那块命中区跟着一起没了，触摸自然落不到候选条上。
-    /// 壳收到空字节串要把视图上那张位图**撤掉**，视图量出来的高度才会跟着缩回去——
-    /// 光不更新是不够的，那张旧位图还占着位置。
+    /// **没组句时也画**：那会儿这一条细细的、里面一个齿轮（开工具页 / 剪贴板），
+    /// 一打字才被候选条整个接管（见 [`Renderer::bar_height`]）。那张位图的高度跟着变，
+    /// 壳按位图高度自己量视图——所以壳那边不必知道这两种状态。
     pub fn bar_surface(&mut self) -> Vec<u8> {
         if self.width <= 0.0 {
-            return Vec::new();
-        }
-        if !self.composing() {
-            self.bar = None;
-            self.bar_dirty = false;
             return Vec::new();
         }
         if self.bar_dirty || self.bar.is_none() {
@@ -386,8 +404,11 @@ impl Session {
     /// 与候选条一样，**空表示「这个小窗现在不该在」**——壳收到空字节串要把浮动小窗收起来。
     pub fn popup_surface(&mut self) -> Vec<u8> {
         let (shift, mode) = (self.shift, self.mode);
+        let (clipboard, page) = (&self.clipboard, self.clipboard_page);
         match self.keyboard.as_mut() {
-            Some(keyboard) => keyboard.popup_surface(self.renderer.as_mut(), shift, mode),
+            Some(keyboard) => {
+                keyboard.popup_surface(self.renderer.as_mut(), shift, mode, clipboard, page)
+            }
             None => Vec::new(),
         }
     }
@@ -405,8 +426,11 @@ impl Session {
     /// 键盘的位图（8 字节头 + 预乘 RGBA）。没配过宽度、渲染器不可用、或者键盘不由这里画时返回空。
     pub fn keyboard_surface(&mut self) -> Vec<u8> {
         let (shift, mode) = (self.shift, self.mode);
+        let (clipboard, page) = (&self.clipboard, self.clipboard_page);
         match self.keyboard.as_mut() {
-            Some(keyboard) => keyboard.surface(self.renderer.as_mut(), shift, mode),
+            Some(keyboard) => {
+                keyboard.surface(self.renderer.as_mut(), shift, mode, clipboard, page)
+            }
             None => Vec::new(),
         }
     }
@@ -457,6 +481,7 @@ impl Session {
             Some(Fired::Key(key)) => self.apply(action::on_key(key)),
             Some(Fired::MoveCursor(steps)) => self.move_cursor(steps),
             Some(Fired::ClearToStart) => self.clear_to_start(),
+            Some(Fired::DeleteClipboard(index)) => self.apply(Act::DeleteClipboard(index)),
             None => {}
         }
         self.touch_bar(action, pointer, x, y);
@@ -711,6 +736,11 @@ impl Session {
                 self.recompose();
             }
             Act::Punctuate(c) => self.punctuate(c),
+            Act::ToggleTools => self.toggle_tools(),
+            Act::PasteClipboard(index) => self.paste_clipboard(index),
+            Act::DeleteClipboard(index) => self.delete_clipboard(index),
+            Act::ClearClipboard => self.clear_clipboard(),
+            Act::ClipboardPage(step) => self.turn_clipboard_page(step),
         }
     }
 
@@ -847,13 +877,30 @@ impl Session {
             // 认整格不认「露了半边的那个」——压在半格上的话，看着像画坏了，
             // 而且空格上屏的会是屏幕上几乎看不见的词。
             highlighted: self.highlighted_index().map(|index| index - visible.start),
-            // 页码是**第几屏 / 共几屏**，跟着手指走。带子一屏就装得下时不报——没有第二屏好去
-            footer: (screens > 1)
-                .then(|| format!("{}/{}", self.strip.screen(self.scroll, viewport), screens)),
+            footer: self.footer(screens),
             rows,
             sentence: None,
             status: None,
         }
+    }
+
+    /// 这一帧右上角那个页码写什么（没有就 `None`）。
+    ///
+    /// 两种页码**共用那条候选条**：组句当中报候选翻到第几屏；没组句时那条上只有一个齿轮，
+    /// 报的是**剪贴板**第几屏——剪贴板页恰恰只在没组句时才开得起来（齿轮那时才画）。
+    /// 只有一屏就都不报。
+    fn footer(&self, candidate_screens: usize) -> Option<String> {
+        if !self.composing() && self.panel == Panel::Clipboard {
+            let pages = self.clipboard_pages();
+            return (pages > 1).then(|| format!("{}/{}", self.clipboard_page + 1, pages));
+        }
+        (candidate_screens > 1).then(|| {
+            format!(
+                "{}/{}",
+                self.strip.screen(self.scroll, self.viewport()),
+                candidate_screens
+            )
+        })
     }
 
     /// 高亮那个候选在整份候选表里排第几：**最左边那个整格**。一个候选都没有时是 `None`。
@@ -947,6 +994,102 @@ impl Session {
             self.fling = Fling::new(-velocity_x / 1000.0);
         }
         self.mask()
+    }
+
+    /// 壳复制到东西了：记一条进历史，**最新的在最前**。
+    ///
+    /// 同一条文本再复制一次不重复记，只把它挪到最前——「刚复制的永远第一条」。
+    /// 超过 [`CLIPBOARD_LIMIT`] 条丢最旧的。空白的壳那边就滤掉了，这里再挡一道。
+    pub fn note_clipboard(&mut self, text: &str) -> i32 {
+        if text.trim().is_empty() {
+            return self.mask();
+        }
+        self.clipboard.retain(|entry| entry != text);
+        self.clipboard.insert(0, text.to_owned());
+        self.clipboard.truncate(CLIPBOARD_LIMIT);
+        self.after_clipboard_change();
+        self.mask()
+    }
+
+    /// 剪贴板那份列表变了：剪贴板页开着就重画（画的是那份列表）。
+    ///
+    /// 删到不够一屏可能就翻过头了，页码先夹回来。
+    fn after_clipboard_change(&mut self) {
+        self.clipboard_page = self
+            .clipboard_page
+            .min(self.clipboard_pages().saturating_sub(1));
+        if self.panel == Panel::Clipboard {
+            self.mark_keyboard_dirty();
+            // 页码写在候选条那条上（没组句时那条就一个齿轮加它），跟着一起重画
+            self.refresh();
+        }
+    }
+
+    /// 剪贴板一共几屏，至少 1。
+    fn clipboard_pages(&self) -> usize {
+        self.clipboard.len().div_ceil(CLIPBOARD_CELLS).max(1)
+    }
+
+    /// 剪贴板页上第 `index` 格（**本屏**下标）对应整份里的第几条。这一屏没那么多条时是 `None`。
+    fn clipboard_index(&self, index: usize) -> Option<usize> {
+        let index = self.clipboard_page * CLIPBOARD_CELLS + index;
+        (index < self.clipboard.len()).then_some(index)
+    }
+
+    /// 齿轮：开 / 收工具页。已经在工具页或剪贴板页时收回字母页。
+    ///
+    /// 仿搜狗那个 S 的开关手感：同一个按钮管开也管收。工具页是这些「不是打字的」页的入口，
+    /// 以后的震动 / 设置都排在那儿。
+    fn toggle_tools(&mut self) {
+        let panel = match self.panel {
+            Panel::Tools | Panel::Clipboard => Panel::Letters,
+            _ => Panel::Tools,
+        };
+        self.set_panel(panel);
+    }
+
+    /// 把剪贴板里第 `index` 格（**本屏**下标）那条插到光标处。
+    ///
+    /// 走 [`Self::commit_text`]，也就是壳那边一句 `commitText`——**插在光标处**，
+    /// 正是「点一条就插进来」那个用法。插完收回字母页：粘完就该接着打字了
+    /// （fcitx5 那个 `clipboardReturnAfterPaste` 是同一个意思，它做成了开关）。
+    fn paste_clipboard(&mut self, index: usize) {
+        let Some(entry) = self
+            .clipboard_index(index)
+            .and_then(|index| self.clipboard.get(index))
+            .cloned()
+        else {
+            return;
+        };
+        self.commit_text(entry);
+        self.set_panel(Panel::Letters);
+    }
+
+    /// 删掉剪贴板里第 `index` 格（**本屏**下标）那条。在记录上往左滑、松手走这条。
+    fn delete_clipboard(&mut self, index: usize) {
+        let Some(index) = self.clipboard_index(index) else {
+            return;
+        };
+        self.clipboard.remove(index);
+        self.after_clipboard_change();
+    }
+
+    /// 清空整份剪贴板历史。
+    fn clear_clipboard(&mut self) {
+        self.clipboard.clear();
+        self.after_clipboard_change();
+    }
+
+    /// 剪贴板翻页，夹在首末屏之间。
+    fn turn_clipboard_page(&mut self, step: isize) {
+        let pages = self.clipboard_pages() as isize;
+        let target = (self.clipboard_page as isize + step).clamp(0, pages - 1) as usize;
+        if target == self.clipboard_page {
+            return;
+        }
+        self.clipboard_page = target;
+        self.mark_keyboard_dirty();
+        self.refresh();
     }
 
     /// 惯性的一拍：过去 `dt` 毫秒，这一拍该挪多少由 [`Fling`] 算。

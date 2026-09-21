@@ -37,11 +37,19 @@ pub enum InputMode {
 
 /// 键盘此刻长什么样。
 #[derive(Debug, Clone, Copy, Default)]
-pub struct KeyboardState {
+pub struct KeyboardState<'a> {
     pub shift: ShiftState,
 
     pub mode: InputMode,
 
     /// 正被按住的键，画成按下态。抬起或滑出后为 `None`。
     pub pressed: Option<KeyId>,
+
+    /// 剪贴板历史，**整份**（最新在最前）。剪贴板页画的字就是从这儿来的。
+    ///
+    /// 渲染器只读它、按 [`Self::clipboard_page`] 取那一屏——**存与不存、留几条都不归它管**。
+    pub clipboard: &'a [String],
+
+    /// 剪贴板页现在在第几屏（从 0 起）。
+    pub clipboard_page: usize,
 }

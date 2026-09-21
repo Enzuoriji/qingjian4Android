@@ -10,6 +10,6 @@ mod panel;
 mod state;
 
 pub use key::{Key, KeyId, KeyStyle, KeyWidth};
-pub use layout::{KeyRow, KeyboardLayout};
+pub use layout::{CLIPBOARD_CELLS, KeyRow, KeyboardLayout, TOOLS};
 pub use panel::Panel;
 pub use state::{InputMode, KeyboardState, ShiftState};

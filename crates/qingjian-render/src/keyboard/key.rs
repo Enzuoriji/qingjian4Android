@@ -44,6 +44,21 @@ pub enum KeyId {
 
     /// 切到另一页。标签写的是**要去哪一页**，不是现在在哪页。
     Panel(Panel),
+
+    /// 工具页上的一格（`TOOLS` 里第几个）。现在只有「剪贴板」，以后排设置。
+    Tool(usize),
+
+    /// 剪贴板页上的**本屏**第几格（从 0 起）。文本从 [`KeyboardState`] 里取，
+    /// 越界（这一屏没那么多条）时那格不画。
+    ///
+    /// [`KeyboardState`]: super::KeyboardState
+    Clipboard(usize),
+
+    /// 剪贴板翻页：`-1` 上一屏、`1` 下一屏。
+    ClipboardPage(isize),
+
+    /// 清空整份剪贴板历史。
+    ClipboardClear,
 }
 
 /// 按键的样式。只影响配色，不影响行为。
@@ -129,8 +144,12 @@ impl Key {
     /// 这个键按哪种样子画。
     pub const fn style(&self) -> KeyStyle {
         match self.id {
-            // 数字、符号与空格跟字母一样是「内容键」，白的
-            KeyId::Letter(_) | KeyId::Literal(_) | KeyId::Space => KeyStyle::Letter,
+            // 数字、符号、空格、工具与剪贴板的格子跟字母一样是「内容键」，白的
+            KeyId::Letter(_)
+            | KeyId::Literal(_)
+            | KeyId::Space
+            | KeyId::Tool(_)
+            | KeyId::Clipboard(_) => KeyStyle::Letter,
             // 回车是唯一的强调键
             KeyId::Enter => KeyStyle::Primary,
             KeyId::Shift
@@ -138,7 +157,9 @@ impl Key {
             | KeyId::Mode
             | KeyId::Comma
             | KeyId::Period
-            | KeyId::Panel(_) => KeyStyle::Function,
+            | KeyId::Panel(_)
+            | KeyId::ClipboardPage(_)
+            | KeyId::ClipboardClear => KeyStyle::Function,
         }
     }
 }

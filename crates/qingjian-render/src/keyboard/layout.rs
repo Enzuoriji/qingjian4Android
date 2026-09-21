@@ -6,6 +6,18 @@
 use super::key::{Key, KeyId, KeyWidth};
 use super::panel::Panel;
 
+/// 一行的宽度，按单位算。**各页都是 5**：数字 / 符号页是五列，工具与剪贴板页也按这个排——
+/// 单位宽取最挤的那一行，所以各页的行宽一致、格子边缘对得齐。
+const ROW_UNITS: f32 = 5.0;
+
+/// 剪贴板一屏几条（三行两格）。
+pub const CLIPBOARD_CELLS: usize = 6;
+
+/// 工具页上那几行的名字，顺序就是 [`KeyboardLayout::tools`] 的行序。
+///
+/// 现在只有剪贴板；「震动程度」「设置」这些以后往下排（页里留了空行）。
+pub const TOOLS: [&str; 1] = ["剪贴板"];
+
 /// 一行按键，一个字符一个键——字母页与数字 / 符号页的一半都是这么来的。
 fn literals(chars: &str) -> KeyRow {
     KeyRow {
@@ -189,12 +201,61 @@ impl KeyboardLayout {
         }
     }
 
+    /// 工具页：一页一个工具，**整行宽**（一行 5 个单位，与数字 / 符号页同一个单位宽）。
+    ///
+    /// 空行是留着以后排工具的（震动、设置那些），没有键就不画。
+    pub fn tools() -> Self {
+        Self {
+            rows: vec![
+                KeyRow {
+                    keys: vec![Key::new(KeyId::Tool(0), ROW_UNITS)],
+                },
+                KeyRow { keys: Vec::new() },
+                KeyRow { keys: Vec::new() },
+                KeyRow {
+                    keys: vec![Key::new(KeyId::Panel(Panel::Letters), ROW_UNITS)],
+                },
+            ],
+        }
+    }
+
+    /// 剪贴板页：三行两格的记录 + 一行控制。
+    ///
+    /// 记录格 2.5 个单位、控制行四个 1 个单位的键——都是 5 个单位一行，
+    /// 所以**六格的左右边与别的页对得齐**（单位宽取最挤的那一行，这里是记录行）。
+    pub fn clipboard() -> Self {
+        let cell = |index: usize| Key::new(KeyId::Clipboard(index), ROW_UNITS / 2.0);
+        Self {
+            rows: vec![
+                KeyRow {
+                    keys: vec![cell(0), cell(1)],
+                },
+                KeyRow {
+                    keys: vec![cell(2), cell(3)],
+                },
+                KeyRow {
+                    keys: vec![cell(4), cell(5)],
+                },
+                KeyRow {
+                    keys: vec![
+                        Key::new(KeyId::Panel(Panel::Letters), 1.0),
+                        Key::new(KeyId::ClipboardPage(-1), 1.0),
+                        Key::new(KeyId::ClipboardPage(1), 1.0),
+                        Key::new(KeyId::ClipboardClear, 1.0),
+                    ],
+                },
+            ],
+        }
+    }
+
     /// 某一页的布局。
     pub fn of(panel: Panel) -> Self {
         match panel {
             Panel::Letters => Self::letters(),
             Panel::Digits => Self::digits(),
             Panel::Symbols => Self::symbols(),
+            Panel::Tools => Self::tools(),
+            Panel::Clipboard => Self::clipboard(),
         }
     }
 
@@ -227,6 +288,52 @@ impl KeyboardLayout {
 #[cfg(test)]
 mod tests {
     use super::{Key, KeyId, KeyWidth, KeyboardLayout, Panel};
+
+    /// 剪贴板页：六格铺满整宽，控制行四个键窄一点居中。
+    ///
+    /// 单位宽取**最挤的那一行**，这里是最上面那三行记录格（两个键、5 个单位）——
+    /// 所以六格的左右边与别的页对得齐，而下面那行四个键是居中的一组。
+    #[test]
+    fn the_clipboard_page_cells_fill_the_row() {
+        let layout = KeyboardLayout::clipboard();
+        let (width, gap) = (360.0, 8.0);
+        let unit = layout.unit_width(width, gap);
+
+        let cells = &layout.rows()[0];
+        assert_eq!(cells.keys.len(), 2, "一屏两格");
+        assert!(
+            (KeyboardLayout::row_width(cells, unit, gap) - width).abs() < 0.01,
+            "记录那两格该铺满整宽"
+        );
+
+        let control = layout.rows().last().expect("该有控制行");
+        assert_eq!(control.keys.len(), 4, "返回 / 上一屏 / 下一屏 / 清空");
+        let control_width = KeyboardLayout::row_width(control, unit, gap);
+        assert!(
+            (width * 0.7..width).contains(&control_width),
+            "控制行该窄一点、居中，实际 {control_width}"
+        );
+    }
+
+    /// 工具页：每一行整宽（一行 5 个单位，与数字 / 符号页同一个单位宽）。
+    #[test]
+    fn the_tools_page_rows_fill_the_width() {
+        let layout = KeyboardLayout::tools();
+        let (width, gap) = (360.0, 8.0);
+        let unit = layout.unit_width(width, gap);
+
+        assert_eq!(
+            layout.rows().len(),
+            4,
+            "跟别的页一样四行，空行留着以后排工具"
+        );
+        for row in layout.rows().iter().filter(|row| !row.keys.is_empty()) {
+            assert!(
+                (KeyboardLayout::row_width(row, unit, gap) - width).abs() < 0.01,
+                "工具页每行都该铺满整宽"
+            );
+        }
+    }
 
     #[test]
     fn letters_layout_is_26_letters_plus_nine_function_keys() {

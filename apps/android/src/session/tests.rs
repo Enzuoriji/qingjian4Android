@@ -46,6 +46,22 @@ fn key_centre(session: &Session, id: KeyId) -> (f32, f32) {
     (x + width / 2.0, y + height / 2.0)
 }
 
+/// 齿轮 → 工具页 → 剪贴板页，最后停在那页上。
+fn open_clipboard(session: &mut Session) {
+    tap_bar(session, BarHitId::Tools);
+    tap_key(session, KeyId::Tool(0));
+}
+
+/// 在一格上**往左滑**（过阈值）再松手。
+fn swipe_left(session: &mut Session, id: KeyId) {
+    let (x, y) = key_centre(session, id);
+    let swipe = 16.0 * DENSITY + 20.0;
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - swipe, y);
+    session.touch(MotionAction::Up, POINTER, x - swipe, y);
+    session.keyboard_surface();
+}
+
 /// 候选条上某一块的中心。候选条就在视图顶部，所以 y 不用再加偏移。
 fn bar_centre(session: &Session, id: BarHitId) -> (f32, f32) {
     let bar = session.bar.as_ref().expect("候选条还没画过，没有命中矩形");
@@ -788,29 +804,52 @@ fn a_tap_on_the_bar_is_not_a_key_press() {
     );
 }
 
-/// 候选条**只在组句时存在**：没拼音时不出位图，壳据此把视图缩回去、高度还给应用。
-///
-/// 组句当中高度仍是定死的：候选从 0 个变 6 个不动，否则每敲一键都顶一下应用。
+/// 那条候选条**两种画法共用一块地方**：没组句时细细一条、里面一个齿轮；
+/// 一打字候选条整个接管（齿轮让开），打字的竖向空间一点没多占。
 #[test]
-fn the_bar_only_exists_while_composing() {
+fn the_bar_shrinks_to_a_gear_strip_when_not_composing() {
     let Some(mut session) = ready() else {
         return;
     };
 
-    assert_eq!(session.bar_height(), 0.0, "没组句时不该占高度");
-    assert!(session.bar_surface().is_empty(), "没组句时不该出位图");
-    assert!(session.bar.is_none(), "命中区也该跟着一起没");
+    // 没组句：一条细的，位图照出，那一块地方只有齿轮可点
+    let idle = session.bar_height();
+    assert!(idle > 0.0, "没组句时也该留一条细的（齿轮要有地方）");
+    let bytes = session.bar_surface();
+    assert!(bytes.len() > 8, "那条细的也得有位图");
+    let height = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+    assert_eq!(
+        height,
+        (idle * DENSITY).round() as u32,
+        "位图高度该跟报出去的一致"
+    );
+    assert_eq!(gears(&session), 1, "没组句时只有齿轮一个可点的");
 
     type_text(&mut session, "nihao");
 
+    // 组句：候选条接管，高度是主题定死的那个值（候选从 0 个变 6 个也不动）
+    assert!(
+        session.bar_height() > idle * 2.0,
+        "一打字候选条该把那一块接管过去"
+    );
     let bytes = session.bar_surface();
-    assert!(bytes.len() > 8, "组句了就该有位图");
     let height = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
     assert_eq!(
         height,
         (session.bar_height() * DENSITY).round() as u32,
         "组句时的高度该是主题定死的那个值"
     );
+    assert_eq!(gears(&session), 0, "组句时齿轮让开，那块地方全给候选");
+}
+
+/// 候选条上「齿轮」那个命中区有几个（0 或 1）。
+fn gears(session: &Session) -> usize {
+    session.bar.as_ref().map_or(0, |bar| {
+        bar.hits
+            .iter()
+            .filter(|hit| hit.id == BarHitId::Tools)
+            .count()
+    })
 }
 
 #[test]
@@ -1467,13 +1506,16 @@ fn a_tablet_does_not_get_a_giant_keyboard() {
         return;
     };
 
-    let portrait = session.configure(WIDTH, 1200.0, DENSITY, 0.0, false, false);
+    // 量的是**键盘本体**（上面那条细的齿轮条不算在内）
+    session.configure(WIDTH, 1200.0, DENSITY, 0.0, false, false);
+    let portrait = session.keyboard_height();
     assert!(
         portrait <= 300.0 + 0.01,
         "竖屏上限该夹住：1200 点高的屏幕给到了 {portrait}"
     );
 
-    let landscape = session.configure(WIDTH, 800.0, DENSITY, 0.0, false, true);
+    session.configure(WIDTH, 800.0, DENSITY, 0.0, false, true);
+    let landscape = session.keyboard_height();
     assert!(
         landscape <= 260.0 + 0.01,
         "横屏上限该夹住：800 点高的屏幕给到了 {landscape}"
@@ -2019,4 +2061,230 @@ fn long_pressing_a_key_without_a_hint_opens_nothing() {
         "⇧ 按住不该弹出那排、也不该打字"
     );
     assert!(!session.english(), "Shift 那一档也不该被长按弄乱");
+}
+
+/// 齿轮开 / 收工具页：同一个按钮管开也管收（仿搜狗那个 S 的手感）。
+#[test]
+fn the_gear_toggles_the_tools_page() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    tap_bar(&mut session, BarHitId::Tools);
+    assert_eq!(session.panel, Panel::Tools, "点齿轮该进工具页");
+
+    tap_bar(&mut session, BarHitId::Tools);
+    assert_eq!(session.panel, Panel::Letters, "再点一下该收回字母页");
+}
+
+/// 工具页那一行「剪贴板」进剪贴板页；页里的「返回」回字母页。
+#[test]
+fn the_tools_page_opens_the_clipboard() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    tap_bar(&mut session, BarHitId::Tools);
+    tap_key(&mut session, KeyId::Tool(0));
+    assert_eq!(session.panel, Panel::Clipboard, "该进剪贴板页");
+
+    tap_key(&mut session, KeyId::Panel(Panel::Letters));
+    assert_eq!(session.panel, Panel::Letters, "返回该回字母页");
+}
+
+/// 复制的文本一条条记下来：**最新的在最前**，同一条不重复记。
+#[test]
+fn the_clipboard_keeps_the_newest_first() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    session.note_clipboard("第一段");
+    session.note_clipboard("第二段");
+    assert_eq!(session.clipboard, ["第二段", "第一段"]);
+
+    // 再复制一次「第一段」：不新记一条，把它挪到最前
+    session.note_clipboard("第一段");
+    assert_eq!(
+        session.clipboard,
+        ["第一段", "第二段"],
+        "同一条只留一条，而且挪到最前"
+    );
+
+    // 空白不当一条记录
+    let before = session.clipboard.len();
+    session.note_clipboard("   ");
+    assert_eq!(session.clipboard.len(), before, "空白不该记");
+}
+
+/// 记够上限就丢最旧的。
+#[test]
+fn the_clipboard_forgets_the_oldest() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    for index in 0..60 {
+        session.note_clipboard(&format!("第 {index} 条"));
+    }
+
+    assert_eq!(session.clipboard.len(), 50, "最多留 50 条");
+    assert_eq!(session.clipboard[0], "第 59 条", "最新的在最前");
+    assert_eq!(session.clipboard[49], "第 10 条", "最旧的那十条被挤掉了");
+}
+
+/// 点一条记录就把那段文本交给壳上屏（**插在光标处**），然后收回字母页。
+#[test]
+fn tapping_an_entry_pastes_it() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("粘这段");
+
+    open_clipboard(&mut session);
+    tap_key(&mut session, KeyId::Clipboard(0));
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("粘这段"),
+        "点一条该把它交出去上屏"
+    );
+    assert_eq!(session.panel, Panel::Letters, "粘完收回字母页，接着打字");
+}
+
+/// 空列表时点格子什么也不该发生。
+#[test]
+fn tapping_an_empty_cell_does_nothing() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+
+    open_clipboard(&mut session);
+    tap_key(&mut session, KeyId::Clipboard(0));
+
+    assert_eq!(session.take_commit(), None, "一条都没有，点格子不该上屏");
+    assert_eq!(session.panel, Panel::Clipboard, "也不该乱切页");
+}
+
+/// 在一条记录上往左滑、松手 → 删掉那条，别的还在。
+#[test]
+fn swiping_an_entry_left_deletes_it() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("旧的");
+    session.note_clipboard("新的");
+    open_clipboard(&mut session);
+
+    // 最新在最前：第一格是「新的」
+    swipe_left(&mut session, KeyId::Clipboard(0));
+
+    assert_eq!(session.clipboard, ["旧的"], "往左滑过就该删掉那一条");
+    assert_eq!(session.take_commit(), None, "删不是上屏");
+}
+
+/// 光按一下不滑，不算删——那是「点这条」，会上屏。
+#[test]
+fn a_tap_on_an_entry_does_not_delete_it() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("点一下");
+
+    open_clipboard(&mut session);
+    tap_key(&mut session, KeyId::Clipboard(0));
+
+    assert_eq!(session.clipboard, ["点一下"], "点一下不是删");
+    assert_eq!(session.take_commit().as_deref(), Some("点一下"));
+}
+
+/// 「清空」把整份历史清掉。
+#[test]
+fn the_clear_key_empties_the_clipboard() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("一条");
+    session.note_clipboard("两条");
+    open_clipboard(&mut session);
+
+    tap_key(&mut session, KeyId::ClipboardClear);
+
+    assert!(session.clipboard.is_empty(), "该一条不剩");
+    assert_eq!(session.take_commit(), None, "清空不上屏任何东西");
+}
+
+/// 一屏 6 条，多出来的翻页看；翻到头就停住。
+#[test]
+fn the_clipboard_pages_through_the_entries() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    for index in 0..8 {
+        session.note_clipboard(&format!("第 {index} 条"));
+    }
+    open_clipboard(&mut session);
+
+    assert_eq!(session.clipboard_page, 0, "进来从头看起");
+    assert_eq!(
+        session.frame.footer.as_deref(),
+        Some("1/2"),
+        "两屏就该报页码：{:?}",
+        session.frame.footer
+    );
+
+    tap_key(&mut session, KeyId::ClipboardPage(1));
+    assert_eq!(session.clipboard_page, 1);
+    assert_eq!(session.frame.footer.as_deref(), Some("2/2"));
+
+    tap_key(&mut session, KeyId::ClipboardPage(1));
+    assert_eq!(session.clipboard_page, 1, "到底了再往后翻该不动");
+
+    tap_key(&mut session, KeyId::ClipboardPage(-1));
+    assert_eq!(session.clipboard_page, 0);
+    tap_key(&mut session, KeyId::ClipboardPage(-1));
+    assert_eq!(session.clipboard_page, 0, "第一屏再往前翻该不动");
+}
+
+/// 第二屏点的是**整份里第 7 条**（本屏第 1 格），不是第一条。
+#[test]
+fn the_second_page_pastes_the_right_entry() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    for index in 0..8 {
+        session.note_clipboard(&format!("第 {index} 条"));
+    }
+    open_clipboard(&mut session);
+
+    tap_key(&mut session, KeyId::ClipboardPage(1));
+    tap_key(&mut session, KeyId::Clipboard(0));
+
+    // 最新在最前，整份是 [第7, 第6, 第5, 第4, 第3, 第2, 第1, 第0]：
+    // 第二屏第一格 = 整份第 7 个（从 0 数）= 「第 1 条」
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("第 1 条"),
+        "第二屏第一格该是整份第 7 个，不是第一个"
+    );
+}
+
+/// 删到不够一屏时页码要收回来，不能停在一个空屏上。
+#[test]
+fn deleting_the_last_page_falls_back_a_page() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    for index in 0..7 {
+        session.note_clipboard(&format!("第 {index} 条"));
+    }
+    open_clipboard(&mut session);
+    tap_key(&mut session, KeyId::ClipboardPage(1));
+    assert_eq!(session.clipboard_page, 1, "七条该有第二屏");
+
+    // 第二屏只有一条，删掉它就只剩一屏了
+    swipe_left(&mut session, KeyId::Clipboard(0));
+
+    assert_eq!(session.clipboard.len(), 6);
+    assert_eq!(session.clipboard_page, 0, "只剩一屏了，页码该收回来");
+    assert_eq!(session.frame.footer, None, "一屏就没有页码");
 }

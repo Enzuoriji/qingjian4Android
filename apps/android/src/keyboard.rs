@@ -56,6 +56,15 @@ const CLEAR_SWIPE: f32 = SWIPE;
 /// 气泡得把话讲清楚，不然用户不知道松手会发生什么。
 const CLEAR_HINT: &str = "松手清空";
 
+/// 在剪贴板一条记录上**往左滑**多远算「要删这条」（点）——松手才删，跟 ⌫ 上滑一个手感。
+///
+/// 比 [`SWIPE`] 小：手指本来就靠格子左边按下去，往左一划就到头了（格子比键宽不了多少，
+/// 一屏还分两格），阈值大了够不着。
+const DELETE_SWIPE: f32 = 16.0;
+
+/// 那条记录上往左滑过之后，气泡改口说什么。
+const DELETE_HINT: &str = "松手删除";
+
 /// 长按字母键弹的那排选项：**三格 —— 大写 / 符号 / 小写**，默认停在中间那个（符号）。
 ///
 /// 2026-09-21 定的，取代原先「在键上往下滑 22 点取角标」。换掉的理由是那个手势**治不好**：
@@ -126,6 +135,9 @@ pub enum Fired {
     ///
     /// 清多少由壳去问应用（输入法不知道光标前面有什么），这边只说「清」。
     ClearToStart,
+
+    /// 删掉剪贴板里第几条（**整份里的下标**）。在一条记录上往左滑、松手时兑现。
+    DeleteClipboard(usize),
 }
 
 /// 尺寸与外观。壳在 `Session::configure` 时给一份。
@@ -207,6 +219,9 @@ struct Press {
     /// 已经往上滑够了：松手要把光标前面整段清掉。
     clearing: bool,
 
+    /// 这根手指在剪贴板一条记录上往左滑过，这一下要删掉它（松手才删）。
+    deleting: bool,
+
     /// 这一下已经连发过了。
     ///
     /// 连发过就不再按「点击」兑现——键是**抬起时**才触发一次的，按住删一串之后松手，
@@ -238,6 +253,9 @@ pub struct Keyboard {
 
     /// 那一根手指**已经往上滑了**：松手要把光标前面整段清掉。气泡照它改口。
     pressed_clearing: bool,
+
+    /// 正按着的那根手指在剪贴板一条记录上往左滑过（气泡要说「松手删除」）。
+    pressed_deleting: bool,
 
     /// 那一根手指**长按开着那排选项**：气泡要画那一排，还得知道选中第几个。
     ///
@@ -279,6 +297,7 @@ impl Keyboard {
             presses: Vec::new(),
             pressed: None,
             pressed_clearing: false,
+            pressed_deleting: false,
             pressed_choice: None,
             popup: None,
             popup_for: None,
@@ -351,12 +370,14 @@ impl Keyboard {
     /// 键盘的位图（8 字节头 + 预乘 RGBA）。没配过宽度或渲染器不可用时给空。
     ///
     /// Shift 与中 / 英是引擎那头的状态（`Session` 拿着），画的时候借过来用一下；
-    /// 键盘自己只记「哪个键看着是按下的」。
+    /// 剪贴板那一份也是（记录在会话里，键盘只负责画出来）；键盘自己只记「哪个键看着是按下的」。
     pub fn surface(
         &mut self,
         renderer: Option<&mut Renderer>,
         shift: ShiftState,
         mode: InputMode,
+        clipboard: &[String],
+        clipboard_page: usize,
     ) -> Vec<u8> {
         if self.metrics.width <= 0.0 {
             return Vec::new();
@@ -367,6 +388,8 @@ impl Keyboard {
                 shift,
                 mode,
                 pressed: self.pressed,
+                clipboard,
+                clipboard_page,
             };
             let rendered = renderer.and_then(|renderer| {
                 renderer
@@ -418,6 +441,7 @@ impl Keyboard {
                     cursor_started: false,
                     cursor_carry: 0.0,
                     clearing: false,
+                    deleting: false,
                     repeated: false,
                 });
                 self.refresh_pressed();
@@ -450,6 +474,13 @@ impl Keyboard {
                     if press.key == Some(KeyId::Backspace) && dy <= -clear_swipe {
                         press.clearing = true;
                     }
+                    // 剪贴板那几格**往左滑** = 要删这条（也是松手才兑现）。
+                    // 往左是「不要了」的方向，跟候选条上「往左看后面的候选」不冲突——那儿是另一块地方。
+                    if matches!(press.key, Some(KeyId::Clipboard(_)))
+                        && x - press.at.0 <= -DELETE_SWIPE * self.metrics.density
+                    {
+                        press.deleting = true;
+                    }
                     // 空格上横着滑 = 移光标。**拖动当中就走**，不是等松手才算——
                     // 松手才走的话手指得先盲拖一段、再抬起来看结果，没法一边看一边调。
                     if press.key == Some(KeyId::Space) {
@@ -475,6 +506,7 @@ impl Keyboard {
                     if !press.choosing
                         && !press.cursor_started
                         && !press.clearing
+                        && !press.deleting
                         && (press.key.is_none() || hit != press.key)
                     {
                         press.sliding = true;
@@ -509,6 +541,13 @@ impl Keyboard {
                 // 那一下的语义是「清空前面」，跟删一个字不是一回事
                 if ended.clearing {
                     return Some(Fired::ClearToStart);
+                }
+                // 剪贴板那条往左滑过：松手删掉它
+                if ended.deleting {
+                    let Some(KeyId::Clipboard(index)) = ended.key else {
+                        return None;
+                    };
+                    return Some(Fired::DeleteClipboard(index));
                 }
                 // 抬起时只要还在那个键上、或者只挪了触摸阈值那么点距离，都算这一下按着了
                 match ended.key {
@@ -550,6 +589,8 @@ impl Keyboard {
         renderer: Option<&mut Renderer>,
         shift: ShiftState,
         mode: InputMode,
+        clipboard: &[String],
+        clipboard_page: usize,
     ) -> Vec<u8> {
         let Some((key, rect)) = self.pressed_key() else {
             self.forget_popup();
@@ -576,12 +617,14 @@ impl Keyboard {
                 selected: *index,
             },
             None if self.pressed_clearing => Popup::Text(CLEAR_HINT),
+            None if self.pressed_deleting => Popup::Text(DELETE_HINT),
             None => Popup::Key(&key),
         };
         // 形态：0 普通 / 1 松手清空 / 2 起是那排选项的第几个
+        // （「松手删除」与「松手清空」同一形态：都是换一句话说，宽高按字量）
         let shape = match &chooser {
             Some((_, index)) => 2 + *index as u32,
-            None if self.pressed_clearing => 1,
+            None if self.pressed_clearing || self.pressed_deleting => 1,
             None => 0,
         };
 
@@ -597,6 +640,8 @@ impl Keyboard {
                 shift,
                 mode,
                 pressed: self.pressed,
+                clipboard,
+                clipboard_page,
             };
             let density = self.metrics.density;
             let rendered = renderer.and_then(|renderer| {
@@ -777,15 +822,20 @@ impl Keyboard {
             .find(|press| !press.sliding && press.key.is_some());
         let key = held.and_then(|press| press.key);
         let clearing = held.is_some_and(|press| press.clearing);
+        let deleting = held.is_some_and(|press| press.deleting);
         // 长按开着那排选项的那一根：气泡要画那一排，还得知道选中第几个
         let choice = held
             .filter(|press| press.choosing)
             .map(|press| press.choice);
-        if self.pressed != key || self.pressed_choice != choice || self.pressed_clearing != clearing
+        if self.pressed != key
+            || self.pressed_choice != choice
+            || self.pressed_clearing != clearing
+            || self.pressed_deleting != deleting
         {
             self.pressed = key;
             self.pressed_choice = choice;
             self.pressed_clearing = clearing;
+            self.pressed_deleting = deleting;
             self.dirty = true;
         }
     }

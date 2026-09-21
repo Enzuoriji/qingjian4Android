@@ -12,7 +12,7 @@ mod command;
 pub use act::Act;
 pub use command::Command;
 
-use qingjian_render::{BarHitId, KeyId};
+use qingjian_render::{BarHitId, KeyId, Panel};
 
 /// 碰到一个键该干什么。
 pub fn on_key(key: KeyId) -> Act {
@@ -29,6 +29,12 @@ pub fn on_key(key: KeyId) -> Act {
         // 数字与符号一样：键帽上是原字符，全角与否交给引擎
         KeyId::Literal(c) => Act::Punctuate(c),
         KeyId::Panel(panel) => Act::SwitchPanel(panel),
+        // 工具页那一行「剪贴板」：切到剪贴板页
+        KeyId::Tool(_) => Act::SwitchPanel(Panel::Clipboard),
+        // 记录格报的是**本屏**第几格，加成整份里的下标是会话的事（它才知道翻到第几屏了）
+        KeyId::Clipboard(index) => Act::PasteClipboard(index),
+        KeyId::ClipboardPage(step) => Act::ClipboardPage(step),
+        KeyId::ClipboardClear => Act::ClearClipboard,
     }
 }
 
@@ -48,6 +54,7 @@ pub fn on_bar(id: BarHitId) -> Act {
         BarHitId::PagePrev => Act::Page(-1),
         BarHitId::PageNext => Act::Page(1),
         BarHitId::Clear => Act::Clear,
+        BarHitId::Tools => Act::ToggleTools,
     }
 }
 

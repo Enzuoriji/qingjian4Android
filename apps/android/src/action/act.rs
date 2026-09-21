@@ -40,4 +40,19 @@ pub enum Act {
 
     /// 切到键盘的另一页。
     SwitchPanel(Panel),
+
+    /// 开 / 收工具页（候选条左边那个齿轮）。在工具页与剪贴板页时收回字母页。
+    ToggleTools,
+
+    /// 把剪贴板第几条插到光标处（**整份里的下标**，不是本屏的；换算在壳里做）。
+    PasteClipboard(usize),
+
+    /// 删掉剪贴板里第几条（在记录上往左滑、松手）。
+    DeleteClipboard(usize),
+
+    /// 清空整份剪贴板历史。
+    ClearClipboard,
+
+    /// 剪贴板翻页，正数往后。
+    ClipboardPage(isize),
 }

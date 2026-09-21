@@ -55,30 +55,33 @@ const CELL_PADDING: f32 = 4.0;
 /// 词太长装不下时截断补的记号。
 const ELLIPSIS: &str = "…";
 
-/// 工具条的高度（点）。
+/// 那个齿轮的边长（点）。
+const GEAR_SIZE: f32 = 17.0;
+
+/// 齿轮左右各留的空白（点）——图标本身就窄，不留白手指点不准。
+const GEAR_PAD: f32 = 7.0;
+
+/// 没组句时那一条该多高（点）：齿轮上下各留一点，够手指点着。
 ///
-/// 候选条底下那条常驻的按钮排——切键盘、设置齿轮那一类。**现在还没有，是 0**；
-/// 将来加的时候改这里，**它不受组句与否影响**：没打字时它照样在。
-const TOOLBAR_HEIGHT: f32 = 0.0;
+/// 这条细的与候选条**共用同一块地方**（2026-09-21 用户拍板）：不打字时只有它，
+/// 一打字候选条整个接管、齿轮让开——打字的竖向空间一点没被它占掉。
+const IDLE_HEIGHT: f32 = 30.0;
 
 impl Renderer {
-    /// 候选条该占多高（点）。
+    /// 候选条该占多高（点）。**同一块地方，两态共用**：
     ///
-    /// 分两段：
-    /// - **工具条**（[`TOOLBAR_HEIGHT`]）常驻，将来放设置 / 工具按钮
-    /// - **组字区**（拼音行 + 候选行）只在组句时占位；**不组句时整段收起来**，
-    ///   省下的高度还给应用——键盘贴着应用下沿，一敲字母再顶出来
+    /// - **组句当中**：拼音行 + 候选行，与以前一模一样（齿轮这时不画）
+    /// - **没组句**：只剩一条细的（[`IDLE_HEIGHT`]），里面一个齿轮
     ///
-    /// 收起来这件事与「固定高度」那条原则**故意相反**：原先高度定死是为了不顶应用，
-    /// 但空着一条几十点高的白带更难受，两害相权取其轻。代价是敲第一个字母时
-    /// 上面的应用内容会被顶一下。
+    /// 「没组句就收起来」那条原则没变（空着一条白带更难受），只是这条细的换成了个有用的按钮：
+    /// 剪贴板、以后的设置都挂在这个齿轮上。代价是没打字时应用少那么一条，
+    /// 而**打字时的竖向空间一分没多**。
     pub fn bar_height(theme: &Theme, composing: bool) -> f32 {
-        TOOLBAR_HEIGHT
-            + if composing {
-                Self::composing_height(theme)
-            } else {
-                0.0
-            }
+        if composing {
+            Self::composing_height(theme)
+        } else {
+            IDLE_HEIGHT
+        }
     }
 
     /// 组字区的高度（点）：拼音行 + 候选行 + 上下留白。
@@ -86,10 +89,8 @@ impl Renderer {
         theme.padding * 2.0 + top_line_height(theme) + candidate_row_height(theme)
     }
 
-    /// 画候选条，返回位图与每块可点区域。
-    ///
-    /// **高度为 0 的时候不要调这里**（没组句、也没有工具条时就是那样，0 高的位图建不出来）。
-    /// 调用方看 [`Self::bar_height`] 先判一下——`Session::bar_surface` 就是这么做的。
+    /// 画候选条，返回位图与每块可点区域。**同一块地方两种画法**（见 [`Self::bar_height`]）：
+    /// 组句当中是拼音行 + 候选行，没组句时只有左边一个齿轮与旁边的页码。
     ///
     /// `width` 是内容宽度（点）——安卓传屏幕宽除以密度。没有阴影：候选条上下都与屏幕边、
     /// 键盘边齐平，四边不露在外面。
@@ -103,7 +104,8 @@ impl Renderer {
     ) -> Result<RenderedBar, RenderError> {
         let m = Metrics { theme, scale };
         let content_width = (width * scale).round().max(1.0);
-        let content_height = (Self::bar_height(theme, frame.preedit.is_some()) * scale)
+        let composing = frame.preedit.is_some();
+        let content_height = (Self::bar_height(theme, composing) * scale)
             .round()
             .max(1.0);
         let mut canvas = Canvas::new(content_width as u32, content_height as u32)?;
@@ -116,20 +118,24 @@ impl Renderer {
         );
 
         let mut hits = Vec::new();
-        let top = m.padding();
-        let top_band = Band {
-            top,
-            height: m.px(top_line_height(theme)),
-        };
-        // 上排：拼音那一行整个复用候选窗的画法
-        self.draw_top_line(&mut canvas, frame, &m, 0.0, top);
-        self.draw_bar_buttons(&mut canvas, frame, &m, content_width, top_band, &mut hits);
-        // 下排：候选
-        let rows_band = Band {
-            top: top_band.bottom(),
-            height: m.px(candidate_row_height(theme)),
-        };
-        self.draw_bar_rows(&mut canvas, frame, &m, rows_band, &mut hits, scroll);
+        if composing {
+            let top = m.padding();
+            let top_band = Band {
+                top,
+                height: m.px(top_line_height(theme)),
+            };
+            // 上排：拼音那一行整个复用候选窗的画法
+            self.draw_top_line(&mut canvas, frame, &m, 0.0, top);
+            self.draw_bar_buttons(&mut canvas, frame, &m, content_width, top_band, &mut hits);
+            // 下排：候选
+            let rows_band = Band {
+                top: top_band.bottom(),
+                height: m.px(candidate_row_height(theme)),
+            };
+            self.draw_bar_rows(&mut canvas, frame, &m, rows_band, &mut hits, scroll);
+        } else {
+            self.draw_bar_tools(&mut canvas, frame, &m, &mut hits);
+        }
 
         Ok(RenderedBar {
             rendered: Rendered {
@@ -142,6 +148,51 @@ impl Renderer {
             },
             hits,
         })
+    }
+
+    /// 没组句时那一条：左边一个齿轮（开 / 收工具页），右边跟着页码。
+    ///
+    /// 齿轮走 [`crate::gear::draw_gear`]——与状态条同一个图标，**画路径不画字形**
+    /// （`U+2699` 可能落进彩色 emoji 字体，也可能缺字）。命中区比图标大一圈，手指点得着。
+    ///
+    /// 页码是给剪贴板翻页用的（[`Frame::footer`]）：候选那一套翻页在组句时才在，
+    /// 而剪贴板页恰恰是没组句的时候——页码挪到这条上来才看得见。
+    fn draw_bar_tools(
+        &mut self,
+        canvas: &mut Canvas,
+        frame: &Frame,
+        m: &Metrics,
+        hits: &mut Vec<BarHit>,
+    ) {
+        let band = Band {
+            top: 0.0,
+            height: m.px(IDLE_HEIGHT),
+        };
+        let size = m.px(GEAR_SIZE);
+        let pad = m.px(GEAR_PAD);
+        let left = m.padding();
+        crate::gear::draw_gear(
+            canvas,
+            left + pad,
+            band.centre(size),
+            size,
+            m.theme.colors.index,
+        );
+        hits.push(BarHit {
+            id: BarHitId::Tools,
+            x: left,
+            y: band.top,
+            width: size + pad * 2.0,
+            height: band.height,
+        });
+
+        let Some(footer) = frame.footer.as_deref() else {
+            return;
+        };
+        let style = m.index_style();
+        let text = self.measure(footer, &style);
+        let x = left + size + pad * 3.0;
+        self.draw_text(canvas, footer, &style, x, band.centre(text.height));
     }
 
     /// 上排右端的清空与翻页：从右边缘往左摆。没有拼音就不画清空，**带子一屏装得下就不画翻页**
@@ -328,7 +379,9 @@ impl Renderer {
     }
 
     /// 把 `text` 截到不超过 `max_width`，截过就补省略号；装得下原样返回。
-    fn fit(&mut self, text: &str, style: &TextStyle, max_width: f32) -> String {
+    ///
+    /// 剪贴板那几格也用这条（那边是键盘，同属渲染器内部）。
+    pub(super) fn fit(&mut self, text: &str, style: &TextStyle, max_width: f32) -> String {
         if max_width <= 0.0 {
             return String::new();
         }
@@ -480,20 +533,55 @@ mod tests {
         );
     }
 
-    /// **没在组句时这一条整个收起来**——高度是 0，不是「矮一点」。
+    /// **没在组句时这一条收成细细的一条**（里面就一个齿轮），不是「整个没有」。
     ///
-    /// 收起来省下的高度还给应用，键盘贴着应用下沿；一敲字母再顶出来。
-    /// 与「组句当中高度定死」不矛盾：变的只是**在不在组句**这一个开关。
+    /// 2026-09-21 之前是收到 0；现在那条细的换成个有用的按钮（剪贴板 / 设置那个齿轮），
+    /// 而**一打字就被候选条整个接管**——打字的竖向空间一点没多占（见 [`Renderer::bar_height`]）。
     #[test]
-    fn the_bar_has_no_height_when_not_composing() {
+    fn the_bar_shrinks_to_one_thin_strip_when_not_composing() {
         let theme = Theme::light();
+        let idle = Renderer::bar_height(&theme, false);
+        let composing = Renderer::bar_height(&theme, true);
+
+        assert!(idle > 0.0, "没组句时也该留一条细的（齿轮要地方）");
+        assert!(
+            idle < composing / 2.0,
+            "那条细的该比组句时矮得多：{idle} vs {composing}"
+        );
+    }
+
+    /// 没组句时那一条上画的是齿轮，**不是**拼音行与候选行。
+    #[test]
+    fn the_idle_strip_is_just_the_gear() {
+        let Some(mut renderer) = renderer() else {
+            return;
+        };
+        let theme = Theme::light();
+        let bare = Frame {
+            preedit: None,
+            rows: Vec::new(),
+            highlighted: None,
+            footer: None,
+            sentence: None,
+            status: None,
+        };
+        let out = renderer
+            .render_bar(&bare, WIDTH, &theme, SCALE, 0.0)
+            .unwrap();
 
         assert_eq!(
-            Renderer::bar_height(&theme, false),
-            0.0,
-            "没组句时不该占任何高度"
+            out.hits.iter().map(|hit| hit.id).collect::<Vec<_>>(),
+            vec![BarHitId::Tools],
+            "没组句时那块地方只有齿轮可点"
         );
-        assert!(Renderer::bar_height(&theme, true) > 0.0, "组句时该有高度");
+        // 齿轮贴在左边，命中区够手指点
+        let gear = button(&out, BarHitId::Tools);
+        assert!(gear.x < WIDTH, "齿轮该在左边");
+        assert!(
+            gear.width >= 24.0 * SCALE,
+            "命中区太窄手指点不准：{}",
+            gear.width
+        );
     }
 
     /// 下排候选：从左边距起，一格一格往右铺，格与格之间留一条缝。

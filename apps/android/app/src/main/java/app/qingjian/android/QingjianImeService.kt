@@ -1,5 +1,7 @@
 package app.qingjian.android
 
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
@@ -58,6 +60,41 @@ class QingjianImeService : InputMethodService() {
             return
         }
         Log.i(TAG, "会话已打开，词库 ${dictionary.length() / 1024} KB")
+
+        systemClipboard?.addPrimaryClipChangedListener(clipboardListener)
+    }
+
+    /** 系统剪贴板。剪贴板页那份历史就是从这儿来的。 */
+    private val systemClipboard: ClipboardManager?
+        get() = getSystemService(ClipboardManager::class.java)
+
+    /**
+     * 复制了新东西：交给 Rust 记一条（去重、条数上限都在那边）。
+     *
+     * **敏感内容与空白不报**：密码管理器复制的会打 `EXTRA_IS_SENSITIVE` 标记，
+     * 那种东西不该躺在输入法的历史里；空白记下来也没用。
+     * 回调不一定在主线程上，所以挪到视图那条线程再碰会话（Rust 那边要求单线程）。
+     */
+    private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
+        val view = inputView ?: return@OnPrimaryClipChangedListener
+        val text = readClipboard() ?: return@OnPrimaryClipChangedListener
+        view.post {
+            // 排到这儿时输入法可能已经收摊了（`onDestroy` 把 handle 清零）
+            if (handle == 0L) return@post
+            val started = SystemClock.elapsedRealtime()
+            val flags = QingjianNative.clipboardChanged(handle, text)
+            afterInput(view, flags, started)
+        }
+    }
+
+    /** 当前剪贴板里的文字；没有、不是文字、或者标了敏感时是 `null`。 */
+    private fun readClipboard(): String? {
+        val clip = systemClipboard?.primaryClip ?: return null
+        if (clip.description.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true) {
+            return null
+        }
+        val text = clip.getItemAt(0)?.coerceToText(this)?.toString() ?: return null
+        return text.ifBlank { null }
     }
 
     /**
@@ -309,6 +346,10 @@ class QingjianImeService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         if (handle == 0L) return
+        // 补一次当前剪贴板：上面那个监听器只管**变化**，输入法起来之前复制的东西收不到。
+        // 放在这儿而不是 `onCreate`——那会儿输入法窗口还没显示，
+        // 非前台读剪贴板会让系统弹一条「某某读取了剪贴板」的提示（Android 12 起）。
+        readClipboard()?.let { QingjianNative.clipboardChanged(handle, it) }
         val flags = QingjianNative.resetPanel(handle)
         inputView?.let { view ->
             if (flags and QingjianNative.FLAG_BAR != 0) refreshBar(view)
@@ -411,6 +452,7 @@ class QingjianImeService : InputMethodService() {
             Configuration.UI_MODE_NIGHT_YES
 
     override fun onDestroy() {
+        systemClipboard?.removePrimaryClipChangedListener(clipboardListener)
         if (handle != 0L) {
             QingjianNative.close(handle)
             handle = 0L

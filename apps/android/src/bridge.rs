@@ -291,6 +291,29 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_cursorTick(
     }
 }
 
+/// 系统剪贴板里新复制了东西：记一条进历史（剪贴板页画的就是它）。
+///
+/// 敏感内容与空白**壳那边就滤掉了**，不会走到这儿来（见 `QingjianImeService.readClipboard`）——
+/// 读得到什么、该不该读是平台的事；记几条、怎么去重是这边的事。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_clipboardChanged(
+    mut env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+    text: JString,
+) -> jint {
+    let Ok(text) = env.get_string(&text) else {
+        return 0;
+    };
+    let text = String::from(text);
+    match unsafe { from_handle(handle) } {
+        Some(session) => {
+            catch_unwind(AssertUnwindSafe(|| session.note_clipboard(&text))).unwrap_or(0)
+        }
+        None => 0,
+    }
+}
+
 /// 一根手指抬起了，报上它的横向速度（**像素/秒，向右为正**，`VelocityTracker` 的单位与方向）。
 ///
 /// 够快就让候选条接着滑一段——甩不甩、甩多远由 Rust 定（[`crate::session::Session::start_fling`]），

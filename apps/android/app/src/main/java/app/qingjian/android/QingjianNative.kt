@@ -94,6 +94,14 @@ object QingjianNative {
     external fun cursorTick(handle: Long, pointer: Int): Int
 
     /**
+     * 系统剪贴板里新复制了东西：记一条进历史（剪贴板页画的就是它）。
+     *
+     * **敏感内容与空白在壳这边就滤掉了**（见 `QingjianImeService.readClipboard`），不会送到这儿来。
+     * 返回与 [touch] 同一种位掩码：剪贴板页开着时那份列表要重画。
+     */
+    external fun clipboardChanged(handle: Long, text: String): Int
+
+    /**
      * 一根手指抬起了，报上它的横向速度（**像素/秒，向右为正**，就是 `VelocityTracker` 的单位与方向）。
      *
      * 壳只管量（安卓自带 `VelocityTracker`，自己算得再去摸时间戳），

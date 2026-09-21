@@ -16,7 +16,8 @@ use super::{Rendered, Renderer};
 use crate::canvas::Canvas;
 use crate::error::RenderError;
 use crate::keyboard::{
-    InputMode, Key, KeyId, KeyWidth, KeyboardLayout, KeyboardState, Panel, ShiftState,
+    CLIPBOARD_CELLS, InputMode, Key, KeyId, KeyWidth, KeyboardLayout, KeyboardState, Panel,
+    ShiftState, TOOLS,
 };
 use crate::text::TextStyle;
 use crate::theme::KeyboardTheme;
@@ -119,6 +120,11 @@ impl Renderer {
         slot: (f32, f32, f32, f32),
     ) {
         let (x, y, width, height) = slot;
+        let text = label(key, state);
+        // 剪贴板这一屏没那么多条：这一格整个不画（连键帽都不画），免得空一块白格子
+        if matches!(key.id, KeyId::Clipboard(_)) && text.is_empty() {
+            return;
+        }
         let pressed = state.pressed == Some(key.id);
         let mut cap = theme.key_color(key.style(), pressed);
         // Shift 锁定着换成强调色，一眼看出还开着
@@ -161,8 +167,21 @@ impl Renderer {
             KeyId::Backspace => {
                 icon::draw_backspace(canvas, cx, main_cy, height, scale, theme.label)
             }
+            // 剪贴板那一格是**一段话**，不是键帽上的一个字：左边对齐、放不下截断补省略号
+            // （复用候选条那套 `fit`，见 `renderer/bar`）。居中的话长文本两头都被切、认不出来。
+            KeyId::Clipboard(_) => {
+                let style = TextStyle::new(
+                    theme.font.scaled(scale),
+                    theme.font.size,
+                    theme.label,
+                    theme.text_gamma,
+                );
+                let pad = CELL_TEXT_PADDING * scale;
+                let text = self.fit(&text, &style, width - pad * 2.0);
+                let size = self.measure(&text, &style);
+                self.draw_text(canvas, &text, &style, x + pad, cy - size.height / 2.0);
+            }
             _ => {
-                let text = label(key, state);
                 let style = TextStyle::new(
                     theme.font.scaled(scale),
                     theme.font.size,
@@ -190,9 +209,25 @@ const HINT_CENTER_Y: f32 = 0.22;
 /// 有角标时主字往下挪的比例——不挪会和角标叠在一起。
 const MAIN_SHIFT: f32 = 0.10;
 
+/// 剪贴板那种「一段话」的格子，字离左右边缘各留多少（点）。
+///
+/// 居中的键帽不留白也好看（字就一个），左边对齐的一长串贴边就难看了。
+const CELL_TEXT_PADDING: f32 = 8.0;
+
 /// 键帽上写什么字。图标键（Shift / 退格）由 [`Renderer::draw_key`] 提前分走，不会走到这里。
 fn label(key: &Key, state: &KeyboardState) -> String {
     match key.id {
+        // 剪贴板那一格写的是**那条文本**（本屏第几个 = 整份里的 页 × 一屏条数 + i）。
+        // 这一屏没那么多条时给空串，`draw_key` 见空就整个不画。
+        KeyId::Clipboard(index) => state
+            .clipboard
+            .get(state.clipboard_page * CLIPBOARD_CELLS + index)
+            .cloned()
+            .unwrap_or_default(),
+        KeyId::Tool(index) => TOOLS.get(index).copied().unwrap_or_default().to_owned(),
+        KeyId::ClipboardPage(step) if step < 0 => "‹".to_owned(),
+        KeyId::ClipboardPage(_) => "›".to_owned(),
+        KeyId::ClipboardClear => "清空".to_owned(),
         KeyId::Letter(c) => {
             if state.shift.is_upper() {
                 c.to_uppercase().to_string()
@@ -224,6 +259,8 @@ fn label(key: &Key, state: &KeyboardState) -> String {
             Panel::Letters => "返回".to_owned(),
             Panel::Digits => "123".to_owned(),
             Panel::Symbols => "符".to_owned(),
+            // 工具页是齿轮开的，页里没有再回工具页的键
+            Panel::Tools | Panel::Clipboard => String::new(),
         },
     }
 }
@@ -350,6 +387,10 @@ mod tests {
         for row in layout.rows() {
             let slice = &out.keys[at..at + row.keys.len()];
             at += row.keys.len();
+            // 空行（工具页留着以后排工具的那两行）没有键，也就没有「两头」可比
+            if slice.is_empty() {
+                continue;
+            }
             let left = slice.iter().map(|key| key.x).fold(f32::MAX, f32::min);
             let right = slice
                 .iter()
@@ -392,11 +433,50 @@ mod tests {
         assert_rows_line_up(Panel::Letters, Some(1));
     }
 
-    /// 数字页、符号页每行都是 5 个键、一样宽，这条守着别退化。
+    /// 数字页、符号页、工具页每行都是 5 个单位、一样宽，这条守着别退化。
+    ///
+    /// **剪贴板页故意不在这条里**：它上面三行两格铺满、下面那行四个键窄一点居中
+    /// （见 `layout.rs` 的 `the_clipboard_page_cells_fill_the_row`）。
     #[test]
     fn every_panel_has_rows_of_the_same_width() {
-        for panel in [Panel::Digits, Panel::Symbols] {
+        for panel in [Panel::Digits, Panel::Symbols, Panel::Tools] {
             assert_rows_line_up(panel, None);
         }
+    }
+
+    /// 剪贴板那几格写的是**这一屏**的记录：整份里按「页 × 一屏条数」往下取。
+    ///
+    /// 这一屏没那么多条时给空串——`draw_key` 见空就整个不画（连键帽都不画），
+    /// 不然空着一块白格子。
+    #[test]
+    fn the_clipboard_cells_show_the_entries_of_this_page() {
+        let entries: Vec<String> = (0..8).map(|index| format!("第 {index} 条")).collect();
+        let state = |page| KeyboardState {
+            clipboard: &entries,
+            clipboard_page: page,
+            ..KeyboardState::default()
+        };
+        let cell = |index| Key::new(KeyId::Clipboard(index), 2.5);
+
+        assert_eq!(label(&cell(0), &state(0)), "第 0 条");
+        assert_eq!(label(&cell(5), &state(0)), "第 5 条", "第一屏六格");
+        assert_eq!(label(&cell(0), &state(1)), "第 6 条", "第二屏从第七条起");
+        assert_eq!(label(&cell(1), &state(1)), "第 7 条");
+        assert_eq!(
+            label(&cell(2), &state(1)),
+            "",
+            "这一屏只剩两条，第三格该是空的"
+        );
+    }
+
+    /// 一屏装得下就没有翻页这回事；翻到哪一屏由 `KeyboardState` 说。
+    #[test]
+    fn an_empty_clipboard_draws_no_cells() {
+        let state = KeyboardState::default();
+        assert_eq!(
+            label(&Key::new(KeyId::Clipboard(0), 2.5), &state),
+            "",
+            "一条都没有时第一格也是空的"
+        );
     }
 }
