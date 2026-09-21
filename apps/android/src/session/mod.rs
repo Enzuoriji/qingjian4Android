@@ -21,7 +21,7 @@ use qingjian_render::{
 
 use crate::action::{self, Act, Command};
 use crate::error::SessionError;
-use crate::keyboard::{Fired, Keyboard};
+use crate::keyboard::{EmojiView, Fired, Keyboard};
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 use fling::Fling;
@@ -46,6 +46,10 @@ const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
 /// 那 4 倍差距不在渲染侧（引擎 CLI 量出来 1.47ms）。**剩下的嫌疑在跨语言那一段**
 /// （取位图 → 过 JNI → Kotlin 建 Bitmap），下次查从那儿分段计时。
 const CANDIDATE_LIMIT: usize = 80;
+
+/// 表情面板那两张表（随包资源目录里解出来的，见 `assets/emoji/README.md`）。
+const EMOJI_PANEL_FILE: &str = "emoji-panel.tsv";
+const KAOMOJI_PANEL_FILE: &str = "kaomoji-panel.tsv";
 
 /// 剪贴板历史落在数据目录里的文件名（同目录下还有解出来的词库与 emoji 表）。
 const CLIPBOARD_FILE: &str = "clipboard.tsv";
@@ -72,6 +76,92 @@ pub mod flags {
     /// 这是唯一一个「下一步该做什么」的位，别的位都是「哪个面变了」——滑行得有人一直敲帧，
     /// 而帧的节拍只在壳那边（安卓有现成的 `Handler`），所以只能这么告诉它别停。
     pub const FLING: i32 = 16;
+}
+
+/// 表情面板的数据：一张表就够两种（emoji 与颜文字）。
+///
+/// 表是「分类 / 字符 / 名字…」几列用制表符隔开，分组用 `# group: 分类` 标出
+/// （见 `assets/emoji/emoji-panel.tsv`
+/// 与 `assets/kaomoji/kaomoji-panel.tsv`）。**只认前两列**——emoji 那张后头还有中英文名，
+/// 面板上用不上，但留着给以后做搜索。
+#[derive(Debug, Default)]
+struct EmojiPanel {
+    /// 分类名，顺序就是表面上的顺序。
+    names: Vec<String>,
+
+    /// 每个分类的字符，与 [`Self::names`] 一一对应。
+    items: Vec<Vec<String>>,
+
+    /// 当前选中的是第几类。
+    group: usize,
+}
+
+/// 标签条一屏摆几个分类。
+const EMOJI_GROUP_SLOTS: usize = 3;
+
+/// 一屏摆几个表情（与 `qingjian_render` 的 `EMOJI_COLS × EMOJI_ROWS` 是同一个数）。
+const EMOJI_SLOTS: usize = 15;
+
+impl EmojiPanel {
+    /// 从文件读。文件不在或读不了就是个空的——表情面板画不出来，别的照常用。
+    fn open(path: &Path) -> Self {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return Self::default();
+        };
+        let mut names: Vec<String> = Vec::new();
+        let mut items: Vec<Vec<String>> = Vec::new();
+        for line in text.lines() {
+            // 只认 `# group: ` 这一种注释——文件头那两行说明也是 `#` 开头，
+            // 一律当分类的话面板上会冒出「由 render-panel.py 生成…」这种标签
+            if let Some(name) = line.strip_prefix("# group: ") {
+                names.push(name.trim().to_owned());
+                items.push(Vec::new());
+                continue;
+            }
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut fields = line.split('\t');
+            let (Some(_group), Some(item)) = (fields.next(), fields.next()) else {
+                continue;
+            };
+            if let Some(last) = items.last_mut() {
+                last.push(item.to_owned());
+            }
+        }
+        // 分类名与条目要一一对应；对不上就当没读到（表被手改坏了的兜底）
+        if names.len() != items.len() {
+            return Self::default();
+        }
+        Self {
+            names,
+            items,
+            group: 0,
+        }
+    }
+
+    /// 标签条上这一屏要画的那几个分类名。
+    fn labels(&self, screen: usize) -> &[String] {
+        let start = (screen * EMOJI_GROUP_SLOTS).min(self.names.len());
+        let end = (start + EMOJI_GROUP_SLOTS).min(self.names.len());
+        &self.names[start..end]
+    }
+
+    /// 这一屏第一个标签在整份里是第几个（点标签时要把屏幕号换算回去）。
+    fn screen_start(&self, screen: usize) -> usize {
+        (screen * EMOJI_GROUP_SLOTS).min(self.names.len())
+    }
+
+    /// 标签条一共几屏（至少 1）。
+    fn screens(&self) -> usize {
+        self.names.len().div_ceil(EMOJI_GROUP_SLOTS).max(1)
+    }
+
+    /// 当前这一类的字符，**这一屏要画的那几个**。
+    fn visible(&self) -> &[String] {
+        let items = self.items.get(self.group).map_or(&[][..], Vec::as_slice);
+        &items[..items.len().min(EMOJI_SLOTS)]
+    }
 }
 
 /// 安卓壳持有的会话状态。
@@ -149,6 +239,15 @@ pub struct Session {
     /// 输入法进程在安卓上被杀得很勤，只在内存里的话「刚复制的那条」说没就没。
     /// 每次改动它自己就写盘，这里不用管。
     clipboard: Clipboard,
+
+    /// 表情面板的两份数据（emoji 与颜文字共用一套机制，各喂一份）。
+    ///
+    /// 走的是与剪贴板**同一套**格子：布局、命中、上屏都一样，只是喂进去的字符不同。
+    emoji: EmojiPanel,
+    kaomoji: EmojiPanel,
+
+    /// 标签条翻到第几屏（一屏 [`EMOJI_GROUP_SLOTS`] 个分类）。
+    emoji_group_screen: usize,
 
     /// 剪贴板列表甩出去之后的那一段滑行（与候选条那条带子各走各的）。
     clipboard_fling: Option<Fling>,
@@ -261,6 +360,13 @@ impl Session {
             scroll: 0.0,
             fling: None,
             scrolled: None,
+            emoji: bundle.map_or_else(EmojiPanel::default, |dir| {
+                EmojiPanel::open(&dir.join(EMOJI_PANEL_FILE))
+            }),
+            kaomoji: bundle.map_or_else(EmojiPanel::default, |dir| {
+                EmojiPanel::open(&dir.join(KAOMOJI_PANEL_FILE))
+            }),
+            emoji_group_screen: 0,
             clipboard: data_dir.map_or_else(Clipboard::default, |dir| {
                 Clipboard::open(dir.join(CLIPBOARD_FILE))
             }),
@@ -312,6 +418,10 @@ impl Session {
         // 剪贴板页从头看起（每次进来都回到最新的那几条）
         if panel == Panel::Clipboard {
             self.clipboard_scroll = 0.0;
+        }
+        // 表情页也从第一屏分类看起
+        if matches!(panel, Panel::Emoji | Panel::Kaomoji) {
+            self.emoji_group_screen = 0;
         }
         // 换页了，正在跑的那段滑行按的是上一页的视口，停掉
         self.clipboard_fling = None;
@@ -442,10 +552,26 @@ impl Session {
             &self.clipboard.entries()[first..end],
             self.clipboard_offset(),
         );
+        let panel = match self.panel {
+            Panel::Kaomoji => &self.kaomoji,
+            _ => &self.emoji,
+        };
+        let emoji = EmojiView {
+            items: panel.visible(),
+            labels: panel.labels(self.emoji_group_screen),
+            group: panel
+                .group
+                .saturating_sub(panel.screen_start(self.emoji_group_screen)),
+        };
         match self.keyboard.as_mut() {
-            Some(keyboard) => {
-                keyboard.popup_surface(self.renderer.as_mut(), shift, mode, clipboard, offset)
-            }
+            Some(keyboard) => keyboard.popup_surface(
+                self.renderer.as_mut(),
+                shift,
+                mode,
+                clipboard,
+                offset,
+                emoji,
+            ),
             None => Vec::new(),
         }
     }
@@ -468,10 +594,26 @@ impl Session {
             &self.clipboard.entries()[first..end],
             self.clipboard_offset(),
         );
+        let panel = match self.panel {
+            Panel::Kaomoji => &self.kaomoji,
+            _ => &self.emoji,
+        };
+        let emoji = EmojiView {
+            items: panel.visible(),
+            labels: panel.labels(self.emoji_group_screen),
+            group: panel
+                .group
+                .saturating_sub(panel.screen_start(self.emoji_group_screen)),
+        };
         match self.keyboard.as_mut() {
-            Some(keyboard) => {
-                keyboard.surface(self.renderer.as_mut(), shift, mode, clipboard, offset)
-            }
+            Some(keyboard) => keyboard.surface(
+                self.renderer.as_mut(),
+                shift,
+                mode,
+                clipboard,
+                offset,
+                emoji,
+            ),
             None => Vec::new(),
         }
     }
@@ -718,6 +860,9 @@ impl Session {
     /// 执行一个动作。引擎在什么状态决定同一动作的不同走法，都写在这里。
     fn apply(&mut self, act: Act) {
         match act {
+            Act::Emoji(index) => self.commit_emoji(index),
+            Act::EmojiGroup(index) => self.pick_emoji_group(index),
+            Act::EmojiGroupPage(step) => self.turn_emoji_groups(step),
             Act::Push(c) => self.type_letter(c),
             Act::CommitCandidate(index) => {
                 // 命中矩形里的下标是**画出来那一批**里的（从最左边看得见的那个数起）
@@ -1126,6 +1271,56 @@ impl Session {
         self.keyboard
             .as_ref()
             .map_or(0.0, Keyboard::clipboard_pitch)
+    }
+
+    /// 当前这一页该用哪份表情数据：颜文字页用颜文字那份，其余（只有表情页）用 emoji 那份。
+    fn emoji_panel(&self) -> &EmojiPanel {
+        match self.panel {
+            Panel::Kaomoji => &self.kaomoji,
+            _ => &self.emoji,
+        }
+    }
+
+    /// 同上，要改的时候用这个。
+    fn emoji_panel_mut(&mut self) -> &mut EmojiPanel {
+        match self.panel {
+            Panel::Kaomoji => &mut self.kaomoji,
+            _ => &mut self.emoji,
+        }
+    }
+
+    /// 表情页点了一个：**整条上屏**（不是像打字那样一个字符一个字符喂给引擎）。
+    ///
+    /// 上屏之后**留在这一页**——发 emoji 常常一次发好几个，弹回字母页反而要重新点进来。
+    fn commit_emoji(&mut self, index: usize) {
+        let Some(text) = self.emoji_panel().visible().get(index).cloned() else {
+            return;
+        };
+        self.commit_text(text);
+    }
+
+    /// 点了分类标签：切到那一类。`index` 是**这一屏里的第几个**，要换算回整份里的下标。
+    fn pick_emoji_group(&mut self, index: usize) {
+        let start = self.emoji_panel().screen_start(self.emoji_group_screen);
+        let target = start + index;
+        let panel = self.emoji_panel_mut();
+        if target >= panel.names.len() {
+            return;
+        }
+        panel.group = target;
+        self.mark_keyboard_dirty();
+    }
+
+    /// 标签条往前后翻一屏，夹在首末屏之间。
+    fn turn_emoji_groups(&mut self, step: isize) {
+        let screens = self.emoji_panel().screens();
+        let target = (self.emoji_group_screen as isize + step).clamp(0, screens as isize - 1);
+        let target = target as usize;
+        if target == self.emoji_group_screen {
+            return;
+        }
+        self.emoji_group_screen = target;
+        self.mark_keyboard_dirty();
     }
 
     /// 剪贴板列表跟着手指滚。

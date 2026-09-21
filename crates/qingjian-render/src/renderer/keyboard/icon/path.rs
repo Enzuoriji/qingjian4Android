@@ -122,12 +122,145 @@ pub(super) fn clipboard() -> Option<Path> {
     builder.finish()
 }
 
+/// 表情（工具页那一格）——Material 的 `mood`。
+pub(super) fn mood() -> Option<Path> {
+    let mut builder = PathBuilder::new();
+    builder.move_to(620.0, -520.0);
+    builder.quad_to(645.0, -520.0, 662.5, -537.5);
+    builder.quad_to(680.0, -555.0, 680.0, -580.0);
+    builder.quad_to(680.0, -605.0, 662.5, -622.5);
+    builder.quad_to(645.0, -640.0, 620.0, -640.0);
+    builder.quad_to(595.0, -640.0, 577.5, -622.5);
+    builder.quad_to(560.0, -605.0, 560.0, -580.0);
+    builder.quad_to(560.0, -555.0, 577.5, -537.5);
+    builder.quad_to(595.0, -520.0, 620.0, -520.0);
+    builder.close();
+    builder.move_to(340.0, -520.0);
+    builder.quad_to(365.0, -520.0, 382.5, -537.5);
+    builder.quad_to(400.0, -555.0, 400.0, -580.0);
+    builder.quad_to(400.0, -605.0, 382.5, -622.5);
+    builder.quad_to(365.0, -640.0, 340.0, -640.0);
+    builder.quad_to(315.0, -640.0, 297.5, -622.5);
+    builder.quad_to(280.0, -605.0, 280.0, -580.0);
+    builder.quad_to(280.0, -555.0, 297.5, -537.5);
+    builder.quad_to(315.0, -520.0, 340.0, -520.0);
+    builder.close();
+    builder.move_to(603.5, -298.5);
+    builder.quad_to(659.0, -337.0, 684.0, -400.0);
+    builder.line_to(276.0, -400.0);
+    builder.quad_to(301.0, -337.0, 356.5, -298.5);
+    builder.quad_to(412.0, -260.0, 480.0, -260.0);
+    builder.quad_to(548.0, -260.0, 603.5, -298.5);
+    builder.close();
+    builder.move_to(324.0, -111.5);
+    builder.quad_to(251.0, -143.0, 197.0, -197.0);
+    builder.quad_to(143.0, -251.0, 111.5, -324.0);
+    builder.quad_to(80.0, -397.0, 80.0, -480.0);
+    builder.quad_to(80.0, -563.0, 111.5, -636.0);
+    builder.quad_to(143.0, -709.0, 197.0, -763.0);
+    builder.quad_to(251.0, -817.0, 324.0, -848.5);
+    builder.quad_to(397.0, -880.0, 480.0, -880.0);
+    builder.quad_to(563.0, -880.0, 636.0, -848.5);
+    builder.quad_to(709.0, -817.0, 763.0, -763.0);
+    builder.quad_to(817.0, -709.0, 848.5, -636.0);
+    builder.quad_to(880.0, -563.0, 880.0, -480.0);
+    builder.quad_to(880.0, -397.0, 848.5, -324.0);
+    builder.quad_to(817.0, -251.0, 763.0, -197.0);
+    builder.quad_to(709.0, -143.0, 636.0, -111.5);
+    builder.quad_to(563.0, -80.0, 480.0, -80.0);
+    builder.quad_to(397.0, -80.0, 324.0, -111.5);
+    builder.close();
+    builder.move_to(480.0, -480.0);
+    builder.close();
+    builder.move_to(707.0, -253.0);
+    builder.quad_to(800.0, -346.0, 800.0, -480.0);
+    builder.quad_to(800.0, -614.0, 707.0, -707.0);
+    builder.quad_to(614.0, -800.0, 480.0, -800.0);
+    builder.quad_to(346.0, -800.0, 253.0, -707.0);
+    builder.quad_to(160.0, -614.0, 160.0, -480.0);
+    builder.quad_to(160.0, -346.0, 253.0, -253.0);
+    builder.quad_to(346.0, -160.0, 480.0, -160.0);
+    builder.quad_to(614.0, -160.0, 707.0, -253.0);
+    builder.close();
+    builder.finish()
+}
+
+/// 颜文字（工具页那一格）——Material 的 `sentiment_satisfied`。
+pub(super) fn kaomoji() -> Option<Path> {
+    let mut builder = PathBuilder::new();
+    builder.move_to(620.0, -520.0);
+    builder.quad_to(645.0, -520.0, 662.5, -537.5);
+    builder.quad_to(680.0, -555.0, 680.0, -580.0);
+    builder.quad_to(680.0, -605.0, 662.5, -622.5);
+    builder.quad_to(645.0, -640.0, 620.0, -640.0);
+    builder.quad_to(595.0, -640.0, 577.5, -622.5);
+    builder.quad_to(560.0, -605.0, 560.0, -580.0);
+    builder.quad_to(560.0, -555.0, 577.5, -537.5);
+    builder.quad_to(595.0, -520.0, 620.0, -520.0);
+    builder.close();
+    builder.move_to(340.0, -520.0);
+    builder.quad_to(365.0, -520.0, 382.5, -537.5);
+    builder.quad_to(400.0, -555.0, 400.0, -580.0);
+    builder.quad_to(400.0, -605.0, 382.5, -622.5);
+    builder.quad_to(365.0, -640.0, 340.0, -640.0);
+    builder.quad_to(315.0, -640.0, 297.5, -622.5);
+    builder.quad_to(280.0, -605.0, 280.0, -580.0);
+    builder.quad_to(280.0, -555.0, 297.5, -537.5);
+    builder.quad_to(315.0, -520.0, 340.0, -520.0);
+    builder.close();
+    builder.move_to(603.5, -298.5);
+    builder.quad_to(659.0, -337.0, 684.0, -400.0);
+    builder.line_to(618.0, -400.0);
+    builder.quad_to(596.0, -363.0, 559.5, -341.5);
+    builder.quad_to(523.0, -320.0, 480.0, -320.0);
+    builder.quad_to(437.0, -320.0, 400.5, -341.5);
+    builder.quad_to(364.0, -363.0, 342.0, -400.0);
+    builder.line_to(276.0, -400.0);
+    builder.quad_to(301.0, -337.0, 356.5, -298.5);
+    builder.quad_to(412.0, -260.0, 480.0, -260.0);
+    builder.quad_to(548.0, -260.0, 603.5, -298.5);
+    builder.close();
+    builder.move_to(324.0, -111.5);
+    builder.quad_to(251.0, -143.0, 197.0, -197.0);
+    builder.quad_to(143.0, -251.0, 111.5, -324.0);
+    builder.quad_to(80.0, -397.0, 80.0, -480.0);
+    builder.quad_to(80.0, -563.0, 111.5, -636.0);
+    builder.quad_to(143.0, -709.0, 197.0, -763.0);
+    builder.quad_to(251.0, -817.0, 324.0, -848.5);
+    builder.quad_to(397.0, -880.0, 480.0, -880.0);
+    builder.quad_to(563.0, -880.0, 636.0, -848.5);
+    builder.quad_to(709.0, -817.0, 763.0, -763.0);
+    builder.quad_to(817.0, -709.0, 848.5, -636.0);
+    builder.quad_to(880.0, -563.0, 880.0, -480.0);
+    builder.quad_to(880.0, -397.0, 848.5, -324.0);
+    builder.quad_to(817.0, -251.0, 763.0, -197.0);
+    builder.quad_to(709.0, -143.0, 636.0, -111.5);
+    builder.quad_to(563.0, -80.0, 480.0, -80.0);
+    builder.quad_to(397.0, -80.0, 324.0, -111.5);
+    builder.close();
+    builder.move_to(480.0, -480.0);
+    builder.close();
+    builder.move_to(707.0, -253.0);
+    builder.quad_to(800.0, -346.0, 800.0, -480.0);
+    builder.quad_to(800.0, -614.0, 707.0, -707.0);
+    builder.quad_to(614.0, -800.0, 480.0, -800.0);
+    builder.quad_to(346.0, -800.0, 253.0, -707.0);
+    builder.quad_to(160.0, -614.0, 160.0, -480.0);
+    builder.quad_to(160.0, -346.0, 253.0, -253.0);
+    builder.quad_to(346.0, -160.0, 480.0, -160.0);
+    builder.quad_to(614.0, -160.0, 707.0, -253.0);
+    builder.close();
+    builder.finish()
+}
+
 /// 每个图标自己的包围盒（Material 那套坐标）：`(左, 上, 右, 下)`。
 ///
 /// 画的时候按**这个框**等比缩到目标边长——960 的网格里四周是 Google 留的呼吸位，
 /// 照网格缩的话画出来比要的尺寸小一圈。
-pub(super) const BOXES: [(f32, f32, f32, f32); 3] = [
+pub(super) const BOXES: [(f32, f32, f32, f32); 5] = [
     (240.0, -736.0, 720.0, -240.0), // shift
     (80.0, -800.0, 880.0, -160.0),  // backspace
     (120.0, -920.0, 840.0, -120.0), // clipboard
+    (80.0, -880.0, 880.0, -80.0),   // mood
+    (80.0, -880.0, 880.0, -80.0),   // kaomoji
 ];

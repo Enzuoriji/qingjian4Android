@@ -1,6 +1,11 @@
 # 颜文字
 
-## kaomoji-panel.tsv
+## 表在 `assets/emoji/kaomoji-panel.tsv`
+
+**不在这个目录里**：gradle 是把资源目录**平铺**进 APK 的 assets 根（`srcDir` 不保留目录名），
+两个目录里都有 `README.md` 与 `render-panel.py` 就会撞名。所以脚本留在这儿、表生成到隔壁
+`assets/emoji/` 下（那个目录本来就是挂进包的），APK 里只有 `emoji-panel.tsv` 与
+`kaomoji-panel.tsv` 两张表。
 
 表情面板「颜文字」那一页的排布：一行一条，`分类\t颜文字`，分组用 `# 分类` 注释标出。
 

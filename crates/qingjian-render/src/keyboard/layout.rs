@@ -21,7 +21,14 @@ pub const CLIPBOARD_CELLS: usize = 5;
 /// 工具页上那几格的名字，顺序就是 [`KeyboardLayout::tools`] 的格子顺序。
 ///
 /// 现在只有剪贴板；「震动程度」「设置」这些以后往下排（页里留了空格子）。
-pub const TOOLS: [&str; 1] = ["剪贴板"];
+pub const TOOLS: [&str; 3] = ["剪贴板", "表情", "颜文字"];
+
+/// 表情页的格子：一行几个、一共几行。5 × 3 = 15 个一屏。
+///
+/// 比剪贴板那种「一条一行」密得多：emoji 就是一个字，一格放得下；
+/// 颜文字要宽一些，但共用同一份布局，靠**缩字号**塞进去（见渲染那边）。
+pub const EMOJI_COLS: usize = 5;
+pub const EMOJI_ROWS: usize = 3;
 
 /// 工具页一行摆几个图标格子。一排 5 个，与别的页同一个单位宽。
 const TOOLS_PER_ROW: usize = 5;
@@ -236,6 +243,31 @@ impl KeyboardLayout {
         Self { rows }
     }
 
+    /// 表情页：**上面一条分类标签、下面一片格子**（emoji 与颜文字共用）。
+    ///
+    /// 标签条是 `‹ [分类] [分类] [分类] ›` 五个 1 单位的格子——分类比这多，靠两头那两个
+    /// 箭头翻（与候选条那对 `‹ ›` 一个意思）。下面三行 × 5 格 = 15 个表情，
+    /// 一屏这么多；多了靠上下滑（与剪贴板那套滚动一样，下一步接）。
+    pub fn emoji() -> Self {
+        let mut rows = vec![KeyRow {
+            keys: vec![
+                Key::new(KeyId::EmojiGroupPage(-1), 1.0),
+                Key::new(KeyId::EmojiGroup(0), 1.0),
+                Key::new(KeyId::EmojiGroup(1), 1.0),
+                Key::new(KeyId::EmojiGroup(2), 1.0),
+                Key::new(KeyId::EmojiGroupPage(1), 1.0),
+            ],
+        }];
+        for row in 0..EMOJI_ROWS {
+            rows.push(KeyRow {
+                keys: (0..EMOJI_COLS)
+                    .map(|col| Key::new(KeyId::Emoji(row * EMOJI_COLS + col), 1.0))
+                    .collect(),
+            });
+        }
+        Self { rows }
+    }
+
     /// 剪贴板页：**一条记录占一整行**，最后一行是控制。
     ///
     /// 记录格与别的页一样是 5 个单位一行（铺满整宽、左右边对得齐），
@@ -279,6 +311,8 @@ impl KeyboardLayout {
             Panel::Symbols => Self::symbols(),
             Panel::Tools => Self::tools(),
             Panel::Clipboard => Self::clipboard(),
+            // emoji 与颜文字共用一份布局（见 `Panel::Kaomoji` 的注释）
+            Panel::Emoji | Panel::Kaomoji => Self::emoji(),
         }
     }
 

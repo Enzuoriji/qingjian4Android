@@ -1,6 +1,6 @@
 # 表情面板的排布：分组\temoji\t中文名\t英文名，按 Unicode 的 CLDR 顺序（面板就照这个排）
 # 由 render-panel.py 从 Unicode emoji-test.txt 生成（Unicode License v3），别手改
-# Smileys & Emotion
+# group: Smileys & Emotion
 Smileys & Emotion	😀	嘿嘿	grinning face
 Smileys & Emotion	😃	哈哈	grinning face with big eyes
 Smileys & Emotion	😄	笑	grinning face with smiling eyes
@@ -173,7 +173,7 @@ Smileys & Emotion	🗨️	left speech bubble	left speech bubble
 Smileys & Emotion	🗯️	right anger bubble	right anger bubble
 Smileys & Emotion	💭	思想	thought balloon
 Smileys & Emotion	💤	呼噜	ZZZ
-# People & Body
+# group: People & Body
 People & Body	👋	手	waving hand
 People & Body	🤚	手	raised back of hand
 People & Body	🖐️	hand with fingers splayed	hand with fingers splayed
@@ -564,7 +564,7 @@ People & Body	🧑‍🧒	一孩	family: adult, child
 People & Body	🧑‍🧒‍🧒	二孩	family: adult, child, child
 People & Body	👣	脚印	footprints
 People & Body	🫆	侦探	fingerprint
-# Animals & Nature
+# group: Animals & Nature
 Animals & Nature	🐵	猴	monkey face
 Animals & Nature	🐒	猴	monkey
 Animals & Nature	🦍	动物	gorilla
@@ -726,7 +726,7 @@ Animals & Nature	🪹	树枝	empty nest
 Animals & Nature	🪺	蛋	nest with eggs
 Animals & Nature	🍄	毒蕈	mushroom
 Animals & Nature	🪾	树	leafless tree
-# Food & Drink
+# group: Food & Drink
 Food & Drink	🍇	水果	grapes
 Food & Drink	🍈	水果	melon
 Food & Drink	🍉	水果	watermelon
@@ -859,7 +859,7 @@ Food & Drink	🥄	匙	spoon
 Food & Drink	🔪	刀	kitchen knife
 Food & Drink	🫙	罐	jar
 Food & Drink	🏺	水瓶	amphora
-# Travel & Places
+# group: Travel & Places
 Travel & Places	🌍	世界	globe showing Europe-Africa
 Travel & Places	🌎	世界	globe showing Americas
 Travel & Places	🌏	世界	globe showing Asia-Australia
@@ -1081,7 +1081,7 @@ Travel & Places	🪋	meteor	meteor
 Travel & Places	🔥	火	fire
 Travel & Places	💧	水	droplet
 Travel & Places	🌊	浪	water wave
-# Activities
+# group: Activities
 Activities	🎃	灯	jack-o-lantern
 Activities	🎄	树	Christmas tree
 Activities	🎆	庆典	fireworks
@@ -1167,7 +1167,7 @@ Activities	🧵	线	thread
 Activities	🪡	针	sewing needle
 Activities	🧶	毛线	yarn
 Activities	🪢	结	knot
-# Objects
+# group: Objects
 Objects	👓	服饰	glasses
 Objects	🕶️	sunglasses	sunglasses
 Objects	🥽	护目	goggles
@@ -1436,7 +1436,7 @@ Objects	🪬	手	hamsa
 Objects	🗿	摩埃	moai
 Objects	🪧	告示	placard
 Objects	🪪	id	identification card
-# Symbols
+# group: Symbols
 Symbols	🏧	标识	ATM sign
 Symbols	🚮	倒垃圾	litter in bin sign
 Symbols	🚰	水	potable water
@@ -1661,7 +1661,7 @@ Symbols	💠	圆	diamond with a dot
 Symbols	🔘	单独	radio button
 Symbols	🔳	按钮	white square button
 Symbols	🔲	几何	black square button
-# Flags
+# group: Flags
 Flags	🏁	方格	chequered flag
 Flags	🚩	旗	triangular flag
 Flags	🎌	旗	crossed flags

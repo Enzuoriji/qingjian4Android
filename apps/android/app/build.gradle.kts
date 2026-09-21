@@ -46,7 +46,8 @@ android {
     // emoji 字体与 emoji 表放在仓库的 assets/emoji/（来源与许可见那里的 README），整个目录挂进来跟着 APK 走。
     // 系统自带的那张 emoji 字体在安卓 15 起换成了渲染器画不出的格式，所以随包带一张。
     sourceSets["main"].assets.srcDir("../../../assets/emoji")
-    // 颜文字面板那张表（来源与许可见 assets/kaomoji/README.md）。两个目录是**平铺**进 assets 根的
-    // （srcDir 不保留目录名），所以表名带前缀区分：emoji-panel.tsv / kaomoji-panel.tsv。
-    sourceSets["main"].assets.srcDir("../../../assets/kaomoji")
+    // **只挂这一个目录**：颜文字那张表也生成在它里面（`kaomoji-panel.tsv`）。
+    // 原因是 gradle 把资源目录**平铺**进 assets 根（srcDir 不保留目录名），再挂一个
+    // `assets/kaomoji` 的话，两边的 README 与生成脚本会撞名（mergeReleaseAssets 报
+    // Duplicate resources）。表名带前缀区分就够，脚本与说明留在仓库里、不进包。
 }

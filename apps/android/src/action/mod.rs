@@ -29,12 +29,18 @@ pub fn on_key(key: KeyId) -> Act {
         // 数字与符号一样：键帽上是原字符，全角与否交给引擎
         KeyId::Literal(c) => Act::Punctuate(c),
         KeyId::Panel(panel) => Act::SwitchPanel(panel),
-        // 工具页那一行「剪贴板」：切到剪贴板页
-        KeyId::Tool(_) => Act::SwitchPanel(Panel::Clipboard),
+        // 工具页那几格：0 剪贴板、1 表情、2 颜文字（表情与颜文字共用一份布局）
+        KeyId::Tool(0) => Act::SwitchPanel(Panel::Clipboard),
+        KeyId::Tool(1) => Act::SwitchPanel(Panel::Emoji),
+        KeyId::Tool(_) => Act::SwitchPanel(Panel::Kaomoji),
         // 记录格报的是**屏幕上**第几格；它对着整份里的哪一条，是会话的事
         // （它才知道列表滚到哪儿了）
         KeyId::Clipboard(index) => Act::PasteClipboard(index),
         KeyId::ClipboardClear => Act::ClearClipboard,
+        // 表情页：点一个上屏、点标签切分类、翻标签条
+        KeyId::Emoji(index) => Act::Emoji(index),
+        KeyId::EmojiGroup(index) => Act::EmojiGroup(index),
+        KeyId::EmojiGroupPage(step) => Act::EmojiGroupPage(step),
     }
 }
 

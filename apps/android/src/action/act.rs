@@ -52,4 +52,13 @@ pub enum Act {
 
     /// 清空整份剪贴板历史。
     ClearClipboard,
+
+    /// 表情页上点了一个：把那一格的东西上屏（**整条**，不是像打字那样一个字符一个字符）。
+    Emoji(usize),
+
+    /// 表情页上点了个分类标签：切到那一类。
+    EmojiGroup(usize),
+
+    /// 表情页的标签条翻一屏。
+    EmojiGroupPage(isize),
 }

@@ -28,6 +28,12 @@ ICONS = [
     ("shift", "keyboard_capslock.svg", "上档（大小写）——Material 的 `keyboard_capslock`"),
     ("backspace", "backspace.svg", "退格——Material 的 `backspace`"),
     ("clipboard", "content_paste.svg", "剪贴板（工具页那一格）——Material 的 `content_paste`"),
+    ("mood", "mood.svg", "表情（工具页那一格）——Material 的 `mood`"),
+    (
+        "kaomoji",
+        "sentiment_satisfied.svg",
+        "颜文字（工具页那一格）——Material 的 `sentiment_satisfied`",
+    ),
 ]
 
 

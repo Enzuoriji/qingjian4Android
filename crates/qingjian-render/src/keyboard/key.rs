@@ -58,6 +58,15 @@ pub enum KeyId {
 
     /// 清空整份剪贴板历史。
     ClipboardClear,
+
+    /// 表情页上的第几个格子（**屏幕上那一格**）。字符从 `KeyboardState` 里取。
+    Emoji(usize),
+
+    /// 表情页上面那条分类标签里、**这一屏**的第几个（点一下切到那一类）。
+    EmojiGroup(usize),
+
+    /// 分类标签条往前后翻一屏：`-1` 上一屏、`1` 下一屏。
+    EmojiGroupPage(isize),
 }
 
 /// 按键的样式。只影响配色，不影响行为。
@@ -148,7 +157,10 @@ impl Key {
             | KeyId::Literal(_)
             | KeyId::Space
             | KeyId::Tool(_)
-            | KeyId::Clipboard(_) => KeyStyle::Letter,
+            | KeyId::Clipboard(_)
+            // 表情格子与分类标签都是「内容」：白的，点着才显眼
+            | KeyId::Emoji(_)
+            | KeyId::EmojiGroup(_) => KeyStyle::Letter,
             // 回车是唯一的强调键
             KeyId::Enter => KeyStyle::Primary,
             KeyId::Shift
@@ -157,7 +169,9 @@ impl Key {
             | KeyId::Comma
             | KeyId::Period
             | KeyId::Panel(_)
-            | KeyId::ClipboardClear => KeyStyle::Function,
+            | KeyId::ClipboardClear
+            // 分类条那两个箭头是「翻」，不是内容
+            | KeyId::EmojiGroupPage(_) => KeyStyle::Function,
         }
     }
 }

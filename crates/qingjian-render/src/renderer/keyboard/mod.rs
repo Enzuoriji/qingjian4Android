@@ -259,6 +259,58 @@ impl Renderer {
                 icon::size_on_key(height, scale),
                 theme.label,
             ),
+            // 表情格子：emoji 是**彩色字形**（`draw_text` 走 swash 那条彩色路），
+            // 颜文字是普通文字——两者共用这一格，**按内容长短自己挑字号**：
+            // 一两个字符的（emoji）用键帽那个大号，更长的（颜文字）缩一号才塞得下。
+            KeyId::Emoji(_) => {
+                let font = if text.chars().count() <= 2 {
+                    theme.font
+                } else {
+                    theme.hint_font
+                };
+                let style =
+                    TextStyle::new(font.scaled(scale), font.size, theme.label, theme.text_gamma);
+                let pad = CELL_TEXT_PADDING * scale;
+                let text = self.fit(&text, &style, width - pad * 2.0);
+                let size = self.measure(&text, &style);
+                self.draw_text(
+                    canvas,
+                    &text,
+                    &style,
+                    cx - size.width / 2.0,
+                    cy - size.height / 2.0,
+                );
+            }
+            // 分类标签：小字居中；选中那一类垫一块底色（跟长按弹的那排选项一个做法）
+            KeyId::EmojiGroup(index) => {
+                let style = TextStyle::new(
+                    theme.hint_font.scaled(scale),
+                    theme.hint_font.size,
+                    theme.label,
+                    theme.text_gamma,
+                );
+                let chosen = state.emoji_group == index;
+                if chosen {
+                    let inset = CARD_INSET * scale;
+                    canvas.fill_round_rect(
+                        x + inset,
+                        y + inset,
+                        width - inset * 2.0,
+                        height - inset * 2.0,
+                        radius / 2.0,
+                        theme.key_pressed,
+                    );
+                }
+                let text = self.fit(&text, &style, width - CELL_TEXT_PADDING * scale * 2.0);
+                let size = self.measure(&text, &style);
+                self.draw_text(
+                    canvas,
+                    &text,
+                    &style,
+                    cx - size.width / 2.0,
+                    cy - size.height / 2.0,
+                );
+            }
             // 工具页的格子：**图标在上、名字在下**（搜狗那个面板就是这个样子），
             // 跟「一个大字居中」的键帽不是一回事，所以整个格子自己画
             KeyId::Tool(index) => {
@@ -360,6 +412,8 @@ const TOOL_ICON_RATIO: f32 = 0.42;
 fn tool_icon(index: usize) -> Option<IconPainter> {
     match index {
         0 => Some(icon::draw_clipboard),
+        1 => Some(icon::draw_mood),
+        2 => Some(icon::draw_kaomoji),
         _ => None,
     }
 }
@@ -373,6 +427,11 @@ fn label(key: &Key, state: &KeyboardState) -> String {
         KeyId::Clipboard(index) => state.clipboard.get(index).cloned().unwrap_or_default(),
         KeyId::Tool(index) => TOOLS.get(index).copied().unwrap_or_default().to_owned(),
         KeyId::ClipboardClear => "清空".to_owned(),
+        // 表情格子写的是**那一个 emoji 或那一条颜文字**（会话切好的这一屏）
+        KeyId::Emoji(index) => state.emojis.get(index).cloned().unwrap_or_default(),
+        KeyId::EmojiGroup(index) => state.emoji_groups.get(index).cloned().unwrap_or_default(),
+        KeyId::EmojiGroupPage(step) if step < 0 => "‹".to_owned(),
+        KeyId::EmojiGroupPage(_) => "›".to_owned(),
         KeyId::Letter(c) => {
             if state.shift.is_upper() {
                 c.to_uppercase().to_string()
@@ -404,8 +463,8 @@ fn label(key: &Key, state: &KeyboardState) -> String {
             Panel::Letters => "返回".to_owned(),
             Panel::Digits => "123".to_owned(),
             Panel::Symbols => "符".to_owned(),
-            // 工具页是标开的，页里没有再回工具页的键
-            Panel::Tools | Panel::Clipboard => String::new(),
+            // 工具页是标开的，页里没有再回工具页的键；表情页也一样（从工具页进）
+            Panel::Tools | Panel::Clipboard | Panel::Emoji | Panel::Kaomoji => String::new(),
         },
     }
 }

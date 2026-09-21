@@ -76,6 +76,16 @@ pub(crate) fn draw_clipboard(canvas: &mut Canvas, cx: f32, cy: f32, size: f32, c
     );
 }
 
+/// 画表情（工具页那一格），居中在 `(cx, cy)`，边长 `size` 像素。
+pub(crate) fn draw_mood(canvas: &mut Canvas, cx: f32, cy: f32, size: f32, color: Color) {
+    draw(canvas, path::mood(), path::BOXES[3], cx, cy, size, color);
+}
+
+/// 画颜文字（工具页那一格），居中在 `(cx, cy)`，边长 `size` 像素。
+pub(crate) fn draw_kaomoji(canvas: &mut Canvas, cx: f32, cy: f32, size: f32, color: Color) {
+    draw(canvas, path::kaomoji(), path::BOXES[4], cx, cy, size, color);
+}
+
 /// 把一段路径缩到**最长边 = `size`** 并居中在 `(cx, cy)`，然后填色。
 ///
 /// 按最长边而不是按高：这几个图标有宽扁的（⌫ 的包围盒是 800×640），按高缩会顶出格子。

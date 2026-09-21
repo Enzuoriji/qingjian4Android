@@ -50,6 +50,15 @@ pub struct KeyboardState<'a> {
     /// 渲染器只读它——**存与不存、留几条都不归它管**。
     pub clipboard: &'a [String],
 
+    /// 表情页此刻该画的那一串字符（emoji 或颜文字，哪一页喂哪一串）。会话切好的。
+    pub emojis: &'a [String],
+
+    /// 表情页上面那条分类标签，**这一屏**要画的名字。
+    pub emoji_groups: &'a [String],
+
+    /// 这一屏的标签里，当前这一类是第几个（画成选中态）。
+    pub emoji_group: usize,
+
     /// 剪贴板列表**让开不足一格的那点**（点，0 到一格高之间）。
     ///
     /// 整格的那部分由壳切好（[`Self::clipboard`] 给的就已经是这一屏该画的几条），

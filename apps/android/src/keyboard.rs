@@ -151,6 +151,22 @@ pub enum Fired {
     ClipboardScroll(f32),
 }
 
+/// 表情面板要画的那一串：这一屏的条目、标签条上的分类名、选中的是标签里第几个。
+///
+/// 打包成一个结构是因为 `surface` / `popup_surface` 都得收它——三个参数一个个传，
+/// 调用处会变成一长串看不出谁是谁。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EmojiView<'a> {
+    /// 这一屏要画的那些字符（emoji 或颜文字）。
+    pub items: &'a [String],
+
+    /// 标签条上这一屏的几个分类名。
+    pub labels: &'a [String],
+
+    /// 选中的是标签里第几个（画成选中态）。
+    pub group: usize,
+}
+
 /// 尺寸与外观。壳在 `Session::configure` 时给一份。
 #[derive(Debug, Clone, Copy)]
 struct Metrics {
@@ -415,6 +431,7 @@ impl Keyboard {
         mode: InputMode,
         clipboard: &[String],
         clipboard_offset: f32,
+        emoji: EmojiView<'_>,
     ) -> Vec<u8> {
         if self.metrics.width <= 0.0 {
             return Vec::new();
@@ -427,6 +444,9 @@ impl Keyboard {
                 pressed: self.pressed,
                 clipboard,
                 clipboard_offset,
+                emojis: emoji.items,
+                emoji_groups: emoji.labels,
+                emoji_group: emoji.group,
             };
             let rendered = renderer.and_then(|renderer| {
                 renderer
@@ -656,6 +676,7 @@ impl Keyboard {
         mode: InputMode,
         clipboard: &[String],
         clipboard_offset: f32,
+        emoji: EmojiView<'_>,
     ) -> Vec<u8> {
         let Some((key, rect)) = self.pressed_key() else {
             self.forget_popup();
@@ -713,6 +734,9 @@ impl Keyboard {
                 pressed: self.pressed,
                 clipboard,
                 clipboard_offset,
+                emojis: emoji.items,
+                emoji_groups: emoji.labels,
+                emoji_group: emoji.group,
             };
             let density = self.metrics.density;
             let rendered = renderer.and_then(|renderer| {

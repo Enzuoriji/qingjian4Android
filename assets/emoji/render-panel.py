@@ -89,7 +89,7 @@ def main():
     last = None
     for group, emoji, zh, en in rows:
         if group != last:
-            text.append(f"# {group}\n")
+            text.append(f"# group: {group}\n")
             last = group
         text.append(f"{group}\t{emoji}\t{zh}\t{en}\n")
     OUT.write_text("".join(text), encoding="utf-8")
