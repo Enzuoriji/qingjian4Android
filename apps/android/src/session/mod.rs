@@ -1496,7 +1496,8 @@ impl Session {
     /// 以后的震动 / 设置都排在那儿。
     fn toggle_tools(&mut self) {
         let panel = match self.panel {
-            Panel::Tools | Panel::Clipboard => Panel::Letters,
+            // 这四页都是「不是打字的」子页：点标一律收回字母页
+            Panel::Tools | Panel::Clipboard | Panel::Emoji | Panel::Kaomoji => Panel::Letters,
             _ => Panel::Tools,
         };
         self.set_panel(panel);
