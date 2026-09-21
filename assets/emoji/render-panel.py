@@ -3,7 +3,7 @@
 
     python assets/emoji/render-panel.py
 
-写出 `assets/emoji/panel.tsv`：一行一个 emoji，`分组\temoji\t中文名\t英文名`。
+写出 `assets/emoji/emoji-panel.tsv`：一行一个 emoji，`分组\temoji\t中文名\t英文名`。
 
 **为什么不用现成的 `emoji-zh.tsv`**：那张是「词 → emoji」，给候选用的（打「笑」出 😄）——
 同一个 emoji 挂在好几个词下、顺序也不是面板要的。面板要的是「按分类排好、一屏一屏翻」，
@@ -24,7 +24,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 SOURCE = ROOT / "data/emoji/emoji-test.txt"
 NAMES = HERE / "emoji-zh.tsv"
-OUT = HERE / "panel.tsv"
+OUT = HERE / "emoji-panel.tsv"
 
 # 跳过的分组：Component 里全是肤色、发型这类「部件」，是给别的 emoji 拼着用的，
 # 单独摆出来点一下没有意义（搜狗那几个面板也都不收）。

@@ -46,4 +46,7 @@ android {
     // emoji 字体与 emoji 表放在仓库的 assets/emoji/（来源与许可见那里的 README），整个目录挂进来跟着 APK 走。
     // 系统自带的那张 emoji 字体在安卓 15 起换成了渲染器画不出的格式，所以随包带一张。
     sourceSets["main"].assets.srcDir("../../../assets/emoji")
+    // 颜文字面板那张表（来源与许可见 assets/kaomoji/README.md）。两个目录是**平铺**进 assets 根的
+    // （srcDir 不保留目录名），所以表名带前缀区分：emoji-panel.tsv / kaomoji-panel.tsv。
+    sourceSets["main"].assets.srcDir("../../../assets/kaomoji")
 }

@@ -1,6 +1,6 @@
 # 颜文字
 
-## panel.tsv
+## kaomoji-panel.tsv
 
 表情面板「颜文字」那一页的排布：一行一条，`分类\t颜文字`，分组用 `# 分类` 注释标出。
 
@@ -17,7 +17,7 @@
   python assets/kaomoji/render-panel.py
   ```
 
-  原始 JSON 放 `data/`（不进仓库），生成物 `panel.tsv` 随仓库提交。
+  原始 JSON 放 `data/`（不进仓库），生成物 `kaomoji-panel.tsv` 随仓库提交。
   换分类、改每类收几条，都改脚本里的 `CATEGORIES` / `PER_CATEGORY` 再重跑。
 
 ## 为什么挑着收，而不是全量

@@ -470,9 +470,16 @@ class QingjianImeService : InputMethodService() {
         const val DICTIONARY = "dict.qj"
 
         /** emoji 字体与 emoji 表（在 APK 的 assets 里，启动时解到私有目录的 [BUNDLE_DIR]）。 */
-        val EMOJI_ASSETS = listOf("NotoColorEmoji.ttf", "emoji-zh.tsv", "emoji-en.tsv")
+        val EMOJI_ASSETS = listOf(
+            "NotoColorEmoji.ttf",
+            "emoji-zh.tsv",
+            "emoji-en.tsv",
+            // 表情面板的两张表（emoji 与颜文字各一张）
+            "emoji-panel.tsv",
+            "kaomoji-panel.tsv",
+        )
 
-        /** emoji 那几个文件解到私有目录时用的子目录名。 */
+        /** 随包那几个数据文件解到私有目录时用的子目录名（emoji 与颜文字的表都在里头）。 */
         const val BUNDLE_DIR = "emoji"
 
         /** 一次触摸超过这么多毫秒就报一声（约一帧）；打字手感的分水岭。 */

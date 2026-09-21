@@ -3,7 +3,7 @@
 
     python assets/kaomoji/render-panel.py
 
-写出 `assets/kaomoji/panel.tsv`：`分类\t颜文字`，按 [`CATEGORIES`] 里的顺序。
+写出 `assets/kaomoji/kaomoji-panel.tsv`：`分类\t颜文字`，按 [`CATEGORIES`] 里的顺序。
 
 **为什么要挑**：原始表有 535 个分类，大半是日文罗马字（`yorokobu` 喜ぶ、`sumurai`
 スマイル、`chokon` チョコン…），面板上没法当标签用；4 万条也翻不完。这里只挑
@@ -22,7 +22,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 SOURCE = ROOT / "data/kaomoji/kaomoji.json"
-OUT = HERE / "panel.tsv"
+OUT = HERE / "kaomoji-panel.tsv"
 
 # 面板上的分类：`(原表里的分类名, 面板上写的中文标签)`。
 #
