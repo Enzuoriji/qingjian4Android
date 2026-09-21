@@ -291,6 +291,13 @@ impl KeyboardLayout {
         Self { rows }
     }
 
+    /// 这一页是不是表情页（emoji 与颜文字共用一份布局，所以一起认）。
+    pub fn is_emoji(&self) -> bool {
+        self.rows
+            .iter()
+            .any(|row| row.keys.iter().any(|key| matches!(key.id, KeyId::Emoji(_))))
+    }
+
     /// 这一页是不是剪贴板页。
     ///
     /// 渲染器要知道这个：**空列表时它得在键盘中间写一句话**，不然整块键盘上只剩底下

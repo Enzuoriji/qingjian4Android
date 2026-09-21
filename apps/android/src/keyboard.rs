@@ -157,6 +157,9 @@ pub enum Fired {
 /// 调用处会变成一长串看不出谁是谁。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EmojiView<'a> {
+    /// 这一屏的格子让开不足一行的那点（点）——整行由会话切好。
+    pub offset: f32,
+
     /// 这一屏要画的那些字符（emoji 或颜文字）。
     pub items: &'a [String],
 
@@ -447,6 +450,7 @@ impl Keyboard {
                 emojis: emoji.items,
                 emoji_groups: emoji.labels,
                 emoji_group: emoji.group,
+                emoji_offset: emoji.offset,
             };
             let rendered = renderer.and_then(|renderer| {
                 renderer
@@ -541,7 +545,8 @@ impl Keyboard {
                     // - **上下滑 = 滚列表**（跟手，每拍都要走）
                     // - **往左滑 = 要删这条**（松手才兑现、拖回原位就取消）
                     // 往左是「不要了」的方向，跟候选条上「往左看后面的候选」不冲突——那儿是另一块地方。
-                    if matches!(press.key, Some(KeyId::Clipboard(_))) {
+                    // 剪贴板那几格与表情页的格子：**上下滑都是滚那一页的列表**
+                    if matches!(press.key, Some(KeyId::Clipboard(_) | KeyId::Emoji(_))) {
                         let dx = x - press.at.0;
                         let dy = y - press.at.1;
                         let slop = SCROLL_SLOP * self.metrics.density;
@@ -737,6 +742,7 @@ impl Keyboard {
                 emojis: emoji.items,
                 emoji_groups: emoji.labels,
                 emoji_group: emoji.group,
+                emoji_offset: emoji.offset,
             };
             let density = self.metrics.density;
             let rendered = renderer.and_then(|renderer| {

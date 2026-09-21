@@ -18,8 +18,8 @@ use super::{Rendered, Renderer};
 use crate::canvas::Canvas;
 use crate::error::RenderError;
 use crate::keyboard::{
-    CLIPBOARD_CELLS, InputMode, Key, KeyId, KeyWidth, KeyboardLayout, KeyboardState, Panel,
-    ShiftState, TOOLS,
+    CLIPBOARD_CELLS, EMOJI_ROWS, InputMode, Key, KeyId, KeyWidth, KeyboardLayout, KeyboardState,
+    Panel, ShiftState, TOOLS,
 };
 use crate::text::TextStyle;
 use crate::theme::KeyboardTheme;
@@ -58,8 +58,18 @@ impl Renderer {
         // 所以先画在一张只有记录区那么大的图上，再整张贴回来（与 `logo::draw_logo` 同一个路数）。
         // 别的页没有这一层，直接画在主画布上。
         let pitch = row_height + gap_y;
-        let mut sheet = if layout.is_clipboard() {
-            let height = (pitch * CLIPBOARD_CELLS as f32 - gap_y).round().max(1.0) as u32;
+        // 这一页有没有「能滚的那一段」、是哪几行：
+        // 剪贴板是上头那五行记录；表情页是**标签条下面**那几行网格（第 0 行是标签，不滚）
+        let (sheet_first, sheet_rows) = if layout.is_clipboard() {
+            (0, CLIPBOARD_CELLS)
+        } else if layout.is_emoji() {
+            (1, EMOJI_ROWS)
+        } else {
+            (0, 0)
+        };
+        let sheet_top = sheet_first as f32 * pitch;
+        let mut sheet = if sheet_rows > 0 {
+            let height = (pitch * sheet_rows as f32 - gap_y).round().max(1.0) as u32;
             Some(Canvas::new(pixels_wide, height)?)
         } else {
             None
@@ -68,19 +78,25 @@ impl Renderer {
         // 这里只让开不足一格的那点：滚动时卡片就是这么一格格挪上去的。
         // **不做除法**——「第几条起」是会话按同一套几何算的，两边各算一次会差出一格。
         let frac = if sheet.is_some() {
-            state.clipboard_offset * scale
+            if layout.is_emoji() {
+                state.emoji_offset * scale
+            } else {
+                state.clipboard_offset * scale
+            }
         } else {
             0.0
         };
         // 窗口几行画不画在小图上、命中区裁到多高——循环里要反复用，
         // 先取出来（`sheet` 待会儿会被可变借走）
         let sheet_height = sheet.as_ref().map_or(0.0, |sheet| sheet.height() as f32);
+        let sheet_bottom = sheet_top + sheet_height;
 
         let mut keys = Vec::new();
         let mut y = 0.0;
         for (index, row) in layout.rows().iter().enumerate() {
             // 窗口那几行画到小图上（顶边往上让开不足一格的那部分），其余行照旧
-            let inside = sheet_height > 0.0 && index < CLIPBOARD_CELLS;
+            let inside =
+                sheet_height > 0.0 && index >= sheet_first && index < sheet_first + sheet_rows;
             let top = if inside { y - frac } else { y };
             let target = match sheet.as_mut() {
                 Some(sheet) if inside => sheet,
@@ -116,8 +132,8 @@ impl Renderer {
                 );
                 // 滚出窗口的那部分不该还能点：命中区裁到窗口里，整个滚出去的就不报了
                 let (hit_y, hit_height) = if inside {
-                    let bottom = (top + row_height).min(sheet_height);
-                    (top.max(0.0), bottom - top.max(0.0))
+                    let bottom = (top + row_height).min(sheet_bottom);
+                    (top.max(sheet_top), bottom - top.max(sheet_top))
                 } else {
                     (top, row_height)
                 };
@@ -136,7 +152,7 @@ impl Renderer {
         }
 
         if let Some(sheet) = sheet {
-            canvas.blend_pixmap(0, 0, &sheet.into_pixmap());
+            canvas.blend_pixmap(0, sheet_top.round() as i32, &sheet.into_pixmap());
         }
 
         // 剪贴板空着时中间写一句：不写的话整块键盘上只剩底下那两个控制键，看着像坏了

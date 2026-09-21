@@ -2332,7 +2332,7 @@ fn the_clipboard_list_scrolls_under_the_finger() {
     assert_eq!(session.frame.footer, None, "剪贴板没有页码了");
 
     // 往上拖一格多一点：看后面的条目
-    let pitch = session.clipboard_pitch();
+    let pitch = session.grid_pitch();
     scroll_up(&mut session, pitch * DENSITY * 1.5);
     assert!(
         session.clipboard_scroll > 0.0,
@@ -2369,7 +2369,7 @@ fn a_long_drag_stops_at_the_end_of_the_list() {
         session.note_clipboard(&format!("第 {index} 条"));
     }
     open_clipboard(&mut session);
-    let pitch = session.clipboard_pitch();
+    let pitch = session.grid_pitch();
 
     scroll_up(&mut session, pitch * DENSITY * 5.0);
 
@@ -2455,7 +2455,7 @@ fn a_flick_keeps_the_clipboard_list_gliding() {
         session.note_clipboard(&format!("第 {index} 条"));
     }
     open_clipboard(&mut session);
-    let pitch = session.clipboard_pitch();
+    let pitch = session.grid_pitch();
 
     // 轻轻拖半格、往上甩一把（速度是像素/秒，安卓的 y 向下为正，所以往上是负数）
     flick_up(&mut session, pitch * DENSITY * 0.4, -2500.0);
@@ -2526,7 +2526,7 @@ fn a_scrolled_cell_pastes_the_entry_under_it() {
     open_clipboard(&mut session);
 
     // 往上拖一格多一点：屏幕上第一格现在是整份里的第二条
-    let pitch = session.clipboard_pitch();
+    let pitch = session.grid_pitch();
     scroll_up(&mut session, pitch * DENSITY * 1.2);
     assert_eq!(session.clipboard_first(), 1);
 
@@ -2552,7 +2552,7 @@ fn deleting_the_last_entry_pulls_the_list_back() {
         session.note_clipboard(&format!("第 {index} 条"));
     }
     open_clipboard(&mut session);
-    let pitch = session.clipboard_pitch();
+    let pitch = session.grid_pitch();
     scroll_up(&mut session, pitch * DENSITY * 1.5);
     assert!(session.clipboard_scroll > 0.0, "六条该能滚一格");
 

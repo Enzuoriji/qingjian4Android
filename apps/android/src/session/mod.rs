@@ -102,6 +102,12 @@ const EMOJI_GROUP_SLOTS: usize = 3;
 /// 一屏摆几个表情（与 `qingjian_render` 的 `EMOJI_COLS × EMOJI_ROWS` 是同一个数）。
 const EMOJI_SLOTS: usize = 15;
 
+/// 一行摆几格（与 `qingjian_render` 的 `EMOJI_COLS` 是同一个数）。
+const EMOJI_COLS: usize = 5;
+
+/// 一屏可见几行（与 `qingjian_render` 的 `EMOJI_ROWS` 是同一个数）。
+const EMOJI_ROWS: usize = 3;
+
 impl EmojiPanel {
     /// 从文件读。文件不在或读不了就是个空的——表情面板画不出来，别的照常用。
     fn open(path: &Path) -> Self {
@@ -157,10 +163,21 @@ impl EmojiPanel {
         self.names.len().div_ceil(EMOJI_GROUP_SLOTS).max(1)
     }
 
-    /// 当前这一类的字符，**这一屏要画的那几个**。
-    fn visible(&self) -> &[String] {
+    /// 当前这一类里，**从第 `first` 行起要画的那几个**。
+    ///
+    /// 一页放不下（笑脸那一类 172 个），所以要能往下滑——跟剪贴板那份列表同一个做法：
+    /// 整行的那部分在这儿切，不足一行的零头由渲染器让开。
+    fn visible(&self, first: usize) -> &[String] {
         let items = self.items.get(self.group).map_or(&[][..], Vec::as_slice);
-        &items[..items.len().min(EMOJI_SLOTS)]
+        let start = (first * EMOJI_COLS).min(items.len());
+        let end = (start + EMOJI_SLOTS).min(items.len());
+        &items[start..end]
+    }
+
+    /// 当前这一类一共几行（一行的格数是 [`EMOJI_COLS`]）。
+    fn rows(&self) -> usize {
+        let count = self.items.get(self.group).map_or(0, Vec::len);
+        count.div_ceil(EMOJI_COLS)
     }
 }
 
@@ -248,6 +265,12 @@ pub struct Session {
 
     /// 标签条翻到第几屏（一屏 [`EMOJI_GROUP_SLOTS`] 个分类）。
     emoji_group_screen: usize,
+
+    /// 表情页的格子被拉上去多少（点）。0 是第一行贴着网格区顶边。
+    ///
+    /// 与剪贴板那份列表**同一套做法**：整行由会话切（[`EmojiPanel::visible`]），
+    /// 不足一行的零头交给渲染器让开。一页 15 格，笑脸那一类 172 个，不滚看不完。
+    emoji_scroll: f32,
 
     /// 剪贴板列表甩出去之后的那一段滑行（与候选条那条带子各走各的）。
     clipboard_fling: Option<Fling>,
@@ -367,6 +390,7 @@ impl Session {
                 EmojiPanel::open(&dir.join(KAOMOJI_PANEL_FILE))
             }),
             emoji_group_screen: 0,
+            emoji_scroll: 0.0,
             clipboard: data_dir.map_or_else(Clipboard::default, |dir| {
                 Clipboard::open(dir.join(CLIPBOARD_FILE))
             }),
@@ -557,7 +581,8 @@ impl Session {
             _ => &self.emoji,
         };
         let emoji = EmojiView {
-            items: panel.visible(),
+            offset: self.emoji_offset(),
+            items: panel.visible(self.emoji_first_row()),
             labels: panel.labels(self.emoji_group_screen),
             group: panel
                 .group
@@ -599,7 +624,8 @@ impl Session {
             _ => &self.emoji,
         };
         let emoji = EmojiView {
-            items: panel.visible(),
+            offset: self.emoji_offset(),
+            items: panel.visible(self.emoji_first_row()),
             labels: panel.labels(self.emoji_group_screen),
             group: panel
                 .group
@@ -669,8 +695,12 @@ impl Session {
             Some(Fired::DeleteClipboard(index)) => self.apply(Act::DeleteClipboard(index)),
             Some(Fired::ClipboardScroll(delta)) => {
                 // 记下是这根手指在滚——抬手时靠它判该不该甩（那时 `presses` 里已经没有它了）
-                self.clipboard_scrolled = Some(pointer);
-                self.scroll_clipboard(delta)
+                if matches!(self.panel, Panel::Emoji | Panel::Kaomoji) {
+                    self.scroll_emoji(delta);
+                } else {
+                    self.clipboard_scrolled = Some(pointer);
+                    self.scroll_clipboard(delta);
+                }
             }
             None => {}
         }
@@ -1236,7 +1266,7 @@ impl Session {
 
     /// 列表顶边现在对着整份里的第几条。
     fn clipboard_first(&self) -> usize {
-        let pitch = self.clipboard_pitch();
+        let pitch = self.grid_pitch();
         if pitch <= 0.0 {
             return 0;
         }
@@ -1253,7 +1283,7 @@ impl Session {
     /// 给的是**余量**不是滚动总量：整格那部分已经在 [`Self::clipboard_first`] 里换成了
     /// 「从第几条起」，渲染器不必（也不该）再做一次除法。
     fn clipboard_offset(&self) -> f32 {
-        let pitch = self.clipboard_pitch();
+        let pitch = self.grid_pitch();
         if pitch <= 0.0 {
             return 0.0;
         }
@@ -1263,11 +1293,11 @@ impl Session {
 
     /// 剪贴板列表还能往下滚多少（点）：比一屏多出来的那几条，一条一格。
     fn clipboard_max_scroll(&self) -> f32 {
-        self.clipboard.len().saturating_sub(CLIPBOARD_CELLS) as f32 * self.clipboard_pitch()
+        self.clipboard.len().saturating_sub(CLIPBOARD_CELLS) as f32 * self.grid_pitch()
     }
 
-    /// 剪贴板列表一格多高（点）。键盘前台算的，这儿只是转一手。
-    fn clipboard_pitch(&self) -> f32 {
+    /// 键盘一行有多高（含行间那条缝）。剪贴板「一格」与表情页「一行」都是它。
+    fn grid_pitch(&self) -> f32 {
         self.keyboard
             .as_ref()
             .map_or(0.0, Keyboard::clipboard_pitch)
@@ -1293,7 +1323,8 @@ impl Session {
     ///
     /// 上屏之后**留在这一页**——发 emoji 常常一次发好几个，弹回字母页反而要重新点进来。
     fn commit_emoji(&mut self, index: usize) {
-        let Some(text) = self.emoji_panel().visible().get(index).cloned() else {
+        let first = self.emoji_first_row();
+        let Some(text) = self.emoji_panel().visible(first).get(index).cloned() else {
             return;
         };
         self.commit_text(text);
@@ -1308,6 +1339,48 @@ impl Session {
             return;
         }
         panel.group = target;
+        // 换了一类就从上头看起（不然会停在上一次滑到的位置，看着像空的）
+        self.emoji_scroll = 0.0;
+        self.mark_keyboard_dirty();
+    }
+
+    /// 表情页的格子滚到第几行起了。
+    fn emoji_first_row(&self) -> usize {
+        let pitch = self.grid_pitch();
+        if pitch <= 0.0 {
+            return 0;
+        }
+        // 与剪贴板同一个理由：浮点下 `n × pitch ÷ pitch` 可能是 n-0.00001，
+        // floor 之后就少一行，滑到底时最后一行永远差一点露不全
+        let rows = self.emoji_scroll / pitch + GRID_EPSILON;
+        rows.floor().max(0.0) as usize
+    }
+
+    /// 整行之外还让开了多少（点，0 到一行高之间）——渲染器拿它把整片格子平移。
+    fn emoji_offset(&self) -> f32 {
+        let pitch = self.grid_pitch();
+        if pitch <= 0.0 {
+            return 0.0;
+        }
+        let frac = self.emoji_scroll - self.emoji_first_row() as f32 * pitch;
+        frac.clamp(0.0, pitch)
+    }
+
+    /// 表情页还能往下滚多少（点）：比一屏多出来的那几行，一行一格。
+    fn emoji_max_scroll(&self) -> f32 {
+        let visible = EMOJI_ROWS;
+        self.emoji_panel().rows().saturating_sub(visible) as f32 * self.grid_pitch()
+    }
+
+    /// 表情页的格子跟着手指滚（`delta` 是这一拍挪了多少**像素**，往下为正）。
+    fn scroll_emoji(&mut self, delta: f32) {
+        let density = if self.density > 0.0 {
+            self.density
+        } else {
+            1.0
+        };
+        let next = self.emoji_scroll - delta / density;
+        self.emoji_scroll = next.clamp(0.0, self.emoji_max_scroll());
         self.mark_keyboard_dirty();
     }
 
