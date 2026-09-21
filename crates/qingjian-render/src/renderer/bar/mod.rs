@@ -55,26 +55,26 @@ const CELL_PADDING: f32 = 4.0;
 /// 词太长装不下时截断补的记号。
 const ELLIPSIS: &str = "…";
 
-/// 那个齿轮的边长（点）。
-const GEAR_SIZE: f32 = 17.0;
+/// 那个标（青简的键帽 + 四片竹简）画多高（点）。
+const LOGO_HEIGHT: f32 = 17.0;
 
-/// 齿轮左右各留的空白（点）——图标本身就窄，不留白手指点不准。
-const GEAR_PAD: f32 = 7.0;
+/// 标左右各留的空白（点）——图标本身就窄，不留白手指点不准。
+const LOGO_PAD: f32 = 7.0;
 
-/// 没组句时那一条该多高（点）：齿轮上下各留一点，够手指点着。
+/// 没组句时那一条该多高（点）：标上下各留一点，够手指点着。
 ///
 /// 这条细的与候选条**共用同一块地方**（2026-09-21 用户拍板）：不打字时只有它，
-/// 一打字候选条整个接管、齿轮让开——打字的竖向空间一点没被它占掉。
+/// 一打字候选条整个接管、标让开——打字的竖向空间一点没被它占掉。
 const IDLE_HEIGHT: f32 = 30.0;
 
 impl Renderer {
     /// 候选条该占多高（点）。**同一块地方，两态共用**：
     ///
-    /// - **组句当中**：拼音行 + 候选行，与以前一模一样（齿轮这时不画）
-    /// - **没组句**：只剩一条细的（[`IDLE_HEIGHT`]），里面一个齿轮
+    /// - **组句当中**：拼音行 + 候选行，与以前一模一样（标这时不画）
+    /// - **没组句**：只剩一条细的（[`IDLE_HEIGHT`]），里面一个标
     ///
     /// 「没组句就收起来」那条原则没变（空着一条白带更难受），只是这条细的换成了个有用的按钮：
-    /// 剪贴板、以后的设置都挂在这个齿轮上。代价是没打字时应用少那么一条，
+    /// 剪贴板、以后的设置都挂在这个标上。代价是没打字时应用少那么一条，
     /// 而**打字时的竖向空间一分没多**。
     pub fn bar_height(theme: &Theme, composing: bool) -> f32 {
         if composing {
@@ -90,7 +90,7 @@ impl Renderer {
     }
 
     /// 画候选条，返回位图与每块可点区域。**同一块地方两种画法**（见 [`Self::bar_height`]）：
-    /// 组句当中是拼音行 + 候选行，没组句时只有左边一个齿轮与旁边的页码。
+    /// 组句当中是拼音行 + 候选行，没组句时只有左边一个标与旁边的页码。
     ///
     /// `width` 是内容宽度（点）——安卓传屏幕宽除以密度。没有阴影：候选条上下都与屏幕边、
     /// 键盘边齐平，四边不露在外面。
@@ -150,10 +150,10 @@ impl Renderer {
         })
     }
 
-    /// 没组句时那一条：左边一个齿轮（开 / 收工具页），右边跟着页码。
+    /// 没组句时那一条：左边是**青简那个标**（开 / 收工具页），右边跟着页码。
     ///
-    /// 齿轮走 [`crate::gear::draw_gear`]——与状态条同一个图标，**画路径不画字形**
-    /// （`U+2699` 可能落进彩色 emoji 字体，也可能缺字）。命中区比图标大一圈，手指点得着。
+    /// 标走 [`crate::logo::draw_logo`]——**画路径不画字形**（那个字画不出形，见模块注释）。
+    /// 命中区比标大一圈，手指点得着。
     ///
     /// 页码是给剪贴板翻页用的（[`Frame::footer`]）：候选那一套翻页在组句时才在，
     /// 而剪贴板页恰恰是没组句的时候——页码挪到这条上来才看得见。
@@ -168,21 +168,21 @@ impl Renderer {
             top: 0.0,
             height: m.px(IDLE_HEIGHT),
         };
-        let size = m.px(GEAR_SIZE);
-        let pad = m.px(GEAR_PAD);
+        let height = m.px(LOGO_HEIGHT);
+        let pad = m.px(LOGO_PAD);
         let left = m.padding();
-        crate::gear::draw_gear(
+        let width = crate::logo::draw_logo(
             canvas,
             left + pad,
-            band.centre(size),
-            size,
+            band.centre(height),
+            height,
             m.theme.colors.index,
         );
         hits.push(BarHit {
             id: BarHitId::Tools,
             x: left,
             y: band.top,
-            width: size + pad * 2.0,
+            width: width + pad * 2.0,
             height: band.height,
         });
 
@@ -191,7 +191,7 @@ impl Renderer {
         };
         let style = m.index_style();
         let text = self.measure(footer, &style);
-        let x = left + size + pad * 3.0;
+        let x = left + width + pad * 3.0;
         self.draw_text(canvas, footer, &style, x, band.centre(text.height));
     }
 
@@ -533,9 +533,9 @@ mod tests {
         );
     }
 
-    /// **没在组句时这一条收成细细的一条**（里面就一个齿轮），不是「整个没有」。
+    /// **没在组句时这一条收成细细的一条**（里面就一个标），不是「整个没有」。
     ///
-    /// 2026-09-21 之前是收到 0；现在那条细的换成个有用的按钮（剪贴板 / 设置那个齿轮），
+    /// 2026-09-21 之前是收到 0；现在那条细的换成个有用的按钮（剪贴板 / 设置那个标），
     /// 而**一打字就被候选条整个接管**——打字的竖向空间一点没多占（见 [`Renderer::bar_height`]）。
     #[test]
     fn the_bar_shrinks_to_one_thin_strip_when_not_composing() {
@@ -543,14 +543,14 @@ mod tests {
         let idle = Renderer::bar_height(&theme, false);
         let composing = Renderer::bar_height(&theme, true);
 
-        assert!(idle > 0.0, "没组句时也该留一条细的（齿轮要地方）");
+        assert!(idle > 0.0, "没组句时也该留一条细的（标要地方）");
         assert!(
             idle < composing / 2.0,
             "那条细的该比组句时矮得多：{idle} vs {composing}"
         );
     }
 
-    /// 没组句时那一条上画的是齿轮，**不是**拼音行与候选行。
+    /// 没组句时那一条上画的是标，**不是**拼音行与候选行。
     #[test]
     fn the_idle_strip_is_just_the_gear() {
         let Some(mut renderer) = renderer() else {
@@ -572,11 +572,11 @@ mod tests {
         assert_eq!(
             out.hits.iter().map(|hit| hit.id).collect::<Vec<_>>(),
             vec![BarHitId::Tools],
-            "没组句时那块地方只有齿轮可点"
+            "没组句时那块地方只有标可点"
         );
-        // 齿轮贴在左边，命中区够手指点
+        // 标贴在左边，命中区够手指点
         let gear = button(&out, BarHitId::Tools);
-        assert!(gear.x < WIDTH, "齿轮该在左边");
+        assert!(gear.x < WIDTH, "标该在左边");
         assert!(
             gear.width >= 24.0 * SCALE,
             "命中区太窄手指点不准：{}",

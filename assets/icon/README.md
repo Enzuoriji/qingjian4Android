@@ -9,6 +9,16 @@
   ```sh
   rsvg-convert -f pdf --page-width 22pt --page-height 16pt -w 22pt -h 16pt assets/icon/menu.svg -o assets/icon/menu.pdf
   ```
+
+  同一个形**安卓那边也在用**：候选条没组句时那条细的最左边的标（点开工具页 / 剪贴板）。
+  渲染器不解析 svg，所以那条路径由 `render-logo-path.py` 转成 Rust 代码：
+
+  ```sh
+  python assets/icon/render-logo-path.py
+  ```
+
+  写出 `crates/qingjian-render/src/logo/path.rs`（**生成物随仓库提交**），画法在 `logo/mod.rs`。
+  改了这个 svg，这两处都要重跑。
 - `windows/mode-zh.svg` / `mode-en.svg` / `mode-caps.svg`：Windows 任务栏的中 / 英 / A 图标源文件（16×16 画布，单色）。
   `windows/render-mode-icons.sh` 用 rsvg-convert + magick 栅格化成 16 / 20 / 24 / 32 四档的 8 位 alpha 蒙版，
   写到 `apps/windows/tsf/resources/mode/`，DLL 用 `include_bytes!` 嵌入、运行时按任务栏深浅色填色（`com/mode/icon.rs`）。

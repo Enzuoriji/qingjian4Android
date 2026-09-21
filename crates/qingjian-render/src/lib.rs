@@ -15,6 +15,7 @@ mod frame;
 mod gear;
 mod keyboard;
 mod layout;
+mod logo;
 mod renderer;
 mod shadow;
 mod text;

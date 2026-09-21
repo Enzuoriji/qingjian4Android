@@ -220,7 +220,14 @@ struct Press {
     clearing: bool,
 
     /// 这根手指在剪贴板一条记录上往左滑过，这一下要删掉它（松手才删）。
+    ///
+    /// 与 [`Self::clearing`] 一样是**实时**判定：滑回原位就变回 `false`（反悔）。
     deleting: bool,
+
+    /// 这根手指**起过手势**（上滑清空 / 左滑删除的阈值碰过），即使后来滑回来了也一直记着。
+    ///
+    /// 用处只有一个：松手时**别再当成「点了一下」**——反悔之后抬手该什么也不做。
+    gestured: bool,
 
     /// 这一下已经连发过了。
     ///
@@ -442,6 +449,7 @@ impl Keyboard {
                     cursor_carry: 0.0,
                     clearing: false,
                     deleting: false,
+                    gestured: false,
                     repeated: false,
                 });
                 self.refresh_pressed();
@@ -471,15 +479,21 @@ impl Keyboard {
                     // ⌫ 上**往上滑** = 要清掉光标前面整段（**松手才清**，滑上去只是「预备」）。
                     // 挑往上而不是往左：往左是「退格」本来的方向，容易跟普通退格混；
                     // 往上是个独立的动作，不会误触。
-                    if press.key == Some(KeyId::Backspace) && dy <= -clear_swipe {
-                        press.clearing = true;
+                    //
+                    // **滑回原位就取消**：这个判定每一下都重算，不是「滑过一次就定死」——
+                    // 滑错了要能反悔（气泡也跟着改回来）。
+                    if press.key == Some(KeyId::Backspace) {
+                        press.clearing = dy <= -clear_swipe;
                     }
-                    // 剪贴板那几格**往左滑** = 要删这条（也是松手才兑现）。
+                    // 剪贴板那几格**往左滑** = 要删这条（同样松手才兑现、**拖回原位就取消**）。
                     // 往左是「不要了」的方向，跟候选条上「往左看后面的候选」不冲突——那儿是另一块地方。
-                    if matches!(press.key, Some(KeyId::Clipboard(_)))
-                        && x - press.at.0 <= -DELETE_SWIPE * self.metrics.density
-                    {
-                        press.deleting = true;
+                    if matches!(press.key, Some(KeyId::Clipboard(_))) {
+                        press.deleting = x - press.at.0 <= -DELETE_SWIPE * self.metrics.density;
+                    }
+                    // 手势**开过**就一直记着（哪怕又滑回来了）：这样松手不会当成「点了一下」——
+                    // 反悔之后抬手该什么也不做，不该顺手把这条粘出去
+                    if press.clearing || press.deleting {
+                        press.gestured = true;
                     }
                     // 空格上横着滑 = 移光标。**拖动当中就走**，不是等松手才算——
                     // 松手才走的话手指得先盲拖一段、再抬起来看结果，没法一边看一边调。
@@ -500,13 +514,12 @@ impl Keyboard {
                     // **已经认成手势的那几根一律不取消**，哪怕手指滑出了键：
                     // - 选一个（`choosing`）：上面那条已经 `return` 了，这里只是再保一道
                     // - 移光标（`cursor_started`）：空格键宽，划着划着就出去了，那不是「这一下不要了」
-                    // - ⌫ 上滑清空（`clearing`）：**这条是补的**——往上一滑手指就出了 ⌫，
+                    // - ⌫ 上滑清空 / 剪贴板左滑删除（`gestured`）：**这条是补的**——往上一滑手指就出了 ⌫，
                     //   原先这里没排掉它，于是 `sliding` 一置上，`refresh_pressed` 就不认这根手指了，
                     //   气泡当场消失——用户正是靠气泡上那句「松手清空」才知道自己在干什么
                     if !press.choosing
                         && !press.cursor_started
-                        && !press.clearing
-                        && !press.deleting
+                        && !press.gestured
                         && (press.key.is_none() || hit != press.key)
                     {
                         press.sliding = true;
@@ -548,6 +561,11 @@ impl Keyboard {
                         return None;
                     };
                     return Some(Fired::DeleteClipboard(index));
+                }
+                // 手势开过又滑回来了（反悔）：这一下什么也不做——别当成「点了一下」
+                // （在剪贴板那格上，点一下是**粘出去**，反悔的人不会想粘）
+                if ended.gestured {
+                    return None;
                 }
                 // 抬起时只要还在那个键上、或者只挪了触摸阈值那么点距离，都算这一下按着了
                 match ended.key {
@@ -711,8 +729,11 @@ impl Keyboard {
     /// 两根手指交替时它会被后按下的那根挤掉。
     ///
     /// **手势一开就不算「按住」**：滑动取角标、空格移光标、退格上滑清空，这三样都是从
-    /// 「按住这个键」岔出去的路。不排掉的话，滑得慢一点（超过连发门槛 400ms）
+    /// 「按住这个键」岔出去的路。不排掉的话，滑得慢一点（超过连发门槛 300ms）
     /// 就会一边做手势一边被连发删——实测踩到过。
+    ///
+    /// 看的是 `gestured`（起过手势就一直算），不是 `clearing` 那个实时值——
+    /// 否则手指滑回来时又变回「按住」，连发会在半路接上。
     pub fn held(&self, pointer: i32) -> Option<KeyId> {
         self.presses
             .iter()
@@ -721,7 +742,7 @@ impl Keyboard {
                     && !press.sliding
                     && !press.choosing
                     && !press.cursor_started
-                    && !press.clearing
+                    && !press.gestured
             })
             .and_then(|press| press.key)
     }
@@ -746,7 +767,7 @@ impl Keyboard {
         let Some(KeyId::Letter(_)) = press.key else {
             return false;
         };
-        if press.hint.is_none() || press.sliding || press.cursor_started || press.clearing {
+        if press.hint.is_none() || press.sliding || press.cursor_started || press.gestured {
             return false;
         }
         press.choosing = true;

@@ -2197,6 +2197,54 @@ fn a_tap_on_an_entry_does_not_delete_it() {
     assert_eq!(session.take_commit().as_deref(), Some("点一下"));
 }
 
+/// 往左滑过一半**又拖回原位**再松手：不算删——滑错了要能反悔。
+///
+/// 反悔之后也不该当成「点了一下」——在剪贴板那格上点一下是**粘出去**，
+/// 后悔的人不会想粘，所以这一下什么也不该发生。
+#[test]
+fn swiping_back_cancels_the_delete() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("别删我");
+    open_clipboard(&mut session);
+
+    let (x, y) = key_centre(&session, KeyId::Clipboard(0));
+    let far = 16.0 * DENSITY + 20.0;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - far, y);
+    // 拖回按下那一点（手指没离开这格）
+    session.touch(MotionAction::Move, POINTER, x, y);
+    session.touch(MotionAction::Up, POINTER, x, y);
+    session.keyboard_surface();
+
+    assert_eq!(session.clipboard, ["别删我"], "拖回来了就不该删");
+    assert_eq!(session.take_commit(), None, "反悔之后也不该顺手粘出去");
+    assert_eq!(session.panel, Panel::Clipboard, "还留在这页");
+}
+
+/// ⌫ 上往上滑过又滑回去、松手：不清——与剪贴板那条一样能反悔。
+#[test]
+fn sliding_back_cancels_the_clear() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Backspace);
+    let up = crate::keyboard::SWIPE * DENSITY * 1.5;
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x, y - up);
+    session.touch(MotionAction::Move, POINTER, x, y);
+    session.touch(MotionAction::Up, POINTER, x, y);
+
+    assert_eq!(
+        session.take_commands(),
+        Vec::<i32>::new(),
+        "滑回来了就不该清，也不该退格"
+    );
+}
+
 /// 「清空」把整份历史清掉。
 #[test]
 fn the_clear_key_empties_the_clipboard() {

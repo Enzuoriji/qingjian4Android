@@ -259,7 +259,7 @@ fn label(key: &Key, state: &KeyboardState) -> String {
             Panel::Letters => "返回".to_owned(),
             Panel::Digits => "123".to_owned(),
             Panel::Symbols => "符".to_owned(),
-            // 工具页是齿轮开的，页里没有再回工具页的键
+            // 工具页是标开的，页里没有再回工具页的键
             Panel::Tools | Panel::Clipboard => String::new(),
         },
     }
