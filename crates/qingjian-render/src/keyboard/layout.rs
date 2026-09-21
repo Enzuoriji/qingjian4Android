@@ -10,17 +10,26 @@ use super::panel::Panel;
 /// 单位宽取最挤的那一行，所以各页的行宽一致、格子边缘对得齐。
 const ROW_UNITS: f32 = 5.0;
 
-/// 剪贴板一屏几条：**一条一行**，五行记录 + 第六行控制。
+/// 剪贴板**记录区一屏摆几条**：一条一行，五行记录 + 第六行控制。
 ///
 /// 2026-09-21 从「三行两格、一屏六条」改成这个（用户要「仿搜狗」）：两列时一条只摊到
 /// 半屏宽，十来个字就被截了，而剪贴板里多的是长句和网址——一行一条、占满整宽才认得出。
-/// 代价是一屏少一条，翻页顶上。
+///
+/// **这是视口的行数，不是一屏的上限**：条目多了不用翻页，往下拉（`clipboard_scroll`）。
 pub const CLIPBOARD_CELLS: usize = 5;
 
-/// 工具页上那几行的名字，顺序就是 [`KeyboardLayout::tools`] 的行序。
+/// 工具页上那几格的名字，顺序就是 [`KeyboardLayout::tools`] 的格子顺序。
 ///
-/// 现在只有剪贴板；「震动程度」「设置」这些以后往下排（页里留了空行）。
+/// 现在只有剪贴板；「震动程度」「设置」这些以后往下排（页里留了空格子）。
 pub const TOOLS: [&str; 1] = ["剪贴板"];
+
+/// 工具页一行摆几个图标格子。一排 5 个，与别的页同一个单位宽。
+const TOOLS_PER_ROW: usize = 5;
+
+/// 工具页给工具留几格（三行，第四行留给「返回」）。
+///
+/// 留这么多是照搜狗那个面板的密度——它也是一屏十几个图标位，常用的那几个排在前面。
+const TOOL_SLOTS: usize = TOOLS_PER_ROW * 3;
 
 /// 一行按键，一个字符一个键——字母页与数字 / 符号页的一半都是这么来的。
 fn literals(chars: &str) -> KeyRow {
@@ -205,28 +214,36 @@ impl KeyboardLayout {
         }
     }
 
-    /// 工具页：一页一个工具，**整行宽**（一行 5 个单位，与数字 / 符号页同一个单位宽）。
+    /// 工具页：**一排排的图标格子**（每格 1 个单位宽，一行 5 个），最后一整行是「返回」。
     ///
-    /// 空行是留着以后排工具的（震动、设置那些），没有键就不画。
+    /// 照搜狗那个工具面板排的（2026-09-21 用户要「入口和搜狗一致」）：面板上是**一格一个
+    /// 图标、图标下面写名字**，不是我们原先那种「一整行一个文字键」。
+    /// 空格子（还没排工具的那些）不画，见 [`TOOLS`]。
     pub fn tools() -> Self {
-        Self {
-            rows: vec![
-                KeyRow {
-                    keys: vec![Key::new(KeyId::Tool(0), ROW_UNITS)],
-                },
-                KeyRow { keys: Vec::new() },
-                KeyRow { keys: Vec::new() },
-                KeyRow {
-                    keys: vec![Key::new(KeyId::Panel(Panel::Letters), ROW_UNITS)],
-                },
-            ],
-        }
+        let mut rows: Vec<KeyRow> = (0..TOOL_SLOTS / TOOLS_PER_ROW)
+            .map(|row| KeyRow {
+                keys: (0..TOOLS_PER_ROW)
+                    .map(|col| Key::new(KeyId::Tool(row * TOOLS_PER_ROW + col), 1.0))
+                    .collect(),
+            })
+            .collect();
+        // 「返回」撑满整行：这一行只有它一个键，按单位宽算的话两头会各缩进去一截
+        // （单位宽是照上面那几行 5 个格子的排法定死的）。别的页那个「返回」是五格之一，
+        // 不这样——那是**页里的一格**，不是整行。
+        rows.push(KeyRow {
+            keys: vec![Key::fill(KeyId::Panel(Panel::Letters))],
+        });
+        Self { rows }
     }
 
     /// 剪贴板页：**一条记录占一整行**，最后一行是控制。
     ///
     /// 记录格与别的页一样是 5 个单位一行（铺满整宽、左右边对得齐），
-    /// 控制行四个 1 个单位的键窄一点居中。
+    /// 控制行两个 1 个单位的键窄一点居中。
+    ///
+    /// **记录区是能上下滚的**（2026-09-21 用户要「向下滑动选择」）：下面这几行只是**视口**，
+    /// 一屏摆得下几条就写几个格子；条目多了靠 `KeyboardState::clipboard_scroll` 往下拉，
+    /// 不再是「一屏几条 + 翻页按钮」。
     pub fn clipboard() -> Self {
         let mut rows: Vec<KeyRow> = (0..CLIPBOARD_CELLS)
             .map(|index| KeyRow {
@@ -236,8 +253,6 @@ impl KeyboardLayout {
         rows.push(KeyRow {
             keys: vec![
                 Key::new(KeyId::Panel(Panel::Letters), 1.0),
-                Key::new(KeyId::ClipboardPage(-1), 1.0),
-                Key::new(KeyId::ClipboardPage(1), 1.0),
                 Key::new(KeyId::ClipboardClear, 1.0),
             ],
         });
@@ -271,6 +286,15 @@ impl KeyboardLayout {
         &self.rows
     }
 
+    /// 一页的行高（点）：键盘总高去掉行间那几条缝，按行数均分。
+    ///
+    /// 渲染（`render_keyboard`）与安卓那边算「剪贴板一格多高」都用这个——
+    /// 公式只写一遍，两边不会走样（`height` 与 `gap` 用同一套单位，点或像素都行）。
+    pub fn row_height(&self, height: f32, gap: f32) -> f32 {
+        let rows = self.rows().len().max(1) as f32;
+        (height - gap * (rows - 1.0)) / rows
+    }
+
     /// 在 `width` 点宽里，一个标准单位占多宽。
     ///
     /// 取**最挤的那一行**来算：任何一行的总宽都不会超过 `width`，其余行居中摆放。
@@ -295,7 +319,7 @@ impl KeyboardLayout {
 
 #[cfg(test)]
 mod tests {
-    use super::{CLIPBOARD_CELLS, Key, KeyId, KeyWidth, KeyboardLayout, Panel};
+    use super::{CLIPBOARD_CELLS, Key, KeyId, KeyWidth, KeyboardLayout, Panel, TOOLS_PER_ROW};
 
     /// 剪贴板页：**一条记录一行**、每行铺满整宽，控制行四个键窄一点居中。
     ///
@@ -322,10 +346,14 @@ mod tests {
         }
 
         let control = layout.rows().last().expect("该有控制行");
-        assert_eq!(control.keys.len(), 4, "返回 / 上一屏 / 下一屏 / 清空");
+        assert_eq!(
+            control.keys.len(),
+            2,
+            "返回 / 清空——翻页那两个 2026-09-21 撤了"
+        );
         let control_width = KeyboardLayout::row_width(control, unit, gap);
         assert!(
-            (width * 0.7..width).contains(&control_width),
+            (width * 0.3..width * 0.6).contains(&control_width),
             "控制行该窄一点、居中，实际 {control_width}"
         );
     }
@@ -338,24 +366,23 @@ mod tests {
         }
     }
 
-    /// 工具页：每一行整宽（一行 5 个单位，与数字 / 符号页同一个单位宽）。
+    /// 工具页：三行图标格子（一行 5 格，与数字 / 符号页同一个单位宽）+ 一整行「返回」。
     #[test]
-    fn the_tools_page_rows_fill_the_width() {
+    fn the_tools_page_is_rows_of_icon_cells() {
         let layout = KeyboardLayout::tools();
         let (width, gap) = (360.0, 8.0);
         let unit = layout.unit_width(width, gap);
 
-        assert_eq!(
-            layout.rows().len(),
-            4,
-            "跟别的页一样四行，空行留着以后排工具"
-        );
-        for row in layout.rows().iter().filter(|row| !row.keys.is_empty()) {
+        assert_eq!(layout.rows().len(), 4, "跟别的页一样四行");
+        for row in &layout.rows()[..3] {
+            assert_eq!(row.keys.len(), TOOLS_PER_ROW, "图标格子一行 5 个");
             assert!(
                 (KeyboardLayout::row_width(row, unit, gap) - width).abs() < 0.01,
-                "工具页每行都该铺满整宽"
+                "这几行该铺满整宽"
             );
         }
+        let back = layout.rows().last().expect("该有返回那一行");
+        assert!(back.has_fill(), "「返回」撑满整行——这一行就它一个键");
     }
 
     #[test]

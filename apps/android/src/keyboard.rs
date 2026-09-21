@@ -65,6 +65,12 @@ const DELETE_SWIPE: f32 = 16.0;
 /// 那条记录上往左滑过之后，气泡改口说什么。
 const DELETE_HINT: &str = "松手删除";
 
+/// 剪贴板记录区**上下滑**这么多点（纵向占优时）就算「在滚列表」。
+///
+/// 比 [`DELETE_SWIPE`] 还小：滚动是**跟手**的，手指一动就该动，等滑够十几点才有反应
+/// 会很黏。两个手势按**方向**分（纵向占优滚、横向往左删），所以阈值小也不会互相误触。
+const SCROLL_SLOP: f32 = 8.0;
+
 /// 长按字母键弹的那排选项：**三格 —— 大写 / 符号 / 小写**，默认停在中间那个（符号）。
 ///
 /// 2026-09-21 定的，取代原先「在键上往下滑 22 点取角标」。换掉的理由是那个手势**治不好**：
@@ -123,7 +129,7 @@ impl Chooser {
 ///
 /// 大多数时候是「按了某个键」，但空格键上横着滑是**移光标**——那不是某个键，
 /// 翻成动作也就不是 [`crate::action::on_key`] 那条路，得分开报。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Fired {
     /// 按了某个键。
     Key(KeyId),
@@ -138,6 +144,11 @@ pub enum Fired {
 
     /// 删掉剪贴板里第几条（**整份里的下标**）。在一条记录上往左滑、松手时兑现。
     DeleteClipboard(usize),
+
+    /// 剪贴板列表滚一下：手指这一拍上下挪了多少像素（往下为正）。
+    ///
+    /// 与空格移光标一样是**连续**的——拖动当中每一拍都要走，不是等松手才结算。
+    ClipboardScroll(f32),
 }
 
 /// 尺寸与外观。壳在 `Session::configure` 时给一份。
@@ -224,6 +235,15 @@ struct Press {
     /// 与 [`Self::clearing`] 一样是**实时**判定：滑回原位就变回 `false`（反悔）。
     deleting: bool,
 
+    /// 这根手指在剪贴板记录区**上下滑、滚列表**。
+    ///
+    /// 与 [`Self::deleting`] 互斥，按**方向**分：纵向位移占优的算滚（跟手走），
+    /// 横向往左的算删。认了滚之后这一下就一直是滚了，不会再变回删。
+    scrolling: bool,
+
+    /// 上一拍手指在哪儿（纵向像素）。滚动是**增量**的（这一拍走多少），得记住上一下。
+    last_y: f32,
+
     /// 这根手指**起过手势**（上滑清空 / 左滑删除的阈值碰过），即使后来滑回来了也一直记着。
     ///
     /// 用处只有一个：松手时**别再当成「点了一下」**——反悔之后抬手该什么也不做。
@@ -263,6 +283,9 @@ pub struct Keyboard {
 
     /// 正按着的那根手指在剪贴板一条记录上往左滑过（气泡要说「松手删除」）。
     pressed_deleting: bool,
+
+    /// 正按着的那根手指在剪贴板记录区上下滚（这一下不弹气泡——气泡正挡着要看的那份列表）。
+    pressed_scrolling: bool,
 
     /// 那一根手指**长按开着那排选项**：气泡要画那一排，还得知道选中第几个。
     ///
@@ -305,6 +328,7 @@ impl Keyboard {
             pressed: None,
             pressed_clearing: false,
             pressed_deleting: false,
+            pressed_scrolling: false,
             pressed_choice: None,
             popup: None,
             popup_for: None,
@@ -348,6 +372,16 @@ impl Keyboard {
         self.theme().height
     }
 
+    /// 剪贴板列表一格多高（点）：行高 + 行间那条缝。
+    ///
+    /// 与渲染器同一套算法（[`KeyboardLayout::row_height`]）——「滚到第几条起、还能滚多远」
+    /// 都按它算，而键盘几何只有这儿知道。**渲染器那边不必再算一遍**：会话把这一屏该画的
+    /// 那几条切好了喂过去，渲染器只负责让开不足一格的那点。
+    pub fn clipboard_pitch(&self) -> f32 {
+        let gap = self.theme().gap_y;
+        KeyboardLayout::clipboard().row_height(self.height(), gap) + gap
+    }
+
     /// 标脏，下次 `surface` 重画。Shift 与中 / 英切换改的是键帽长相，由 `Session` 叫它。
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
@@ -384,7 +418,7 @@ impl Keyboard {
         shift: ShiftState,
         mode: InputMode,
         clipboard: &[String],
-        clipboard_page: usize,
+        clipboard_offset: f32,
     ) -> Vec<u8> {
         if self.metrics.width <= 0.0 {
             return Vec::new();
@@ -396,7 +430,7 @@ impl Keyboard {
                 mode,
                 pressed: self.pressed,
                 clipboard,
-                clipboard_page,
+                clipboard_offset,
             };
             let rendered = renderer.and_then(|renderer| {
                 renderer
@@ -449,6 +483,8 @@ impl Keyboard {
                     cursor_carry: 0.0,
                     clearing: false,
                     deleting: false,
+                    scrolling: false,
+                    last_y: y,
                     gestured: false,
                     repeated: false,
                 });
@@ -485,14 +521,29 @@ impl Keyboard {
                     if press.key == Some(KeyId::Backspace) {
                         press.clearing = dy <= -clear_swipe;
                     }
-                    // 剪贴板那几格**往左滑** = 要删这条（同样松手才兑现、**拖回原位就取消**）。
+                    // 剪贴板记录区上两个手势，按**方向**分（同一块地方，先认出来的算数）：
+                    // - **上下滑 = 滚列表**（跟手，每拍都要走）
+                    // - **往左滑 = 要删这条**（松手才兑现、拖回原位就取消）
                     // 往左是「不要了」的方向，跟候选条上「往左看后面的候选」不冲突——那儿是另一块地方。
                     if matches!(press.key, Some(KeyId::Clipboard(_))) {
-                        press.deleting = x - press.at.0 <= -DELETE_SWIPE * self.metrics.density;
+                        let dx = x - press.at.0;
+                        let dy = y - press.at.1;
+                        let slop = SCROLL_SLOP * self.metrics.density;
+                        if press.scrolling || (dy.abs() >= slop && dy.abs() > dx.abs()) {
+                            press.scrolling = true;
+                            press.gestured = true;
+                            let step = y - press.last_y;
+                            press.last_y = y;
+                            if step != 0.0 {
+                                return Some(Fired::ClipboardScroll(step));
+                            }
+                        } else {
+                            press.deleting = dx <= -DELETE_SWIPE * self.metrics.density;
+                        }
                     }
                     // 手势**开过**就一直记着（哪怕又滑回来了）：这样松手不会当成「点了一下」——
                     // 反悔之后抬手该什么也不做，不该顺手把这条粘出去
-                    if press.clearing || press.deleting {
+                    if press.clearing || press.deleting || press.scrolling {
                         press.gestured = true;
                     }
                     // 空格上横着滑 = 移光标。**拖动当中就走**，不是等松手才算——
@@ -608,7 +659,7 @@ impl Keyboard {
         shift: ShiftState,
         mode: InputMode,
         clipboard: &[String],
-        clipboard_page: usize,
+        clipboard_offset: f32,
     ) -> Vec<u8> {
         let Some((key, rect)) = self.pressed_key() else {
             self.forget_popup();
@@ -616,6 +667,11 @@ impl Keyboard {
         };
         // 空格没有字可显示，弹一个空框子只是晃眼
         if key.id == KeyId::Space {
+            self.forget_popup();
+            return Vec::new();
+        }
+        // 正滚着那份列表：气泡就压在要看的东西上，收起来
+        if self.pressed_scrolling {
             self.forget_popup();
             return Vec::new();
         }
@@ -659,7 +715,7 @@ impl Keyboard {
                 mode,
                 pressed: self.pressed,
                 clipboard,
-                clipboard_page,
+                clipboard_offset,
             };
             let density = self.metrics.density;
             let rendered = renderer.and_then(|renderer| {
@@ -844,6 +900,7 @@ impl Keyboard {
         let key = held.and_then(|press| press.key);
         let clearing = held.is_some_and(|press| press.clearing);
         let deleting = held.is_some_and(|press| press.deleting);
+        let scrolling = held.is_some_and(|press| press.scrolling);
         // 长按开着那排选项的那一根：气泡要画那一排，还得知道选中第几个
         let choice = held
             .filter(|press| press.choosing)
@@ -852,11 +909,13 @@ impl Keyboard {
             || self.pressed_choice != choice
             || self.pressed_clearing != clearing
             || self.pressed_deleting != deleting
+            || self.pressed_scrolling != scrolling
         {
             self.pressed = key;
             self.pressed_choice = choice;
             self.pressed_clearing = clearing;
             self.pressed_deleting = deleting;
+            self.pressed_scrolling = scrolling;
             self.dirty = true;
         }
     }

@@ -8,7 +8,7 @@ use super::flags;
 use crate::action::{Act, Command};
 use crate::touch::MotionAction;
 use qingjian_core::CandidateKind;
-use qingjian_render::{BarHitId, KeyId, Panel};
+use qingjian_render::{BarHitId, CLIPBOARD_CELLS, KeyId, Panel};
 use std::path::PathBuf;
 
 /// 单指测试用的 pointer id。多点触控的用例自己给别的编号。
@@ -50,6 +50,32 @@ fn key_centre(session: &Session, id: KeyId) -> (f32, f32) {
 fn open_clipboard(session: &mut Session) {
     tap_bar(session, BarHitId::Tools);
     tap_key(session, KeyId::Tool(0));
+}
+
+/// 在剪贴板记录区拖一段再松手（一次完整的滚动）。`dy` 正数往下。
+///
+/// 滚动是**跟手**的，所以是一段段 Move（每段都按同一套阈值判方向），不是一步到位。
+fn swipe_vertically(session: &mut Session, dy: f32) {
+    let (x, y) = key_centre(session, KeyId::Clipboard(0));
+    session.touch(MotionAction::Down, POINTER, x, y);
+    let step = 10.0 * DENSITY;
+    let mut moved = 0.0;
+    while moved < dy.abs() {
+        moved = (moved + step).min(dy.abs());
+        session.touch(MotionAction::Move, POINTER, x, y + moved * dy.signum());
+    }
+    session.touch(MotionAction::Up, POINTER, x, y + moved * dy.signum());
+    session.keyboard_surface();
+}
+
+/// 往上拖：看后面的条目。
+fn scroll_up(session: &mut Session, distance: f32) {
+    swipe_vertically(session, -distance);
+}
+
+/// 往下拖：往回看最新的那几条。
+fn scroll_down(session: &mut Session, distance: f32) {
+    swipe_vertically(session, distance);
 }
 
 /// 在一格上**往左滑**（过阈值）再松手。
@@ -2262,9 +2288,10 @@ fn the_clear_key_empties_the_clipboard() {
     assert_eq!(session.take_commit(), None, "清空不上屏任何东西");
 }
 
-/// 一屏 6 条，多出来的翻页看；翻到头就停住。
+/// 剪贴板列表**上下跟手滚**（2026-09-21 取代了原先的 `‹ ›` 翻页）：
+/// 往上拖看后面的条目，拖到头就停住、也滚不动了。
 #[test]
-fn the_clipboard_pages_through_the_entries() {
+fn the_clipboard_list_scrolls_under_the_finger() {
     let Some(mut session) = ready() else {
         return;
     };
@@ -2273,68 +2300,104 @@ fn the_clipboard_pages_through_the_entries() {
     }
     open_clipboard(&mut session);
 
-    assert_eq!(session.clipboard_page, 0, "进来从头看起");
-    assert_eq!(
-        session.frame.footer.as_deref(),
-        Some("1/2"),
-        "两屏就该报页码：{:?}",
-        session.frame.footer
+    assert_eq!(session.clipboard_scroll, 0.0, "进来从头看起");
+    assert_eq!(session.clipboard_first(), 0);
+    assert_eq!(session.frame.footer, None, "剪贴板没有页码了");
+
+    // 往上拖一格多一点：看后面的条目
+    let pitch = session.clipboard_pitch();
+    scroll_up(&mut session, pitch * DENSITY * 1.5);
+    assert!(
+        session.clipboard_scroll > 0.0,
+        "往上拖该把列表滚上去，实际 {}",
+        session.clipboard_scroll
     );
+    assert_eq!(session.clipboard_first(), 1, "滚过一整格就该从第二条起");
 
-    tap_key(&mut session, KeyId::ClipboardPage(1));
-    assert_eq!(session.clipboard_page, 1);
-    assert_eq!(session.frame.footer.as_deref(), Some("2/2"));
-
-    tap_key(&mut session, KeyId::ClipboardPage(1));
-    assert_eq!(session.clipboard_page, 1, "到底了再往后翻该不动");
-
-    tap_key(&mut session, KeyId::ClipboardPage(-1));
-    assert_eq!(session.clipboard_page, 0);
-    tap_key(&mut session, KeyId::ClipboardPage(-1));
-    assert_eq!(session.clipboard_page, 0, "第一屏再往前翻该不动");
-}
-
-/// 第二屏点的是**本屏第一条**（整份里第 6 个），不是整份第一条。
-#[test]
-fn the_second_page_pastes_the_right_entry() {
-    let Some(mut session) = ready() else {
-        return;
-    };
-    for index in 0..8 {
-        session.note_clipboard(&format!("第 {index} 条"));
+    // 一直往上拖：停在「还能滚多远」那儿，不会滚出空白
+    for _ in 0..10 {
+        scroll_up(&mut session, pitch * DENSITY * 3.0);
     }
-    open_clipboard(&mut session);
-
-    tap_key(&mut session, KeyId::ClipboardPage(1));
-    tap_key(&mut session, KeyId::Clipboard(0));
-
-    // 最新在最前，整份是 [第7, 第6, 第5, 第4, 第3, 第2, 第1, 第0]，一屏五条：
-    // 第二屏第一格 = 整份第 6 个（从 0 数）= 「第 2 条」
-    assert_eq!(
-        session.take_commit().as_deref(),
-        Some("第 2 条"),
-        "第二屏第一格该是整份第 6 个，不是第一个"
+    let max = (8 - CLIPBOARD_CELLS) as f32 * pitch;
+    assert!(
+        (session.clipboard_scroll - max).abs() < 0.01,
+        "拖到底该停在 {max}，实际 {}",
+        session.clipboard_scroll
     );
+
+    // 再往下拖回去：回到最新的那几条
+    for _ in 0..10 {
+        scroll_down(&mut session, pitch * DENSITY * 3.0);
+    }
+    assert_eq!(session.clipboard_scroll, 0.0, "往下拖到头就是最新那条贴顶");
 }
 
-/// 删到不够一屏时页码要收回来，不能停在一个空屏上。
+/// 拖得再远也滚不出列表末尾：多出来几格就只滚几格。
 #[test]
-fn deleting_the_last_page_falls_back_a_page() {
+fn a_long_drag_stops_at_the_end_of_the_list() {
     let Some(mut session) = ready() else {
         return;
     };
-    // 六条：正好一屏五条 + 第二屏一条
     for index in 0..6 {
         session.note_clipboard(&format!("第 {index} 条"));
     }
     open_clipboard(&mut session);
-    tap_key(&mut session, KeyId::ClipboardPage(1));
-    assert_eq!(session.clipboard_page, 1, "六条该有第二屏");
+    let pitch = session.clipboard_pitch();
 
-    // 第二屏只有一条，删掉它就只剩一屏了
+    scroll_up(&mut session, pitch * DENSITY * 5.0);
+
+    assert_eq!(
+        session.clipboard_scroll, pitch,
+        "六条比一屏多一条，只该滚一格"
+    );
+    assert_eq!(session.clipboard_first(), 1, "滚一格就该从第二条起");
+}
+
+/// 滚下去之后**点的是屏幕上那一格对着的那条**，不是整份第一条。
+#[test]
+fn a_scrolled_cell_pastes_the_entry_under_it() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    for index in 0..8 {
+        session.note_clipboard(&format!("第 {index} 条"));
+    }
+    open_clipboard(&mut session);
+
+    // 往上拖一格多一点：屏幕上第一格现在是整份里的第二条
+    let pitch = session.clipboard_pitch();
+    scroll_up(&mut session, pitch * DENSITY * 1.2);
+    assert_eq!(session.clipboard_first(), 1);
+
+    tap_key(&mut session, KeyId::Clipboard(0));
+
+    // 最新在最前，整份是 [第7, 第6, 第5, 第4, 第3, 第2, 第1, 第0]：
+    // 滚过一格之后屏幕上第一格 = 整份第 1 个（从 0 数）= 「第 6 条」
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("第 6 条"),
+        "滚过一格之后点的该是整份第 1 个，不是第一个"
+    );
+}
+
+/// 删到不够一屏时滚动量要夹回来，不能停在一段空白上。
+#[test]
+fn deleting_the_last_entry_pulls_the_list_back() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    // 六条：正好一屏五条 + 多出来一条，能往下滚一格
+    for index in 0..6 {
+        session.note_clipboard(&format!("第 {index} 条"));
+    }
+    open_clipboard(&mut session);
+    let pitch = session.clipboard_pitch();
+    scroll_up(&mut session, pitch * DENSITY * 1.5);
+    assert!(session.clipboard_scroll > 0.0, "六条该能滚一格");
+
+    // 滚到底时屏幕上第一条就是最后那条，删掉它就没得滚了
     swipe_left(&mut session, KeyId::Clipboard(0));
 
     assert_eq!(session.clipboard.len(), 5);
-    assert_eq!(session.clipboard_page, 0, "只剩一屏了，页码该收回来");
-    assert_eq!(session.frame.footer, None, "一屏就没有页码");
+    assert_eq!(session.clipboard_scroll, 0.0, "只剩一屏，滚动量该夹回来");
 }

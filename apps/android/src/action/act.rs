@@ -52,7 +52,4 @@ pub enum Act {
 
     /// 清空整份剪贴板历史。
     ClearClipboard,
-
-    /// 剪贴板翻页，正数往后。
-    ClipboardPage(isize),
 }

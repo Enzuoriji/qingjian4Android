@@ -48,14 +48,13 @@ pub enum KeyId {
     /// 工具页上的一格（`TOOLS` 里第几个）。现在只有「剪贴板」，以后排设置。
     Tool(usize),
 
-    /// 剪贴板页上的**本屏**第几格（从 0 起）。文本从 [`KeyboardState`] 里取，
-    /// 越界（这一屏没那么多条）时那格不画。
+    /// 剪贴板页上的**视口**第几格（从 0 起，不是整份里的第几条——那份偏移在
+    /// [`KeyboardState::clipboard_scroll`] 里）。文本从 [`KeyboardState`] 里取，
+    /// 滚到头、这一格没内容时那格不画。
     ///
     /// [`KeyboardState`]: super::KeyboardState
+    /// [`KeyboardState::clipboard_scroll`]: super::KeyboardState::clipboard_scroll
     Clipboard(usize),
-
-    /// 剪贴板翻页：`-1` 上一屏、`1` 下一屏。
-    ClipboardPage(isize),
 
     /// 清空整份剪贴板历史。
     ClipboardClear,
@@ -158,7 +157,6 @@ impl Key {
             | KeyId::Comma
             | KeyId::Period
             | KeyId::Panel(_)
-            | KeyId::ClipboardPage(_)
             | KeyId::ClipboardClear => KeyStyle::Function,
         }
     }

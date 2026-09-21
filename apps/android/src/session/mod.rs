@@ -31,6 +31,11 @@ use fling::Fling;
 /// 我们**只存在内存里**，50 条够翻好几屏，也不至于让那一页翻不到头。
 const CLIPBOARD_LIMIT: usize = 50;
 
+/// 算「滚到第几条起」时给除法的一点补偿（单位是「格」，也就是一格的万分之一）。
+///
+/// 见 [`Session::clipboard_first`]：不加它，滚到底时最后一格会因为浮点误差永远差一点。
+const GRID_EPSILON: f32 = 1e-4;
+
 /// 随包资源目录里的 emoji 字体名（`assets/emoji/README.md` 写了为什么要带它）。
 const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
 
@@ -133,8 +138,11 @@ pub struct Session {
     /// 剪贴板本来就是「刚刚复制的那几样」，先看用起来顺不顺。
     clipboard: Vec<String>,
 
-    /// 剪贴板页现在在第几屏（从 0 起）。
-    clipboard_page: usize,
+    /// 剪贴板列表被拉上去多少（点）。0 是最新那条贴着记录区顶边。
+    ///
+    /// **不是「第几屏」**：列表是跟手滚的，随手停在哪儿都行——所以是个连续的位移，
+    /// 由手指拖动累加（见 [`Self::scroll_clipboard`]），不是整数页号。
+    clipboard_scroll: f32,
 
     /// 当前该画的候选条那一帧。缓冲变化或翻页时由 [`Self::refresh`] 重建。
     frame: Frame,
@@ -235,7 +243,7 @@ impl Session {
             fling: None,
             scrolled: None,
             clipboard: Vec::new(),
-            clipboard_page: 0,
+            clipboard_scroll: 0.0,
             frame: Frame::default(),
             bar: None,
             bar_dirty: true,
@@ -280,9 +288,8 @@ impl Session {
         }
         // 剪贴板页从头看起（每次进来都回到最新的那几条）
         if panel == Panel::Clipboard {
-            self.clipboard_page = 0;
+            self.clipboard_scroll = 0.0;
         }
-        // 页脚（剪贴板第几屏）挂在候选条那一帧上，换页得重算
         self.refresh();
     }
 
@@ -404,10 +411,11 @@ impl Session {
     /// 与候选条一样，**空表示「这个小窗现在不该在」**——壳收到空字节串要把浮动小窗收起来。
     pub fn popup_surface(&mut self) -> Vec<u8> {
         let (shift, mode) = (self.shift, self.mode);
-        let (clipboard, page) = (&self.clipboard, self.clipboard_page);
+        let (first, end) = self.clipboard_range();
+        let (clipboard, offset) = (&self.clipboard[first..end], self.clipboard_offset());
         match self.keyboard.as_mut() {
             Some(keyboard) => {
-                keyboard.popup_surface(self.renderer.as_mut(), shift, mode, clipboard, page)
+                keyboard.popup_surface(self.renderer.as_mut(), shift, mode, clipboard, offset)
             }
             None => Vec::new(),
         }
@@ -426,10 +434,11 @@ impl Session {
     /// 键盘的位图（8 字节头 + 预乘 RGBA）。没配过宽度、渲染器不可用、或者键盘不由这里画时返回空。
     pub fn keyboard_surface(&mut self) -> Vec<u8> {
         let (shift, mode) = (self.shift, self.mode);
-        let (clipboard, page) = (&self.clipboard, self.clipboard_page);
+        let (first, end) = self.clipboard_range();
+        let (clipboard, offset) = (&self.clipboard[first..end], self.clipboard_offset());
         match self.keyboard.as_mut() {
             Some(keyboard) => {
-                keyboard.surface(self.renderer.as_mut(), shift, mode, clipboard, page)
+                keyboard.surface(self.renderer.as_mut(), shift, mode, clipboard, offset)
             }
             None => Vec::new(),
         }
@@ -482,6 +491,7 @@ impl Session {
             Some(Fired::MoveCursor(steps)) => self.move_cursor(steps),
             Some(Fired::ClearToStart) => self.clear_to_start(),
             Some(Fired::DeleteClipboard(index)) => self.apply(Act::DeleteClipboard(index)),
+            Some(Fired::ClipboardScroll(delta)) => self.scroll_clipboard(delta),
             None => {}
         }
         self.touch_bar(action, pointer, x, y);
@@ -740,7 +750,6 @@ impl Session {
             Act::PasteClipboard(index) => self.paste_clipboard(index),
             Act::DeleteClipboard(index) => self.delete_clipboard(index),
             Act::ClearClipboard => self.clear_clipboard(),
-            Act::ClipboardPage(step) => self.turn_clipboard_page(step),
         }
     }
 
@@ -886,14 +895,10 @@ impl Session {
 
     /// 这一帧右上角那个页码写什么（没有就 `None`）。
     ///
-    /// 两种页码**共用那条候选条**：组句当中报候选翻到第几屏；没组句时那条上只有一个标，
-    /// 报的是**剪贴板**第几屏——剪贴板页恰恰只在没组句时才开得起来（标那时才画）。
-    /// 只有一屏就都不报。
+    /// **只有候选翻页才报**：剪贴板列表 2026-09-21 改成跟手滚动之后就没有「第几屏」了
+    /// （要滚到哪儿看手指，不是一个页号说得清的）。
+    /// 只有一屏也不报。
     fn footer(&self, candidate_screens: usize) -> Option<String> {
-        if !self.composing() && self.panel == Panel::Clipboard {
-            let pages = self.clipboard_pages();
-            return (pages > 1).then(|| format!("{}/{}", self.clipboard_page + 1, pages));
-        }
         (candidate_screens > 1).then(|| {
             format!(
                 "{}/{}",
@@ -1013,27 +1018,82 @@ impl Session {
 
     /// 剪贴板那份列表变了：剪贴板页开着就重画（画的是那份列表）。
     ///
-    /// 删到不够一屏可能就翻过头了，页码先夹回来。
+    /// 删到没那么多条了可能就滚过头了，先夹回来——不然会停在一段空白上。
     fn after_clipboard_change(&mut self) {
-        self.clipboard_page = self
-            .clipboard_page
-            .min(self.clipboard_pages().saturating_sub(1));
+        self.clipboard_scroll = self
+            .clipboard_scroll
+            .clamp(0.0, self.clipboard_max_scroll());
         if self.panel == Panel::Clipboard {
             self.mark_keyboard_dirty();
-            // 页码写在候选条那条上（没组句时那条就一个标加它），跟着一起重画
             self.refresh();
         }
     }
 
-    /// 剪贴板一共几屏，至少 1。
-    fn clipboard_pages(&self) -> usize {
-        self.clipboard.len().div_ceil(CLIPBOARD_CELLS).max(1)
+    /// 剪贴板列表此刻该画的几条，在整份里的下标范围。
+    ///
+    /// **整格的部分在这儿切好**：滚动量落在一格中间时，那点零头由渲染器让开
+    /// （见 `Renderer::render_keyboard` 里的 `frac`），这儿只管从第几条起。
+    ///
+    /// 返回的是两个数而不是切片——切片借的是 `self`，调用处还要同时借
+    /// `self.keyboard` / `self.renderer`（可变），借不到一块儿去。
+    fn clipboard_range(&self) -> (usize, usize) {
+        let first = self.clipboard_first().min(self.clipboard.len());
+        (first, (first + CLIPBOARD_CELLS).min(self.clipboard.len()))
     }
 
-    /// 剪贴板页上第 `index` 格（**本屏**下标）对应整份里的第几条。这一屏没那么多条时是 `None`。
-    fn clipboard_index(&self, index: usize) -> Option<usize> {
-        let index = self.clipboard_page * CLIPBOARD_CELLS + index;
-        (index < self.clipboard.len()).then_some(index)
+    /// 列表顶边现在对着整份里的第几条。
+    fn clipboard_first(&self) -> usize {
+        let pitch = self.clipboard_pitch();
+        if pitch <= 0.0 {
+            return 0;
+        }
+        // 除以一格的高度取整，**加一点补偿**：滚动量是一格格累加、又夹在
+        // 「多出来的格数 × 一格高」上的，而浮点下 `3 × pitch ÷ pitch` 可能算出 2.99999…，
+        // floor 之后就少一格——滚到底时最后一格会永远差一丁点露不全。
+        // 补偿取一格的万分之一，比任何有意义的手势位移都小。
+        let grids = self.clipboard_scroll / pitch + GRID_EPSILON;
+        grids.floor().max(0.0) as usize
+    }
+
+    /// 整格之外还让开了多少（点，0 到一格高之间）——渲染器只拿它把卡片平移一下。
+    ///
+    /// 给的是**余量**不是滚动总量：整格那部分已经在 [`Self::clipboard_first`] 里换成了
+    /// 「从第几条起」，渲染器不必（也不该）再做一次除法。
+    fn clipboard_offset(&self) -> f32 {
+        let pitch = self.clipboard_pitch();
+        if pitch <= 0.0 {
+            return 0.0;
+        }
+        let frac = self.clipboard_scroll - self.clipboard_first() as f32 * pitch;
+        frac.clamp(0.0, pitch)
+    }
+
+    /// 剪贴板列表还能往下滚多少（点）：比一屏多出来的那几条，一条一格。
+    fn clipboard_max_scroll(&self) -> f32 {
+        self.clipboard.len().saturating_sub(CLIPBOARD_CELLS) as f32 * self.clipboard_pitch()
+    }
+
+    /// 剪贴板列表一格多高（点）。键盘前台算的，这儿只是转一手。
+    fn clipboard_pitch(&self) -> f32 {
+        self.keyboard
+            .as_ref()
+            .map_or(0.0, Keyboard::clipboard_pitch)
+    }
+
+    /// 剪贴板列表跟着手指滚。
+    ///
+    /// `delta` 是手指这一拍挪了多少**像素**（往下为正）——手指往下拖是把内容往下带，
+    /// 看的是更前面的条目，所以滚动量减。夹在 `[0, 还能滚多少]` 里。
+    fn scroll_clipboard(&mut self, delta: f32) {
+        let density = if self.density > 0.0 {
+            self.density
+        } else {
+            1.0
+        };
+        let next = self.clipboard_scroll - delta / density;
+        self.clipboard_scroll = next.clamp(0.0, self.clipboard_max_scroll());
+        self.mark_keyboard_dirty();
+        self.refresh();
     }
 
     /// 标：开 / 收工具页。已经在工具页或剪贴板页时收回字母页。
@@ -1048,48 +1108,40 @@ impl Session {
         self.set_panel(panel);
     }
 
-    /// 把剪贴板里第 `index` 格（**本屏**下标）那条插到光标处。
+    /// 把剪贴板里第 `index` 格（**屏幕上那一格**）那条插到光标处。
     ///
     /// 走 [`Self::commit_text`]，也就是壳那边一句 `commitText`——**插在光标处**，
     /// 正是「点一条就插进来」那个用法。插完收回字母页：粘完就该接着打字了
     /// （fcitx5 那个 `clipboardReturnAfterPaste` 是同一个意思，它做成了开关）。
     fn paste_clipboard(&mut self, index: usize) {
-        let Some(entry) = self
-            .clipboard_index(index)
-            .and_then(|index| self.clipboard.get(index))
-            .cloned()
-        else {
+        let Some(entry) = self.clipboard_entry(index).cloned() else {
             return;
         };
         self.commit_text(entry);
         self.set_panel(Panel::Letters);
     }
 
-    /// 删掉剪贴板里第 `index` 格（**本屏**下标）那条。在记录上往左滑、松手走这条。
+    /// 删掉剪贴板里第 `index` 格（**屏幕上那一格**）那条。在记录上往左滑、松手走这条。
     fn delete_clipboard(&mut self, index: usize) {
-        let Some(index) = self.clipboard_index(index) else {
+        let Some(index) = self.clipboard_first().checked_add(index) else {
             return;
         };
+        if index >= self.clipboard.len() {
+            return;
+        }
         self.clipboard.remove(index);
         self.after_clipboard_change();
+    }
+
+    /// 屏幕上第 `index` 格对着整份里的哪一条。滚到头、这一格没内容时是 `None`。
+    fn clipboard_entry(&self, index: usize) -> Option<&String> {
+        self.clipboard.get(self.clipboard_first() + index)
     }
 
     /// 清空整份剪贴板历史。
     fn clear_clipboard(&mut self) {
         self.clipboard.clear();
         self.after_clipboard_change();
-    }
-
-    /// 剪贴板翻页，夹在首末屏之间。
-    fn turn_clipboard_page(&mut self, step: isize) {
-        let pages = self.clipboard_pages() as isize;
-        let target = (self.clipboard_page as isize + step).clamp(0, pages - 1) as usize;
-        if target == self.clipboard_page {
-            return;
-        }
-        self.clipboard_page = target;
-        self.mark_keyboard_dirty();
-        self.refresh();
     }
 
     /// 惯性的一拍：过去 `dt` 毫秒，这一拍该挪多少由 [`Fling`] 算。

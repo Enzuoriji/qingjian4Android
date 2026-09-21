@@ -31,9 +31,9 @@ pub fn on_key(key: KeyId) -> Act {
         KeyId::Panel(panel) => Act::SwitchPanel(panel),
         // 工具页那一行「剪贴板」：切到剪贴板页
         KeyId::Tool(_) => Act::SwitchPanel(Panel::Clipboard),
-        // 记录格报的是**本屏**第几格，加成整份里的下标是会话的事（它才知道翻到第几屏了）
+        // 记录格报的是**屏幕上**第几格；它对着整份里的哪一条，是会话的事
+        // （它才知道列表滚到哪儿了）
         KeyId::Clipboard(index) => Act::PasteClipboard(index),
-        KeyId::ClipboardPage(step) => Act::ClipboardPage(step),
         KeyId::ClipboardClear => Act::ClearClipboard,
     }
 }

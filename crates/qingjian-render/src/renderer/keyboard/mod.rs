@@ -14,6 +14,7 @@ pub use rendered::RenderedKeyboard;
 
 use super::{Rendered, Renderer};
 use crate::canvas::Canvas;
+use crate::color::Color;
 use crate::error::RenderError;
 use crate::keyboard::{
     CLIPBOARD_CELLS, InputMode, Key, KeyId, KeyWidth, KeyboardLayout, KeyboardState, Panel,
@@ -47,15 +48,43 @@ impl Renderer {
         let pixels_high = content_height.round().max(1.0) as u32;
 
         let unit = layout.unit_width(content_width, gap_x);
-        let row_count = layout.rows().len().max(1) as f32;
-        let row_height = (rows_height - gap_y * (row_count - 1.0)) / row_count;
+        let row_height = layout.row_height(rows_height, gap_y);
 
         let mut canvas = Canvas::new(pixels_wide, pixels_high)?;
         canvas.fill_rect(0.0, 0.0, content_width, content_height, theme.background);
 
+        // 剪贴板页的**记录区**是一段能上下滚的窗口：卡片会滚过它的上下边界，画布又不裁，
+        // 所以先画在一张只有记录区那么大的图上，再整张贴回来（与 `logo::draw_logo` 同一个路数）。
+        // 别的页没有这一层，直接画在主画布上。
+        let pitch = row_height + gap_y;
+        let mut sheet = if layout.is_clipboard() {
+            let height = (pitch * CLIPBOARD_CELLS as f32 - gap_y).round().max(1.0) as u32;
+            Some(Canvas::new(pixels_wide, height)?)
+        } else {
+            None
+        };
+        // 整格的那部分已经由会话换掉了（喂进来的就是这一屏该画的几条），
+        // 这里只让开不足一格的那点：滚动时卡片就是这么一格格挪上去的。
+        // **不做除法**——「第几条起」是会话按同一套几何算的，两边各算一次会差出一格。
+        let frac = if sheet.is_some() {
+            state.clipboard_offset * scale
+        } else {
+            0.0
+        };
+        // 窗口几行画不画在小图上、命中区裁到多高——循环里要反复用，
+        // 先取出来（`sheet` 待会儿会被可变借走）
+        let sheet_height = sheet.as_ref().map_or(0.0, |sheet| sheet.height() as f32);
+
         let mut keys = Vec::new();
         let mut y = 0.0;
-        for row in layout.rows() {
+        for (index, row) in layout.rows().iter().enumerate() {
+            // 窗口那几行画到小图上（顶边往上让开不足一格的那部分），其余行照旧
+            let inside = sheet_height > 0.0 && index < CLIPBOARD_CELLS;
+            let top = if inside { y - frac } else { y };
+            let target = match sheet.as_mut() {
+                Some(sheet) if inside => sheet,
+                _ => &mut canvas,
+            };
             // 按单位宽算的那部分（不含撑满的键）。有撑满键的行**铺满整宽**，
             // 其余按自己的总宽居中——第 2 行（9 个键）由此自然得到半键错位。
             let fixed = KeyboardLayout::row_width(row, unit, gap_x);
@@ -77,26 +106,39 @@ impl Renderer {
                     KeyWidth::Fill => (content_width - fixed).max(0.0) / fills.max(1) as f32,
                 };
                 self.draw_key(
-                    &mut canvas,
+                    target,
                     key,
                     state,
                     theme,
                     scale,
-                    (x, y, key_width, row_height),
+                    (x, top, key_width, row_height),
                 );
-                keys.push(KeyHit {
-                    id: key.id,
-                    x,
-                    y,
-                    width: key_width,
-                    height: row_height,
-                });
+                // 滚出窗口的那部分不该还能点：命中区裁到窗口里，整个滚出去的就不报了
+                let (hit_y, hit_height) = if inside {
+                    let bottom = (top + row_height).min(sheet_height);
+                    (top.max(0.0), bottom - top.max(0.0))
+                } else {
+                    (top, row_height)
+                };
+                if hit_height > 0.0 {
+                    keys.push(KeyHit {
+                        id: key.id,
+                        x,
+                        y: hit_y,
+                        width: key_width,
+                        height: hit_height,
+                    });
+                }
                 x += key_width + gap_x;
             }
-            y += row_height + gap_y;
+            y += pitch;
         }
 
-        // 剪贴板空着时中间写一句：不写的话整块键盘上只剩底下那四个控制键，看着像坏了
+        if let Some(sheet) = sheet {
+            canvas.blend_pixmap(0, 0, &sheet.into_pixmap());
+        }
+
+        // 剪贴板空着时中间写一句：不写的话整块键盘上只剩底下那两个控制键，看着像坏了
         if layout.is_clipboard() && state.clipboard.is_empty() {
             self.draw_blank_clipboard(&mut canvas, theme, scale, content_width, rows_height);
         }
@@ -153,9 +195,11 @@ impl Renderer {
     ) {
         let (x, y, width, height) = slot;
         let text = label(key, state);
-        // 剪贴板这一屏没那么多条：这一格整个不画（连键帽都不画），免得空一块白格子
+        // 剪贴板这一屏没那么多条 / 工具页这一格还没排工具：整个不画（连键帽都不画），
+        // 免得空着一块白格子
         let sheet = matches!(key.id, KeyId::Clipboard(_));
-        if sheet && text.is_empty() {
+        let sparse = matches!(key.id, KeyId::Clipboard(_) | KeyId::Tool(_));
+        if sparse && text.is_empty() {
             return;
         }
         let pressed = state.pressed == Some(key.id);
@@ -203,6 +247,36 @@ impl Renderer {
             KeyId::Shift => icon::draw_shift(canvas, cx, main_cy, height, scale, theme.label),
             KeyId::Backspace => {
                 icon::draw_backspace(canvas, cx, main_cy, height, scale, theme.label)
+            }
+            // 工具页的格子：**图标在上、名字在下**（搜狗那个面板就是这个样子），
+            // 跟「一个大字居中」的键帽不是一回事，所以整个格子自己画
+            KeyId::Tool(index) => {
+                let label_style = TextStyle::new(
+                    theme.hint_font.scaled(scale),
+                    theme.hint_font.size,
+                    theme.label,
+                    theme.text_gamma,
+                );
+                let label_size = self.measure(&text, &label_style);
+                let icon_size = height * TOOL_ICON_RATIO;
+                // 图标、名字、上下三段的留白平分
+                let gap = (height - icon_size - label_size.height) / 3.0;
+                if let Some(draw) = tool_icon(index) {
+                    draw(
+                        canvas,
+                        cx,
+                        y + gap + icon_size / 2.0,
+                        icon_size,
+                        theme.label,
+                    );
+                }
+                self.draw_text(
+                    canvas,
+                    &text,
+                    &label_style,
+                    cx - label_size.width / 2.0,
+                    y + gap * 2.0 + icon_size,
+                );
             }
             // 剪贴板那一格是**一段话**，不是键帽上的一个字：左边对齐、放不下截断补省略号
             // （复用候选条那套 `fit`，见 `renderer/bar`）。居中的话长文本两头都被切、认不出来。
@@ -263,19 +337,36 @@ const CARD_INSET: f32 = 4.0;
 /// 剪贴板一条都没有时，键盘中间那行字。
 const BLANK_CLIPBOARD: &str = "暂无剪贴板内容";
 
+/// 工具页格子上那个图标占格子高度的多少。
+///
+/// 剩下的是名字与上下留白——格子是「宽比高长」的（一单位宽 × 一行高），
+/// 图标给到 0.42 就够显眼了，再大就把名字挤出去。
+const TOOL_ICON_RATIO: f32 = 0.42;
+
+/// 工具格子上那个图标的画法：`(画布, 中心 x, 中心 y, 边长, 颜色)`，都是像素。
+///
+/// 与 `popup.rs` 里那个 `IconPainter` 不是一回事——那个按**键高**算大小（键帽上的 ⇧ / ⌫），
+/// 这个收的是**边长**：工具格子是「图标 + 名字」两行，图标多大由那儿算好。
+type ToolIcon = fn(&mut Canvas, f32, f32, f32, Color);
+
+/// 工具页第 `index` 格画哪个图标（与 `TOOLS` 一一对应）。
+///
+/// 没排工具的格子是 `None`——那种格子上的字也是空的（见 `label`），整个不画。
+fn tool_icon(index: usize) -> Option<ToolIcon> {
+    match index {
+        0 => Some(icon::draw_clipboard),
+        _ => None,
+    }
+}
+
 /// 键帽上写什么字。图标键（Shift / 退格）由 [`Renderer::draw_key`] 提前分走，不会走到这里。
 fn label(key: &Key, state: &KeyboardState) -> String {
     match key.id {
-        // 剪贴板那一格写的是**那条文本**（本屏第几个 = 整份里的 页 × 一屏条数 + i）。
-        // 这一屏没那么多条时给空串，`draw_key` 见空就整个不画。
-        KeyId::Clipboard(index) => state
-            .clipboard
-            .get(state.clipboard_page * CLIPBOARD_CELLS + index)
-            .cloned()
-            .unwrap_or_default(),
+        // 剪贴板那一格写的是**那条文本**。喂进来的 `state.clipboard` 就是这一屏该画的
+        // 那几条（会话按滚动量切好的），所以格号直接就是下标；滚到头、后面没那么多条时
+        // 给空串，`draw_key` 见空就整个不画。
+        KeyId::Clipboard(index) => state.clipboard.get(index).cloned().unwrap_or_default(),
         KeyId::Tool(index) => TOOLS.get(index).copied().unwrap_or_default().to_owned(),
-        KeyId::ClipboardPage(step) if step < 0 => "‹".to_owned(),
-        KeyId::ClipboardPage(_) => "›".to_owned(),
         KeyId::ClipboardClear => "清空".to_owned(),
         KeyId::Letter(c) => {
             if state.shift.is_upper() {
@@ -497,32 +588,44 @@ mod tests {
         }
     }
 
-    /// 剪贴板那几格写的是**这一屏**的记录：整份里按「页 × 一屏条数」往下取。
+    /// 剪贴板那几格写的就是**喂进来的那几条**，格号即下标。
     ///
-    /// 这一屏没那么多条时给空串——`draw_key` 见空就整个不画（连键帽都不画），
-    /// 不然空着一块白格子。
+    /// 「从整份里的第几条起」是会话切好的（它才知道列表滚到哪儿了）——渲染器这边
+    /// 收到的就是这一屏该画的几条。滚到头、后面没那么多条时给空串，
+    /// `draw_key` 见空就整个不画（连卡片都不画）。
     #[test]
-    fn the_clipboard_cells_show_the_entries_of_this_page() {
-        let entries: Vec<String> = (0..8).map(|index| format!("第 {index} 条")).collect();
-        let state = |page| KeyboardState {
+    fn the_clipboard_cells_show_the_entries_they_are_given() {
+        let entries: Vec<String> = (0..5).map(|index| format!("第 {index} 条")).collect();
+        let state = KeyboardState {
             clipboard: &entries,
-            clipboard_page: page,
             ..KeyboardState::default()
         };
         let cell = |index| Key::new(KeyId::Clipboard(index), 5.0);
 
-        assert_eq!(label(&cell(0), &state(0)), "第 0 条");
-        assert_eq!(label(&cell(4), &state(0)), "第 4 条", "第一屏五条");
-        assert_eq!(label(&cell(0), &state(1)), "第 5 条", "第二屏从第六条起");
-        assert_eq!(label(&cell(2), &state(1)), "第 7 条");
+        assert_eq!(label(&cell(0), &state), "第 0 条");
+        assert_eq!(label(&cell(4), &state), "第 4 条");
+    }
+
+    /// 滚到最后一屏时后面那几格是空的——会话会给不足一屏的切片。
+    #[test]
+    fn a_short_clipboard_leaves_the_last_cells_blank() {
+        let entries = ["第 0 条".to_owned(), "第 1 条".to_owned()];
+        let state = KeyboardState {
+            clipboard: &entries,
+            ..KeyboardState::default()
+        };
         assert_eq!(
-            label(&cell(3), &state(1)),
+            label(&Key::new(KeyId::Clipboard(1), 5.0), &state),
+            "第 1 条"
+        );
+        assert_eq!(
+            label(&Key::new(KeyId::Clipboard(2), 5.0), &state),
             "",
-            "这一屏只剩三条，第四格该是空的"
+            "只给两条时第三格该是空的"
         );
     }
 
-    /// 一屏装得下就没有翻页这回事；翻到哪一屏由 `KeyboardState` 说。
+    /// 一条都没有时哪一格都是空的。
     #[test]
     fn an_empty_clipboard_draws_no_cells() {
         let state = KeyboardState::default();
