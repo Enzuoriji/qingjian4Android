@@ -122,13 +122,17 @@ impl Renderer {
                     KeyWidth::Units(weight) => unit * weight,
                     KeyWidth::Fill => (content_width - fixed).max(0.0) / fills.max(1) as f32,
                 };
+                // 画进子画布的要换成**子画布自己的坐标**（它的原点是可滚那一段的顶边）。
+                // 剪贴板那一段是从顶边起的（`sheet_top` = 0），所以减不减都一样；
+                // 表情页那一段在标签条**下面**，不减就会整片往下偏一行。
+                let slot_y = if inside { top - sheet_top } else { top };
                 self.draw_key(
                     target,
                     key,
                     state,
                     theme,
                     scale,
-                    (x, top, key_width, row_height),
+                    (x, slot_y, key_width, row_height),
                 );
                 // 滚出窗口的那部分不该还能点：命中区裁到窗口里，整个滚出去的就不报了
                 let (hit_y, hit_height) = if inside {
