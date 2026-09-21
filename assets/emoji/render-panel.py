@@ -23,6 +23,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 SOURCE = ROOT / "data/emoji/emoji-test.txt"
+FONT = HERE / "NotoColorEmoji.ttf"
 NAMES = HERE / "emoji-zh.tsv"
 OUT = HERE / "emoji-panel.tsv"
 
@@ -33,6 +34,27 @@ SKIP_GROUPS = {"Component"}
 # 肤色修饰符 U+1F3FB..U+1F3FF。带肤色的变体不要：每个手势、每张脸都有五六种肤色，
 # 全收进来「人物」那一组会占掉全表六成，翻起来没完（搜狗那几个面板也只收默认肤色）。
 SKIN_TONES = set(range(0x1F3FB, 0x1F400))
+
+
+def font_points():
+    """随包那张字体里有字形的码点。
+
+    **照它过滤**：字体比 Unicode 那张表旧，表里有、字体里没有的会画成一个豆腐块
+    （截图里 `🫡` 那种）。按版本号猜（「Emoji 14 以后的不要」）不如直接问字体，
+    反正这张表就是给它配的。
+
+    要 `fontTools`（`pip install fonttools`）；没装就不过滤，只在终端吱一声。
+    """
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        print("  （没装 fontTools，这一轮不按字体过滤）")
+        return None
+    font = TTFont(FONT, lazy=True)
+    points = set()
+    for table in font["cmap"].tables:
+        points.update(table.cmap.keys())
+    return points
 
 
 def zh_names():
@@ -54,6 +76,8 @@ def main():
     if not SOURCE.is_file():
         sys.exit(f"没有 {SOURCE.relative_to(ROOT)}，先按文件头那条 curl 下载")
     names = zh_names()
+    points = font_points()
+    skipped = 0
 
     group = ""
     rows = []
@@ -77,6 +101,9 @@ def main():
         if len(parts) < 3:
             continue
         emoji, english = parts[0], parts[2]
+        if points is not None and not all(ord(c) in points for c in emoji):
+            skipped += 1
+            continue
         rows.append((group, emoji, names.get(emoji, english), english))
 
     if not rows:
@@ -95,7 +122,10 @@ def main():
     OUT.write_text("".join(text), encoding="utf-8")
 
     groups = sorted({row[0] for row in rows})
-    print(f"写好 {OUT.relative_to(ROOT)}：{len(rows)} 个 emoji、{len(groups)} 个分组")
+    print(
+        f"写好 {OUT.relative_to(ROOT)}：{len(rows)} 个 emoji、{len(groups)} 个分组"
+        + (f"（滤掉 {skipped} 个字体里没有的）" if skipped else "")
+    )
     for name in groups:
         count = sum(1 for row in rows if row[0] == name)
         print(f"  {name}: {count}")
