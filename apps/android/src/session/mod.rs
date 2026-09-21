@@ -6,13 +6,14 @@
 #[cfg(test)]
 mod tests;
 
+use std::ops::Range;
 use std::path::Path;
 
 use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
 use qingjian_dictionary::Dictionary;
 use qingjian_render::{
-    BarHitId, FontLibrary, Frame, InputMode, KeyboardLayout, Panel, Preedit, PreeditSegment,
-    PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme,
+    BarHitId, BarStrip, FontLibrary, Frame, InputMode, KeyboardLayout, Panel, Preedit,
+    PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme,
 };
 
 use crate::action::{self, Act, Command};
@@ -20,15 +21,6 @@ use crate::error::SessionError;
 use crate::keyboard::{Fired, Keyboard};
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
-
-/// 候选条**一次铺多长**（个）——滚动就是把这一条拖来拖去。
-///
-/// 2026-09-21 起候选条是一条能滚的带子，所以这个数**不是「看得见几个」**（那是宽度自己定的），
-/// 而是「一次铺几个」。比一屏多好几倍，拖起来才有得看；铺太多则每次重画都要多量几十个字。
-///
-/// 顺带把 2026-09-20 那条「一页画几个按打了几个音节定」取代掉了：那条管的是**可见几个**，
-/// 而滚动之后可见几个由每格宽度自己决定——**短的多露几个、长的少露几个，不必再拿音节数去猜**。
-const WINDOW: usize = 24;
 
 /// 随包资源目录里的 emoji 字体名（`assets/emoji/README.md` 写了为什么要带它）。
 const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
@@ -96,22 +88,19 @@ pub struct Session {
     /// 拼音行。没在组句时为 `None`。
     preedit: Option<Preedit>,
 
-    /// 引擎给的候选，**跨页的完整列表**（`page` 只影响画哪一段）。
+    /// 引擎给的候选，**整份列表**。
     candidates: Vec<Candidate>,
 
-    /// 当前页，从 0 起。
-    page: usize,
-
-    /// 高亮在**本页第几个**（页内下标，从 0 起）。不动它时是本页第一个，空格上屏的就是它。
+    /// 整条候选铺开后的位置：每格在哪、多长、一共几屏。
     ///
-    /// 高亮**不跟着滚动走**：候选条是一条能横滚的带子，拖动只是看，选还得点一下
-    /// （或者空格上屏本页第一个）。
-    highlight: usize,
+    /// 组句一变就算一次（要量全部候选的宽度），滚动与页码都读它。见 [`BarStrip`]。
+    strip: BarStrip,
 
     /// 候选条那条带子被拖出去多远（像素，正数 = 往后滚）。
     ///
-    /// 跟着手指走，滚过一页就翻页（见 [`Self::scroll_by`]）。组句一变、
-    /// 或者按 `‹` `›` 翻页，都回到 0（从头看起）。
+    /// 跟着手指走。**整条带子是通的**——没有「一批一批」这回事（那是 2026-09-21 之前的做法：
+    /// 一次铺 24 个再一批批翻，页码说的也是「第几批」，跟手指没对上），滚到哪儿画哪儿，
+    /// 两头夹住（见 [`Self::scroll_by`]）。组句一变、或者按 `‹` `›` 翻页，都回到 0（从头看起）。
     scroll: f32,
 
     /// 当前该画的候选条那一帧。缓冲变化或翻页时由 [`Self::refresh`] 重建。
@@ -208,8 +197,7 @@ impl Session {
             panel: Panel::Letters,
             preedit: None,
             candidates: Vec::new(),
-            page: 0,
-            highlight: 0,
+            strip: BarStrip::default(),
             scroll: 0.0,
             frame: Frame::default(),
             bar: None,
@@ -287,6 +275,8 @@ impl Session {
             self.dark = dark;
             self.landscape = landscape;
             self.bar_dirty = true;
+            // 带子的位置是**像素**——密度或主题一变就得重新铺开，不然页码按老尺寸算
+            self.relayout();
         }
         if let Some(keyboard) = self.keyboard.as_mut() {
             keyboard.set_metrics(width, screen_height, density, bottom_inset, dark, landscape);
@@ -350,7 +340,8 @@ impl Session {
         }
         if self.bar_dirty || self.bar.is_none() {
             let theme = self.theme();
-            let scroll = self.scroll;
+            // 渲染是从**传进去的第一格**开始往外铺的，所以要喂它「这一格相对视口的位置」
+            let scroll = self.strip.local_scroll(self.visible().start, self.scroll);
             let rendered = self.renderer.as_mut().and_then(|renderer| {
                 renderer
                     .render_bar(&self.frame, self.width, &theme, self.density, scroll)
@@ -623,14 +614,15 @@ impl Session {
         match act {
             Act::Push(c) => self.type_letter(c),
             Act::CommitCandidate(index) => {
-                let absolute = self.page * self.page_size() + index;
+                // 命中矩形里的下标是**画出来那一批**里的（从最左边看得见的那个数起）
+                let absolute = self.visible().start + index;
                 if let Some(candidate) = self.candidates.get(absolute).cloned() {
                     let text = self.engine.commit(&candidate);
                     self.commit_text(text);
                 }
             }
             Act::CommitHighlighted => {
-                // 高亮那个：平时是本页第一个，在候选条上横滑过之后是手指停下的那个
+                // 高亮那个：就是最左边看得见的那个（空格上屏的是它）
                 match self.highlighted_candidate() {
                     Some(candidate) => {
                         let text = self.engine.commit(&candidate);
@@ -753,10 +745,8 @@ impl Session {
         self.recompose();
     }
 
-    /// 缓冲变了：重查候选，回到第一页、高亮也回到第一个、带子从头看起。
+    /// 缓冲变了：重查候选，带子从头铺开、也从头上看起。
     fn recompose(&mut self) {
-        self.page = 0;
-        self.highlight = 0;
         self.scroll = 0.0;
         self.candidates.clear();
         self.preedit = None;
@@ -778,147 +768,134 @@ impl Session {
                 }
             }
         }
+        // 候选整份换了，带子得重铺——**在 build_frame 之前**，画哪几格要读它
+        self.relayout();
         self.refresh();
         self.preedit_dirty = true;
     }
 
-    /// 用当前的候选与页码重建待画的那一帧。
+    /// 用当前的候选与滚动位置重建待画的那一帧。
     ///
-    /// 翻页走这条路而不是 [`Self::recompose`]——重查会把页码打回第一页。
+    /// 滚动与翻页走这条路而不是 [`Self::recompose`]——重查会把带子打回头重看。
     fn refresh(&mut self) {
         self.frame = self.build_frame();
         self.bar_dirty = true;
     }
 
-    /// 这一条铺几个候选——见 [`WINDOW`]。
-    fn page_size(&self) -> usize {
-        WINDOW
+    /// 视口有多宽（像素）：候选条是通栏的，就是输入视图那么宽。
+    fn viewport(&self) -> f32 {
+        self.width * self.density
     }
 
-    /// 本页画哪几个候选、页码是几。这一轮不画译文，所以不调 `engine.annotate()`。
+    /// 此刻该画哪几格（左闭右开）。
+    fn visible(&self) -> Range<usize> {
+        self.strip.slice(self.scroll, self.viewport())
+    }
+
+    /// 画哪几个候选、页码是几。这一轮不画译文，所以不调 `engine.annotate()`。
+    ///
+    /// **只画看得见的那几格**（十来个，两边各带一个只露半边的），不是「铺一整批」——
+    /// 带子是通的，滚到哪儿画哪儿。
     fn build_frame(&self) -> Frame {
-        let start = self.page * self.page_size();
-        let rows: Vec<Row> = self
-            .candidates
+        let visible = self.visible();
+        let rows: Vec<Row> = self.candidates[visible.clone()]
             .iter()
-            .skip(start)
-            .take(self.page_size())
             .enumerate()
-            .map(|(i, candidate)| row(i, candidate))
+            .map(|(i, candidate)| row(visible.start + i, candidate))
             .collect();
-        let pages = self.page_count();
+        let viewport = self.viewport();
+        let screens = self.strip.screens(viewport);
         Frame {
             preedit: self.preedit.clone(),
-            // 高亮跟着手指走（`slide_highlight`），不动它时是本页第一个。
-            // 夹一下：候选变少时旧的高亮下标可能落到这一页外面去
-            highlighted: (!rows.is_empty()).then(|| self.highlight.min(rows.len() - 1)),
-            // 只有一页就不报页码——与桌面一致
-            footer: (pages > 1).then(|| format!("{}/{}", self.page + 1, pages)),
+            // 高亮**跟着带子走**：压在最左边那个**整格**上，空格上屏的就是它。
+            // 认整格不认「露了半边的那个」——压在半格上的话，看着像画坏了，
+            // 而且空格上屏的会是屏幕上几乎看不见的词。
+            highlighted: self.highlighted_index().map(|index| index - visible.start),
+            // 页码是**第几屏 / 共几屏**，跟着手指走。带子一屏就装得下时不报——没有第二屏好去
+            footer: (screens > 1)
+                .then(|| format!("{}/{}", self.strip.screen(self.scroll, viewport), screens)),
             rows,
             sentence: None,
             status: None,
         }
     }
 
-    /// 当前这一页画几行候选。**不重建帧也算得出来**——翻页时要靠它先把高亮定下来。
-    fn page_rows(&self) -> usize {
-        self.candidates
-            .len()
-            .saturating_sub(self.page * self.page_size())
-            .min(self.page_size())
-    }
-
-    /// 高亮那个候选（**跨页的绝对下标**取回来的本体）。一个候选都没有时是 `None`。
+    /// 高亮那个候选在整份候选表里排第几：**最左边那个整格**。一个候选都没有时是 `None`。
     ///
-    /// 空格上屏、组句中打标点先上屏，走的都是它——所以「高亮在哪」只有这一个说法。
-    fn highlighted_candidate(&self) -> Option<Candidate> {
-        let rows = self.page_rows();
-        if rows == 0 {
+    /// 夹进这一屏画出来的那一段里：滚到带子中间时，第一个整格理论上还在可见范围里，
+    /// 但两头（尤其贴到底那一下）可能落到外面去。
+    fn highlighted_index(&self) -> Option<usize> {
+        let visible = self.visible();
+        if visible.is_empty() {
             return None;
         }
-        let index = self.page * self.page_size() + self.highlight.min(rows - 1);
-        self.candidates.get(index).cloned()
+        Some(
+            self.strip
+                .first_whole(self.scroll)
+                .clamp(visible.start, visible.end - 1),
+        )
     }
 
-    /// 一共有几页，至少 1。
-    fn page_count(&self) -> usize {
-        self.candidates.len().div_ceil(self.page_size()).max(1)
+    /// 高亮那个候选。空格上屏、组句中打标点先上屏，走的都是它——
+    /// 所以「高亮在哪」只有这一个说法。
+    fn highlighted_candidate(&self) -> Option<Candidate> {
+        self.highlighted_index()
+            .and_then(|index| self.candidates.get(index))
+            .cloned()
     }
 
-    /// 翻页，夹在首末页之间。
+    /// 按当前候选把带子重铺一遍（要量全部候选的宽度，见 [`BarStrip`]）。
     ///
-    /// **高亮落在新页的对应端**：往后翻是第一格、往前翻是最后一格。
-    /// 一路横滑过去要能接着走——滑到页边界就卡住的话，「滑动选词」就断了。
+    /// 组句一变就得重铺（候选整份换了）；密度或明暗变了也得（带子的位置是像素算的，
+    /// 字号跟着主题走）。渲染器不可用时给空的那份——那时候候选条本来就画不出来。
+    fn relayout(&mut self) {
+        let rows: Vec<Row> = self
+            .candidates
+            .iter()
+            .enumerate()
+            .map(|(i, candidate)| row(i, candidate))
+            .collect();
+        let theme = self.theme();
+        self.strip = self
+            .renderer
+            .as_mut()
+            .map(|renderer| renderer.bar_strip(&rows, &theme, self.density))
+            .unwrap_or_default();
+    }
+
+    /// 翻页：往前后挪 `step` 屏（`‹` `›` 两个箭头走这里）。
+    ///
+    /// **一屏一屏地停**：先把当前位置折到屏边界上再挪——手指拖到半屏的地方按一下，
+    /// 只该挪到下一屏的边界，不该只挪半个屏（那样页码也不动，看着像没反应）。
+    /// 带子一屏就装得下时不动，也不记账。
     fn turn_page(&mut self, step: isize) {
-        let pages = self.page_count();
-        if pages <= 1 {
+        let viewport = self.viewport();
+        if viewport <= 0.0 {
             return;
         }
-        let target = (self.page as isize + step).clamp(0, pages as isize - 1) as usize;
-        if target != self.page {
-            self.page = target;
+        let screen = self.strip.screen(self.scroll, viewport) as isize;
+        let target = (screen + step).clamp(1, self.strip.screens(viewport) as isize) as usize;
+        let wanted = self.strip.screen_scroll(target, viewport);
+        if wanted != self.scroll {
+            self.scroll = wanted;
             self.engine.note_page_turn();
-            self.highlight = if step < 0 {
-                self.page_rows().saturating_sub(1)
-            } else {
-                0
-            };
-            self.scroll = 0.0;
             self.refresh();
         }
     }
 
     /// 候选条那条带子横滚 `step` 像素（正数 = 往后滚，看后面的候选）。
     ///
-    /// 滚过这一页的宽度就翻到下一页；往回滚过页首就翻回上一页、**从那一页开头接着**
-    /// （上一页多宽这边算不出来，手指多拖的那点就吸收掉，不硬凑）。
-    /// **一次移动最多翻一页**：翻完得重画才知道新一页多宽，剩下的位移交给下一次移动。
+    /// 就这么简单：**带子是通的**，滚到哪儿算哪儿，两头夹住——滚到头再拖也拖不出空白。
+    /// 早先这里还要判「滚过一页就翻页」，那是因为一次只铺 24 个；现在整条铺开、
+    /// 画哪几格由 [`Self::visible`] 现算，翻页这件事就不存在了。
     fn scroll_by(&mut self, step: f32) {
-        // **先量页宽再加位移**：页宽是从上一帧的命中矩形加回 `scroll` 算出来的，
-        // 而那一帧用的是**当前**这个 `scroll`。先改再加，量出来的就多算了这一段，
-        // 结果永远够不到翻页的线（踩过）。
-        let page_width = self.page_width();
-        self.scroll += step;
-        if self.scroll >= page_width {
-            if self.page + 1 < self.page_count() {
-                self.scroll -= page_width;
-                self.page += 1;
-                self.engine.note_page_turn();
-                self.highlight = 0;
-            } else {
-                // 最后一页：滚到底为止，别滚出一片空白
-                self.scroll = page_width;
-            }
-            self.refresh();
+        let max = self.strip.max_scroll(self.viewport());
+        let wanted = (self.scroll + step).clamp(0.0, max);
+        if wanted == self.scroll {
             return;
         }
-        if self.scroll < 0.0 {
-            if self.page > 0 {
-                self.page -= 1;
-                self.engine.note_page_turn();
-                self.highlight = 0;
-            }
-            self.scroll = 0.0;
-            self.refresh();
-            return;
-        }
+        self.scroll = wanted;
         self.refresh();
-    }
-
-    /// 当前这一页铺开有多宽（像素）——从上一帧的命中矩形量：最后那格的右边缘，加回滚过的量。
-    ///
-    /// 带子的宽度是内容定的、**渲染之前算不出来**，所以用上一次画出来的结果，差一帧
-    /// （手指每动一下都会重画，追得上）。少算了右边距那一点点，不影响手感。
-    fn page_width(&self) -> f32 {
-        self.bar.as_ref().map_or(0.0, |bar| {
-            let right = bar
-                .hits
-                .iter()
-                .filter(|hit| matches!(hit.id, BarHitId::Candidate(_)))
-                .map(|hit| hit.x + hit.width)
-                .fold(0.0, f32::max);
-            right + self.scroll
-        })
     }
 }
 

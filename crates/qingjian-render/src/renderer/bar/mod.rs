@@ -13,10 +13,12 @@
 mod hit;
 mod id;
 mod rendered;
+mod strip;
 
 pub use hit::BarHit;
 pub use id::BarHitId;
 pub use rendered::RenderedBar;
+pub use strip::BarStrip;
 
 use super::{Metrics, Rendered, Renderer};
 use crate::canvas::Canvas;
@@ -142,7 +144,8 @@ impl Renderer {
         })
     }
 
-    /// 上排右端的清空与翻页：从右边缘往左摆。没有拼音就不画清空，只有一页就不画翻页。
+    /// 上排右端的清空与翻页：从右边缘往左摆。没有拼音就不画清空，**带子一屏装得下就不画翻页**
+    /// （那是会话定的：没有第二屏可去就不报页码，这里跟着没有页码就不画那两个箭头）。
     fn draw_bar_buttons(
         &mut self,
         canvas: &mut Canvas,
@@ -249,7 +252,7 @@ impl Renderer {
             return;
         }
         let gap = m.column_gap();
-        let widths = self.bar_cell_widths(frame, m);
+        let widths = self.bar_cell_widths(&frame.rows, m);
         let mut left = m.padding() - scroll;
         for (i, (row, width)) in frame.rows.iter().zip(&widths).enumerate() {
             if Some(i) == frame.highlighted {
@@ -272,11 +275,9 @@ impl Renderer {
     /// [`MIN_CELL_WIDTH`]（单字候选的自然宽度只有二十来点，没这条底线就成了点不着的针）。
     ///
     /// 不再「把一行铺满」：带子是能滚的，铺满就没有滚的余地了。
-    fn bar_cell_widths(&mut self, frame: &Frame, m: &Metrics) -> Vec<f32> {
+    fn bar_cell_widths(&mut self, rows: &[Row], m: &Metrics) -> Vec<f32> {
         let floor = m.px(MIN_CELL_WIDTH);
-        frame
-            .rows
-            .iter()
+        rows.iter()
             .map(|row| {
                 let text = self.measure(&row.text, &m.text_style()).width;
                 let cloud = if row.cloud { m.cloud_width() } else { 0.0 };
@@ -409,7 +410,7 @@ fn candidate_row_height(theme: &Theme) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{BarHitId, ELLIPSIS, MIN_CELL_WIDTH, Metrics, Renderer};
+    use super::{BarHitId, BarStrip, ELLIPSIS, MIN_CELL_WIDTH, Metrics, Renderer};
     use crate::fonts::FontLibrary;
     use crate::frame::{Frame, Preedit, Row};
     use crate::theme::Theme;
@@ -709,5 +710,80 @@ mod tests {
         assert!(renderer.measure(&fitted, &style).width <= 40.01);
         // 装得下就原样返回，不补省略号
         assert_eq!(renderer.fit("你好", &style, 1000.0), "你好");
+    }
+
+    /// 三格宽 100 / 50 / 200、左边距 10、格间距 4：整条 378 宽，各格从左数 10、114、168 起。
+    fn strip() -> BarStrip {
+        BarStrip::new(&[100.0, 50.0, 200.0], 10.0, 4.0)
+    }
+
+    /// 一屏装得下就全画；装不下时画到装不下的前一格为止。
+    #[test]
+    fn the_strip_shows_the_cells_that_fit() {
+        assert_eq!(
+            strip().slice(0.0, 400.0),
+            0..3,
+            "378 宽的带子配 400 的屏，全看得见"
+        );
+        assert_eq!(strip().slice(0.0, 150.0), 0..2, "150 宽的屏装不下第三格");
+    }
+
+    /// 滚到哪儿画哪儿：第一格整个滚出去之后就不画它了。
+    #[test]
+    fn scrolling_leaves_the_cells_behind() {
+        assert_eq!(strip().slice(160.0, 150.0), 1..3, "滚过第一格就不画它");
+    }
+
+    /// 一屏装得下就没得滚，也就没有「第几屏」这回事。
+    #[test]
+    fn a_strip_that_fits_on_one_screen_cannot_scroll() {
+        assert_eq!(strip().max_scroll(400.0), 0.0);
+        assert_eq!(strip().screens(400.0), 1);
+    }
+
+    /// 高亮认的是**整格**：滚到半格上时，第一个左边没被切掉的格才是它。
+    #[test]
+    fn the_highlighted_cell_is_the_first_one_that_is_not_cut() {
+        // 三格的左边是 10、114、168
+        assert_eq!(strip().first_whole(0.0), 0, "从头看起时是第一格");
+        assert_eq!(strip().first_whole(50.0), 1, "第一格只露半边了，该认第二格");
+        assert_eq!(
+            strip().first_whole(114.0),
+            1,
+            "正好滚到第二格的左边，还是它"
+        );
+        assert_eq!(strip().first_whole(115.0), 2);
+    }
+
+    /// 喂给渲染的位移是「第一格相对视口左缘」：让它贴着左缘时，位移正好是那个左边距。
+    #[test]
+    fn the_render_offset_puts_the_first_cell_at_the_edge() {
+        assert_eq!(strip().local_scroll(0, 0.0), 0.0, "从头看起时不用挪");
+        assert_eq!(strip().local_scroll(1, 114.0), 10.0, "第二格贴左缘");
+    }
+
+    /// 页码的分子要能走到分母：一路 `›` 翻到底，正好停在「第 screens 屏」。
+    #[test]
+    fn paging_forward_stops_on_the_last_page() {
+        // 每格 500 + 间距 10：八格一共 4090 宽，配 1000 的屏不止一屏
+        let strip = BarStrip::new(&[500.0; 8], 10.0, 10.0);
+        let viewport = 1000.0;
+        let screens = strip.screens(viewport);
+        assert!(screens > 1, "4090 宽的带子配 1000 的屏该不止一屏");
+
+        let mut scroll = 0.0;
+        for _ in 0..screens * 2 {
+            let next = strip.screen_scroll(strip.screen(scroll, viewport) + 1, viewport);
+            if next == scroll {
+                break;
+            }
+            scroll = next;
+        }
+        assert_eq!(scroll, strip.max_scroll(viewport), "翻到底该停在最远处");
+        assert_eq!(
+            strip.screen(scroll, viewport),
+            screens,
+            "停下来时该正好是最后一屏——不然页码会停在 5/6 那种数上"
+        );
     }
 }

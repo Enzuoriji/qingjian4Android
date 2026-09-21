@@ -255,30 +255,25 @@ fn the_clear_button_empties_the_buffer() {
 }
 
 #[test]
-fn paging_shows_the_next_batch() {
+fn paging_shows_the_next_screen() {
     let Some(mut session) = ready() else {
         return;
     };
-    // 「shi」在基础词库里有一大把候选，够翻页
+    // 「shi」在词库里有一大把候选，够翻的
     type_text(&mut session, "shi");
-    let footer = session.frame.footer.clone().expect("多于十页该有页码");
-    assert!(footer.starts_with("1/"), "页码该从第一页起，实际 {footer}");
-    let first_page: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
+    let footer = session.frame.footer.clone().expect("不止一屏就该有页码");
+    assert!(footer.starts_with("1/"), "页码该从第一屏起，实际 {footer}");
+    let first_screen: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
 
     tap_bar(&mut session, BarHitId::PageNext);
 
     assert!(
         session.frame.footer.as_deref().unwrap().starts_with("2/"),
-        "该翻到第二页，实际 {:?}",
+        "该翻到第二屏，实际 {:?}",
         session.frame.footer
     );
-    let second_page: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
-    assert_ne!(first_page, second_page, "第二页该是别的候选");
-    assert_eq!(
-        second_page.len(),
-        first_page.len(),
-        "翻一页该跳一整个窗口，两页一样长"
-    );
+    let second_screen: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
+    assert_ne!(first_screen, second_screen, "第二屏该是别的候选");
 
     tap_bar(&mut session, BarHitId::PagePrev);
     assert_eq!(
@@ -286,59 +281,68 @@ fn paging_shows_the_next_batch() {
             .iter()
             .map(|s| (*s).to_owned())
             .collect::<Vec<_>>(),
-        first_page,
-        "翻回来该是原来那一页"
+        first_screen,
+        "翻回来该是原来那一屏"
     );
 }
 
-/// 翻页**一次跳一整个窗口**，两窗不重不漏。
+/// **页码跟着手指走**——用户报的就是这个：滑了半天数字不动。
 ///
-/// 2026-09-21 起「一页」= 候选项一次铺多长（`WINDOW` = 24），不是「看得见几个」——
-/// 看得见几个由每格宽度自己定（候选条能滚）。所以这里只管翻页的步长对不对。
+/// 2026-09-21 之前页码是「第几批 / 共几批」，一批 24 个候选；一屏看得见十来个，
+/// 所以要滑满三屏多才跳一格，看着就像坏了。现在带子是通的，页码说的是屏。
 #[test]
-fn paging_jumps_a_whole_window() {
+fn the_page_number_follows_the_finger() {
     let Some(mut session) = ready() else {
         return;
     };
     type_text(&mut session, "shi");
-    let first: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
-    assert!(first.len() > 1, "「shi」的候选该不止一个窗口");
+    let viewport = WIDTH * DENSITY;
+    let page = |session: &Session| session.frame.footer.clone().unwrap_or_default();
 
-    tap_bar(&mut session, BarHitId::PageNext);
-    let second: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
+    assert!(page(&session).starts_with("1/"), "该从第一屏起");
 
-    assert_eq!(second.len(), first.len(), "第二窗也该是满的");
-    for text in &first {
-        assert!(!second.contains(text), "第二窗不该和第一窗重：「{text}」");
-    }
+    let (x, _) = bar_centre(&session, BarHitId::Candidate(0));
+    let y = bar_y(&session);
+    session.touch(MotionAction::Down, POINTER, x, y);
 
-    tap_bar(&mut session, BarHitId::PagePrev);
-    assert_eq!(
-        drawn(&session)
-            .iter()
-            .map(|s| (*s).to_owned())
-            .collect::<Vec<_>>(),
-        first,
-        "翻回来该是原来那一窗"
+    // 不到一屏：还在第一屏
+    session.touch(MotionAction::Move, POINTER, x - viewport * 0.4, y);
+    assert!(
+        page(&session).starts_with("1/"),
+        "半屏都还没滑到，该还在第一屏，实际 {}",
+        page(&session)
     );
+
+    // 过了一屏：第二屏
+    session.touch(MotionAction::Move, POINTER, x - viewport * 1.1, y);
+    assert!(
+        page(&session).starts_with("2/"),
+        "滑过一屏就该报第二屏，实际 {}",
+        page(&session)
+    );
+
+    session.touch(MotionAction::Up, POINTER, x - viewport * 1.1, y);
 }
 
 #[test]
-fn the_last_page_cannot_be_passed() {
+fn the_last_screen_cannot_be_passed() {
     let Some(mut session) = ready() else {
         return;
     };
     type_text(&mut session, "shi");
 
     // 一路翻到底。翻页的边界是纯算术，这里直接调动作而不是点箭头——
-    // 「点箭头能翻页」由上面那个测试覆盖，这个测试只管夹在首末页之间
+    // 「点箭头能翻页」由上面那个测试覆盖，这个测试只管夹在首末屏之间
     for _ in 0..300 {
         session.apply(Act::Page(1));
     }
-    let footer = session.frame.footer.clone().expect("该有多页");
-    let (page, pages) = footer.split_once('/').expect("页码形如 1/100");
-    assert_eq!(page, pages, "翻到底该停在最后一页，实际 {footer}");
-    let last_page: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
+    let footer = session.frame.footer.clone().expect("该有多屏");
+    let (screen, screens) = footer.split_once('/').expect("页码形如 1/100");
+    assert_eq!(
+        screen, screens,
+        "翻到底该停在最后一屏——分子走不到分母的话，页码会停在 24/25 那种数上，实际 {footer}"
+    );
+    let last_screen: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
 
     session.apply(Act::Page(1));
 
@@ -347,22 +351,22 @@ fn the_last_page_cannot_be_passed() {
             .iter()
             .map(|s| (*s).to_owned())
             .collect::<Vec<_>>(),
-        last_page,
-        "最后一页再往后翻该原地不动"
+        last_screen,
+        "最后一屏再往后翻该原地不动"
     );
     assert!(
-        !last_page.is_empty(),
-        "最后一页也该有候选（不该翻过头翻成空的）"
+        !last_screen.is_empty(),
+        "最后一屏也该有候选（不该翻过头翻成空的）"
     );
 }
 
 #[test]
-fn the_first_page_cannot_be_passed() {
+fn the_first_screen_cannot_be_passed() {
     let Some(mut session) = ready() else {
         return;
     };
     type_text(&mut session, "shi");
-    let first_page: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
+    let first_screen: Vec<String> = drawn(&session).iter().map(|s| (*s).to_owned()).collect();
 
     for _ in 0..3 {
         session.apply(Act::Page(-1));
@@ -373,8 +377,8 @@ fn the_first_page_cannot_be_passed() {
             .iter()
             .map(|s| (*s).to_owned())
             .collect::<Vec<_>>(),
-        first_page,
-        "第一页再往前翻该原地不动"
+        first_screen,
+        "第一屏再往前翻该原地不动"
     );
 }
 
@@ -433,32 +437,86 @@ fn dragging_the_bar_scrolls_it_and_does_not_select() {
     );
 }
 
-/// 一路往左拖过**一整页的宽度**，该接着翻到下一页。
+/// 滚过之后点候选，上屏的得是**手指底下那个**。
+///
+/// 命中矩形报的下标是「画出来这一批里的第几个」（从最左边看得见的那个数起），
+/// 换回整份候选表要加上滚过去的那一段——错一格就会上屏隔壁的词。
 #[test]
-fn dragging_past_the_page_width_turns_the_page() {
+fn tapping_after_scrolling_commits_the_one_under_the_finger() {
     let Some(mut session) = ready() else {
         return;
     };
     type_text(&mut session, "shi");
-    // 这一页铺开多宽：最后那格的右边缘
-    let rows = drawn(&session).len();
-    let last = session
-        .bar
-        .as_ref()
-        .expect("候选条还没画过")
-        .hits
-        .iter()
-        .filter(|hit| matches!(hit.id, BarHitId::Candidate(_)))
-        .map(|hit| hit.x + hit.width)
-        .fold(0.0, f32::max);
-    assert!(rows > 0 && last > 0.0, "「shi」该有候选");
+    let viewport = WIDTH * DENSITY;
+    let (x, _) = bar_centre(&session, BarHitId::Candidate(0));
+    let y = bar_y(&session);
 
+    // 拖过两屏多，停在半路上（没对齐屏边界）
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - viewport * 2.4, y);
+    session.touch(MotionAction::Up, POINTER, x - viewport * 2.4, y);
+    session.bar_surface();
+
+    // 点第三个——头一个可能只露半个在屏幕外
+    let expected = drawn(&session)[2].to_owned();
+    let (tx, _) = bar_centre(&session, BarHitId::Candidate(2));
+    tap_at(&mut session, tx, y);
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some(expected.as_str()),
+        "点哪个上屏哪个，不该串到隔壁"
+    );
+}
+
+/// 滚过之后空格上屏的，得是**第一个整个看得见的**候选——不是左边只露一条边那个。
+///
+/// 押的是「高亮认整格」：停在半格上时，最左边那格左边被切掉了，高亮该往后挪一格。
+/// 不挪的话屏幕上只有一条蓝边，空格上屏的却是个几乎看不见的词。
+#[test]
+fn space_commits_the_first_whole_candidate_after_scrolling() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    let viewport = WIDTH * DENSITY;
+    let (x, _) = bar_centre(&session, BarHitId::Candidate(0));
+    let y = bar_y(&session);
+
+    // 拖的距离带个零头，好停在一格的中间而不是格缝上
+    let drag = viewport * 0.6 + 17.0;
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - drag, y);
+    session.touch(MotionAction::Up, POINTER, x - drag, y);
+    session.bar_surface();
+
+    let cut = bar_left(&session, BarHitId::Candidate(0));
+    assert!(cut < 0.0, "该停在半格上：第一格左边该是负的，实际 {cut}");
+
+    let whole = drawn(&session)[1].to_owned();
+    session.apply(Act::CommitHighlighted);
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some(whole.as_str()),
+        "空格该上屏第一个整格"
+    );
+}
+
+/// 一路往左拖过**一整屏**，页码就该走到第二屏。
+#[test]
+fn dragging_a_whole_screen_turns_the_page() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    let viewport = WIDTH * DENSITY;
     let (x, _) = bar_centre(&session, BarHitId::Candidate(0));
     let y = bar_y(&session);
 
     session.touch(MotionAction::Down, POINTER, x, y);
-    // 拖过一整页还多一点：多出来的那点留在下一页上，接着滑
-    session.touch(MotionAction::Move, POINTER, x - last - 30.0, y);
+    // 拖过一整屏还多一点：多出来的那点留在第二屏上，接着滑
+    session.touch(MotionAction::Move, POINTER, x - viewport - 30.0, y);
 
     assert!(
         session
@@ -467,22 +525,23 @@ fn dragging_past_the_page_width_turns_the_page() {
             .as_deref()
             .unwrap_or_default()
             .starts_with("2/"),
-        "拖过一整页该翻到下一页，实际 {:?}",
+        "拖过一整屏该翻到第二屏，实际 {:?}",
         session.frame.footer
     );
 }
 
-/// 往右拖过页首，该翻回上一页，并从那一页的开头接着看。
+/// 往右拖回一整屏，页码就该走回第一屏。
 #[test]
-fn dragging_back_past_the_start_turns_back_a_page() {
+fn dragging_back_a_screen_turns_back_a_page() {
     let Some(mut session) = ready() else {
         return;
     };
     type_text(&mut session, "shi");
+    let viewport = WIDTH * DENSITY;
     let (x, _) = bar_centre(&session, BarHitId::Candidate(0));
     let y = bar_y(&session);
 
-    // 先翻到第二页，再往右拖过页首
+    // 先翻到第二屏，再往回拖
     tap_bar(&mut session, BarHitId::PageNext);
     assert!(
         session
@@ -491,11 +550,11 @@ fn dragging_back_past_the_start_turns_back_a_page() {
             .as_deref()
             .unwrap_or_default()
             .starts_with("2/"),
-        "先该在第二页"
+        "先该在第二屏"
     );
 
     session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x + 200.0, y);
+    session.touch(MotionAction::Move, POINTER, x + viewport - 30.0, y);
 
     assert!(
         session
@@ -504,7 +563,7 @@ fn dragging_back_past_the_start_turns_back_a_page() {
             .as_deref()
             .unwrap_or_default()
             .starts_with("1/"),
-        "拖过页首该翻回上一页，实际 {:?}",
+        "往回拖一整屏该回到第一屏，实际 {:?}",
         session.frame.footer
     );
 }

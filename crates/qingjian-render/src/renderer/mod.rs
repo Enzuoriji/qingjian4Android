@@ -23,7 +23,7 @@ use crate::shadow::Shadow;
 use crate::text::{TextPainter, TextSize, TextStyle};
 use crate::theme::{FontSpec, Theme};
 
-pub use bar::{BarHit, BarHitId, RenderedBar};
+pub use bar::{BarHit, BarHitId, BarStrip, RenderedBar};
 pub use keyboard::{KeyHit, Popup, RenderedKeyboard};
 pub use rendered::Rendered;
 pub use status::{RenderedStatus, StatusCell};
