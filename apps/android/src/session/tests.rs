@@ -828,8 +828,9 @@ fn the_bar_shrinks_to_a_gear_strip_when_not_composing() {
     type_text(&mut session, "nihao");
 
     // 组句：候选条接管，高度是主题定死的那个值（候选从 0 个变 6 个也不动）
+    // （那条细的 2026-09-21 从 30 抬到 36，所以这里就按「长高一截」比，不按倍数）
     assert!(
-        session.bar_height() > idle * 2.0,
+        session.bar_height() > idle * 1.5,
         "一打字候选条该把那一块接管过去"
     );
     let bytes = session.bar_surface();
