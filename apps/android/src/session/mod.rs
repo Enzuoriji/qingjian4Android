@@ -3,6 +3,8 @@
 //! 这里只管**引擎与候选条**。键盘的画法、命中与按下状态在 [`Keyboard`] 里，
 //! 触摸进来按 y 分给两边（见 [`Session::touch`]）——换掉键盘那半边不影响这一层。
 
+mod fling;
+
 #[cfg(test)]
 mod tests;
 
@@ -21,6 +23,7 @@ use crate::error::SessionError;
 use crate::keyboard::{Fired, Keyboard};
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
+use fling::Fling;
 
 /// 随包资源目录里的 emoji 字体名（`assets/emoji/README.md` 写了为什么要带它）。
 const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
@@ -41,6 +44,12 @@ pub mod flags {
 
     /// 拼音行变了，`setComposingText` 镜像一次。
     pub const PREEDIT: i32 = 8;
+
+    /// 惯性还在跑：壳接着排下一帧，问 [`Session::fling_step`] 要走多少。
+    ///
+    /// 这是唯一一个「下一步该做什么」的位，别的位都是「哪个面变了」——滑行得有人一直敲帧，
+    /// 而帧的节拍只在壳那边（安卓有现成的 `Handler`），所以只能这么告诉它别停。
+    pub const FLING: i32 = 16;
 }
 
 /// 安卓壳持有的会话状态。
@@ -102,6 +111,15 @@ pub struct Session {
     /// 一次铺 24 个再一批批翻，页码说的也是「第几批」，跟手指没对上），滚到哪儿画哪儿，
     /// 两头夹住（见 [`Self::scroll_by`]）。组句一变、或者按 `‹` `›` 翻页，都回到 0（从头看起）。
     scroll: f32,
+
+    /// 此刻甩出去的那一段滑行（见 [`Fling`]）。手指一落下就停。
+    fling: Option<Fling>,
+
+    /// 刚才**真的滚过这条带子**的那根手指。
+    ///
+    /// 只有它抬起时才谈得上「甩」：抬手时每根手指都会报速度上来（点候选、敲键盘也报），
+    /// 照单全收去滑带子就成了乱动。手指落下即清。
+    scrolled: Option<i32>,
 
     /// 当前该画的候选条那一帧。缓冲变化或翻页时由 [`Self::refresh`] 重建。
     frame: Frame,
@@ -199,6 +217,8 @@ impl Session {
             candidates: Vec::new(),
             strip: BarStrip::default(),
             scroll: 0.0,
+            fling: None,
+            scrolled: None,
             frame: Frame::default(),
             bar: None,
             bar_dirty: true,
@@ -277,6 +297,8 @@ impl Session {
             self.bar_dirty = true;
             // 带子的位置是**像素**——密度或主题一变就得重新铺开，不然页码按老尺寸算
             self.relayout();
+            // 尺寸变了，正在跑的那段滑行按老视口算的，停掉拉倒
+            self.fling = None;
         }
         if let Some(keyboard) = self.keyboard.as_mut() {
             keyboard.set_metrics(width, screen_height, density, bottom_inset, dark, landscape);
@@ -420,6 +442,12 @@ impl Session {
     /// 键盘那边的按钮语义（**要松**：手指抖几像素不该掉字）在 [`Keyboard::touch`] 里，
     /// 候选条这边见 [`Self::touch_bar`]。
     pub fn touch(&mut self, action: MotionAction, pointer: i32, x: f32, y: f32) -> i32 {
+        if matches!(action, MotionAction::Down | MotionAction::PointerDown) {
+            // 手指一落下就把滑行停住：滑到一半想抓回来是「摸住就停」那个手感，
+            // 不这么做的话按下去的那一下会和正在跑的惯性互相抢
+            self.fling = None;
+            self.scrolled = None;
+        }
         let bar_pixels = self.bar_pixels();
         let fired = self
             .keyboard
@@ -550,6 +578,8 @@ impl Session {
                 held.last = x;
                 if held.sliding && step != 0.0 {
                     self.scroll_by(step);
+                    // 记下是**这根手指**在滚：只有它抬起时才谈得上甩
+                    self.scrolled = Some(pointer);
                 }
             }
             MotionAction::Up | MotionAction::PointerUp => {
@@ -594,6 +624,9 @@ impl Session {
         }
         if self.pending_commit.is_some() || !self.pending_commands.is_empty() {
             mask |= flags::COMMIT;
+        }
+        if self.fling.is_some() {
+            mask |= flags::FLING;
         }
         mask
     }
@@ -748,6 +781,9 @@ impl Session {
     /// 缓冲变了：重查候选，带子从头铺开、也从头上看起。
     fn recompose(&mut self) {
         self.scroll = 0.0;
+        // 滑行是从「刚才滚到哪儿」接着走的，候选一换就没意义了
+        self.fling = None;
+        self.scrolled = None;
         self.candidates.clear();
         self.preedit = None;
         if !self.engine.composition().is_empty() {
@@ -896,6 +932,39 @@ impl Session {
         }
         self.scroll = wanted;
         self.refresh();
+    }
+
+    /// 一根手指抬起了：报上它的横向速度（**像素/秒，向右为正**，`VelocityTracker` 的单位与方向），
+    /// 够快就让带子接着滑一段。
+    ///
+    /// **速度由壳量**（安卓自带 `VelocityTracker`，自己算得再去摸时间戳），
+    /// 甩不甩、甩多远由这里定（[`Fling`]）。只有刚才**真的滚过这条带子**的那根手指才算数——
+    /// 点候选、敲键盘时壳同样会报速度上来，那不是「甩」。
+    pub fn start_fling(&mut self, pointer: i32, velocity_x: f32) -> i32 {
+        if self.scrolled == Some(pointer) {
+            // 手指往左甩（速度为负）= 带子往后滚，与 `scroll_by` 的正方向一致，所以取负；
+            // 再除以 1000 换成 `Fling` 用的像素/毫秒
+            self.fling = Fling::new(-velocity_x / 1000.0);
+        }
+        self.mask()
+    }
+
+    /// 惯性的一拍：过去 `dt` 毫秒，这一拍该挪多少由 [`Fling`] 算。
+    ///
+    /// 节拍在壳（安卓有现成的 `Handler`，还有真帧率）、手感在这——与长按连发、移光标同一个分工。
+    /// 滚到头、或者慢到看不出在动，就停（掩码里不再有 [`flags::FLING`]，壳那边跟着不再敲帧）。
+    pub fn fling_step(&mut self, dt: f32) -> i32 {
+        let Some(fling) = self.fling.as_mut() else {
+            return self.mask();
+        };
+        let step = fling.step(dt);
+        let finished = fling.finished();
+        let before = self.scroll;
+        self.scroll_by(step);
+        if finished || self.scroll == before {
+            self.fling = None;
+        }
+        self.mask()
     }
 }
 

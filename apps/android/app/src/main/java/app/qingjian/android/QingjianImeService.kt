@@ -135,6 +135,18 @@ class QingjianImeService : InputMethodService() {
             val flags = QingjianNative.cursorTick(handle, pointer)
             afterInput(view, flags, started)
         }
+        // 抬手速度：壳只管把安卓量到的速度报上去，甩不甩、甩多远是 Rust 的事。
+        view.onFling = { pointer, velocityX ->
+            val started = SystemClock.elapsedRealtime()
+            val flags = QingjianNative.fling(handle, pointer, velocityX)
+            afterInput(view, flags, started)
+        }
+        // 惯性的一帧：走多少由 Rust 按「过去多久」算。掩码里还有 FLAG_FLING 就接着敲。
+        view.onFlingTick = { dt ->
+            val started = SystemClock.elapsedRealtime()
+            val flags = QingjianNative.flingStep(handle, dt)
+            afterInput(view, flags, started)
+        }
         return view
     }
 
@@ -160,6 +172,9 @@ class QingjianImeService : InputMethodService() {
             refreshKeyboard(view)
         }
         refreshPopup(view)
+        // 还在滑就按帧接着敲，滑完了就停。**只有这里知道 Rust 那边还在不在跑**，
+        // 所以帧的开关也在这儿翻（惯性那几帧跟打字一样走这条收尾，慢了同样会报出来）。
+        view.setFlinging(flags and QingjianNative.FLAG_FLING != 0)
         val elapsed = SystemClock.elapsedRealtime() - started
         if (elapsed >= SLOW_TOUCH_MS) {
             Log.w(TAG, "这一下花了 ${elapsed}ms，打字会跟不上手感")

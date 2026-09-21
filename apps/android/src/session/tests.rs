@@ -4,6 +4,7 @@
 //! 所以布局一改、命中算错，这里先炸。「能打字能选词」这条验收因此是可断言的。
 
 use super::Session;
+use super::flags;
 use crate::action::{Act, Command};
 use crate::touch::MotionAction;
 use qingjian_core::CandidateKind;
@@ -435,6 +436,177 @@ fn dragging_the_bar_scrolls_it_and_does_not_select() {
         Some("shi"),
         "拼音该原样留着，接着看或接着打"
     );
+}
+
+/// 拖一段候选条，然后在 `dx` 处抬手（返回按下那点的坐标与 y）。
+///
+/// 上屏的东西一概不兑现——拖动只是看。速度由壳量好报上来，所以这里单独调
+/// [`Session::start_fling`]，不走触摸。
+fn drag_then_lift(session: &mut Session, dx: f32) {
+    let (x, _) = bar_centre(session, BarHitId::Candidate(0));
+    let y = bar_y(session);
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - dx, y);
+    session.touch(MotionAction::Up, POINTER, x - dx, y);
+    session.bar_surface();
+}
+
+/// 甩一把：手指抬了之后带子自己接着滑，一直滑到 Rust 说停。
+#[test]
+fn a_flick_glides_on_after_the_finger_leaves() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    let viewport = WIDTH * DENSITY;
+    drag_then_lift(&mut session, viewport * 0.2);
+
+    // 抬手速度 2000 像素/秒、往左甩（向右为正，所以是负的）
+    let flags = session.start_fling(POINTER, -2000.0);
+    assert_eq!(flags & flags::FLING, flags::FLING, "够快就该甩起来");
+    assert!(
+        session
+            .frame
+            .footer
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("1/"),
+        "起手该在第一屏"
+    );
+
+    let mut frames = 0;
+    while session.fling_step(16.0) & flags::FLING != 0 {
+        frames += 1;
+        assert!(frames < 200, "滑了两百帧还没停，衰减写错了");
+    }
+    assert!(frames > 3, "甩一把该滑好几帧，实际 {frames}");
+    assert!(
+        !session
+            .frame
+            .footer
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("1/"),
+        "该滑出去不止一屏，实际 {:?}",
+        session.frame.footer
+    );
+}
+
+/// 慢慢拖着松手：手指停在哪就是哪，不接着跑。
+#[test]
+fn a_slow_lift_does_not_glide() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    drag_then_lift(&mut session, 120.0);
+
+    // 100 像素/秒：比「甩」那条线（200）低
+    let flags = session.start_fling(POINTER, -100.0);
+    assert_eq!(flags & flags::FLING, 0, "慢慢松手不该自己跑起来");
+    let before = drawn(&session)
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect::<Vec<_>>();
+    session.fling_step(16.0);
+    assert_eq!(
+        drawn(&session)
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect::<Vec<_>>(),
+        before,
+        "没甩起来就一帧都不该动"
+    );
+}
+
+/// 在候选条上点一下（没滑）再快抬：那不是甩——壳对每一下都会报速度上来。
+#[test]
+fn a_tap_on_the_bar_does_not_glide() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    // 点在拼音行那块空处：不命中任何目标，也就不会上屏
+    let y = bar_y(&session);
+    session.touch(MotionAction::Down, POINTER, 120.0, y);
+    session.touch(MotionAction::Up, POINTER, 120.0, y);
+
+    let flags = session.start_fling(POINTER, -3000.0);
+    assert_eq!(flags & flags::FLING, 0, "点一下不是甩，速度再快也不算");
+}
+
+/// 滑行当中手指一落下就停住——想抓回来抓得住。
+#[test]
+fn a_new_touch_stops_the_glide() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    drag_then_lift(&mut session, 120.0);
+    assert_ne!(
+        session.start_fling(POINTER, -2000.0) & flags::FLING,
+        0,
+        "先得甩起来"
+    );
+
+    let (x, _) = bar_centre(&session, BarHitId::Candidate(0));
+    let y = bar_y(&session);
+    let flags = session.touch(MotionAction::Down, POINTER, x, y);
+    assert_eq!(flags & flags::FLING, 0, "手指一落下，滑行就该停");
+
+    let before = session.scroll;
+    session.fling_step(16.0);
+    assert_eq!(session.scroll, before, "停了就不该再动");
+}
+
+/// 候选换了（清空 / 上屏 / 再敲一个字母）滑行就停：那一段是接着「刚才滚到哪儿」走的。
+#[test]
+fn a_new_composition_stops_the_glide() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    drag_then_lift(&mut session, 120.0);
+    assert_ne!(
+        session.start_fling(POINTER, -2000.0) & flags::FLING,
+        0,
+        "先得甩起来"
+    );
+
+    session.apply(Act::Clear);
+
+    assert_eq!(
+        session.fling_step(16.0) & flags::FLING,
+        0,
+        "候选一换，滑行就该停"
+    );
+    assert_eq!(session.scroll, 0.0, "而且带子该回到头上");
+}
+
+/// 一路滑到底就停住，不会在尽头空转。
+#[test]
+fn the_glide_stops_at_the_end_of_the_strip() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "shi");
+    drag_then_lift(&mut session, 120.0);
+    // 比安卓能给的最大速度还快：一定要够到带子尾巴
+    assert_ne!(
+        session.start_fling(POINTER, -200_000.0) & flags::FLING,
+        0,
+        "先得甩起来"
+    );
+
+    let mut frames = 0;
+    while session.fling_step(16.0) & flags::FLING != 0 {
+        frames += 1;
+        assert!(frames < 400, "滑了 {frames} 帧还没停");
+    }
+
+    let footer = session.frame.footer.clone().expect("该有多屏");
+    let (screen, screens) = footer.split_once('/').expect("页码形如 1/100");
+    assert_eq!(screen, screens, "该正好停在最后一屏，实际 {footer}");
 }
 
 /// 滚过之后点候选，上屏的得是**手指底下那个**。

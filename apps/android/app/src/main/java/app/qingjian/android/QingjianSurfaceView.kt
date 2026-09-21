@@ -6,14 +6,21 @@ import android.graphics.Canvas
 import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
 import android.view.WindowInsets
 
 /** 按住多久开始连发（毫秒）。 */
 private const val REPEAT_DELAY_MS = 300L
 
-/** 连发间隔（毫秒）。400 + 50 的话，按住一秒能重复十来次。 */
+/** 连发间隔（毫秒）。300 + 50 的话，按住一秒能重复十来次。 */
 private const val REPEAT_INTERVAL_MS = 50L
+
+/** 惯性滑行的两帧之间（毫秒）。16 是 60Hz 一帧。 */
+private const val FLING_INTERVAL_MS = 16L
+
+/** 惯性一帧最多算多少毫秒——卡了一下的那一帧夹住，别让带子一下窜出去。 */
+private const val FLING_MAX_STEP_MS = 48L
 
 /**
  * 贴自绘位图的视图：上面一张候选条、下面一张键盘。
@@ -63,6 +70,12 @@ class QingjianSurfaceView(context: Context) : View(context) {
      */
     var onCursorTick: ((Int) -> Unit)? = null
 
+    /** 一根手指抬起时的横向速度（像素/秒，向右为正）——候选条据此接着滑一段。 */
+    var onFling: ((Int, Float) -> Unit)? = null
+
+    /** 惯性滑行的一拍，参数是这一拍实际过去多少毫秒。 */
+    var onFlingTick: ((Float) -> Unit)? = null
+
     /** 尺寸变化时回调，用来让服务重新告诉 Rust 该画多宽（转屏等）。 */
     var onConfigure: (() -> Unit)? = null
 
@@ -71,6 +84,9 @@ class QingjianSurfaceView(context: Context) : View(context) {
 
     /** 已经报过「按住够久了」的手指。每个按下只报一次，免得每 50ms 刷一行日志。 */
     private val reported = HashSet<Int>()
+
+    /** 抬手速度用。安卓自带的，比自己去摸时间戳算靠谱。 */
+    private var tracker: VelocityTracker? = null
 
     /**
      * 连发 / 移光标共用的一拍：每 50ms 把所有按着的手指各报一次，再排下一拍。
@@ -93,6 +109,41 @@ class QingjianSurfaceView(context: Context) : View(context) {
             }
             // 手指还按着就接着排；全松了的话 UP 那边已经把回调撤了
             if (downAt.isNotEmpty()) postDelayed(this, REPEAT_INTERVAL_MS)
+        }
+    }
+
+    /** 此刻在不在惯性滑行——Rust 那边的掩码带 [QingjianNative.FLAG_FLING] 就是还在跑。 */
+    private var flinging = false
+
+    /** 上一帧的时刻，用来算这一拍过去多久。 */
+    private var lastFlingAt = 0L
+
+    /**
+     * 惯性滑行的那几帧。
+     *
+     * 节拍在这、衰减曲线在 Rust（[QingjianNative.flingStep]）：这一拍走多少全由 Rust 按
+     * 「过去多久」算，所以掉帧了也走够距离、不会慢动作。
+     */
+    private val flingTicker = object : Runnable {
+        override fun run() {
+            if (!flinging) return
+            val now = SystemClock.uptimeMillis()
+            // 卡了一下的那一帧夹住：真卡了半秒的话，照实算会把带子一下甩出去老远
+            val elapsed = (now - lastFlingAt).coerceIn(1L, FLING_MAX_STEP_MS).toFloat()
+            lastFlingAt = now
+            onFlingTick?.invoke(elapsed)
+            if (flinging) postDelayed(this, FLING_INTERVAL_MS)
+        }
+    }
+
+    /** 通知「惯性还在不在跑」：在跑就按帧敲，停了就撤掉。 */
+    fun setFlinging(value: Boolean) {
+        if (value == flinging) return
+        flinging = value
+        removeCallbacks(flingTicker)
+        if (value) {
+            lastFlingAt = SystemClock.uptimeMillis()
+            postDelayed(flingTicker, FLING_INTERVAL_MS)
         }
     }
 
@@ -170,9 +221,31 @@ class QingjianSurfaceView(context: Context) : View(context) {
             }
         }
 
+        val tracker = this.tracker ?: VelocityTracker.obtain().also { this.tracker = it }
+        val lifting = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP
+        // **先量速度再加这一笔**：抬手那一笔一进 tracker，那根手指的历史就被清掉了，
+        // 再取速度只会拿到 0（壳这边量不到，Rust 那边就永远甩不起来）
+        val velocityX = if (lifting) {
+            tracker.computeCurrentVelocity(1000)
+            tracker.getXVelocity(pointer)
+        } else {
+            0f
+        }
+        tracker.addMovement(event)
+
         onTouch?.invoke(action, pointer, event.getX(index), y)
-        if (event.actionMasked == MotionEvent.ACTION_UP) {
+        // 抬手的这一下要**在 touch 之后报**：Rust 那边靠「刚才是谁在滚这条带子」判该不该甩，
+        // 而那个记录是移动时记下的，抬手时已经无用了（见 `Session::start_fling`）
+        if (lifting) {
+            onFling?.invoke(pointer, velocityX)
+        }
+        if (action == MotionEvent.ACTION_UP) {
             performClick()
+        }
+        // 最后一根手指抬走了才还回去；还有手指按着就接着用
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            tracker.recycle()
+            this.tracker = null
         }
         return true
     }

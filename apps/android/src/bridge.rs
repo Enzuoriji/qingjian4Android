@@ -291,6 +291,44 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_cursorTick(
     }
 }
 
+/// 一根手指抬起了，报上它的横向速度（**像素/秒，向右为正**，`VelocityTracker` 的单位与方向）。
+///
+/// 够快就让候选条接着滑一段——甩不甩、甩多远由 Rust 定（[`crate::session::Session::start_fling`]），
+/// 壳只管量速度（安卓自带 `VelocityTracker`，自己算得再去摸时间戳）。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_fling(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+    pointer: jint,
+    velocity_x: jfloat,
+) -> jint {
+    match unsafe { from_handle(handle) } {
+        Some(session) => catch_unwind(AssertUnwindSafe(|| {
+            session.start_fling(pointer, velocity_x)
+        }))
+        .unwrap_or(0),
+        None => 0,
+    }
+}
+
+/// 惯性的**一拍**：壳的帧到点了，问「过去 `dt` 毫秒，这一拍该挪多少」。
+///
+/// 返回的掩码里有 [`crate::session::flags::FLING`] 就接着敲下一帧，没有就停。
+/// 帧的节拍在壳、手感（衰减曲线）在 Rust——与长按连发、移光标同一个分工。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_flingStep(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+    dt: jfloat,
+) -> jint {
+    match unsafe { from_handle(handle) } {
+        Some(session) => catch_unwind(AssertUnwindSafe(|| session.fling_step(dt))).unwrap_or(0),
+        None => 0,
+    }
+}
+
 /// 该镜像给应用的拼音行（取走并清掉脏标记）。空串表示没在组句，壳应当 `finishComposingText`。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_takePreedit(

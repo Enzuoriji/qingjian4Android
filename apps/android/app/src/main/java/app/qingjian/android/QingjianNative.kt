@@ -94,6 +94,22 @@ object QingjianNative {
     external fun cursorTick(handle: Long, pointer: Int): Int
 
     /**
+     * 一根手指抬起了，报上它的横向速度（**像素/秒，向右为正**，就是 `VelocityTracker` 的单位与方向）。
+     *
+     * 壳只管量（安卓自带 `VelocityTracker`，自己算得再去摸时间戳），
+     * **该不该接着滑、滑多远由 Rust 定**——只有刚才真的滚过候选条的那根手指才算数。
+     */
+    external fun fling(handle: Long, pointer: Int, velocityX: Float): Int
+
+    /**
+     * 惯性滑行的**一拍**：壳的帧到点了，问「过去 `dtMs` 毫秒，这一拍该挪多少」。
+     *
+     * 返回的掩码里还有 [FLAG_FLING] 就接着敲下一帧，没有就停。
+     * 帧的节拍在壳、衰减曲线在 Rust——与 [repeat]、[cursorTick] 同一个分工。
+     */
+    external fun flingStep(handle: Long, dtMs: Float): Int
+
+    /**
      * 该镜像给应用的拼音行（取走并清掉脏标记）。
      *
      * 空串表示没在组句，壳应当 `finishComposingText()`。
@@ -132,6 +148,9 @@ object QingjianNative {
 
     /** 拼音行变了。 */
     const val FLAG_PREEDIT = 8
+
+    /** 候选条还在惯性滑行：壳接着排下一帧（问 [flingStep]）。 */
+    const val FLAG_FLING = 16
 
     init {
         System.loadLibrary("qingjian_android")
