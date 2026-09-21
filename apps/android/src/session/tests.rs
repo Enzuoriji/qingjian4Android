@@ -2469,6 +2469,39 @@ fn the_clipboard_survives_a_restart() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// **手指落在格子之间的缝里也能滚**——判的是哪一页，不是按住了哪个格子。
+///
+/// 用户 2026-09-21 指出的：原来只有按住剪贴板格 / 表情格才算滚，
+/// 手指稍微偏一点落在缝上（那儿 `hit()` 给 `None`）就滑不动，手感很差。
+#[test]
+fn a_drag_in_the_gutter_still_scrolls() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    for index in 0..6 {
+        session.note_clipboard(&format!("第 {index} 条"));
+    }
+    open_clipboard(&mut session);
+
+    // 第一格右边缘之外那条缝：缝不归任何格子，`hit()` 在那儿是 `None`
+    let (x, y, width, _) = key_rect(&session, KeyId::Clipboard(0));
+    let (gx, gy) = (x + width + 3.0, y + 20.0);
+    let before = session.clipboard_scroll;
+
+    session.touch(MotionAction::Down, POINTER, gx, gy);
+    session.touch(MotionAction::Move, POINTER, gx, gy - 40.0 * DENSITY);
+    session.touch(MotionAction::Up, POINTER, gx, gy - 40.0 * DENSITY);
+    session.keyboard_surface();
+
+    assert!(
+        session.clipboard_scroll > before,
+        "缝上起手也该能滚，实际 {} → {}",
+        before,
+        session.clipboard_scroll
+    );
+    assert_eq!(session.take_commit(), None, "滑过就不该当成点了一下");
+}
+
 /// 剪贴板列表**甩一下会自己接着滑**——与候选条那条带子同一套惯性，只是方向竖着。
 #[test]
 fn a_flick_keeps_the_clipboard_list_gliding() {

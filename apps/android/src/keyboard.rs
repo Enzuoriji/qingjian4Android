@@ -545,8 +545,12 @@ impl Keyboard {
                     // - **上下滑 = 滚列表**（跟手，每拍都要走）
                     // - **往左滑 = 要删这条**（松手才兑现、拖回原位就取消）
                     // 往左是「不要了」的方向，跟候选条上「往左看后面的候选」不冲突——那儿是另一块地方。
-                    // 剪贴板那几格与表情页的格子：**上下滑都是滚那一页的列表**
-                    if matches!(press.key, Some(KeyId::Clipboard(_) | KeyId::Emoji(_))) {
+                    // 剪贴板页与表情页：**上下滑就是滚那一页的列表**。
+                    //
+                    // 判的是**哪一页**，不是「按住了哪个格子」——手指落在格子之间的缝里、
+                    // 或者落在某个没内容的空格子上，一样得能滚（用户 2026-09-21 指出的：
+                    // 原来只有按住表情格才算滚，手指稍微偏一点就滑不动）。
+                    if self.layout.is_clipboard() || self.layout.is_emoji() {
                         let dx = x - press.at.0;
                         let dy = y - press.at.1;
                         let slop = SCROLL_SLOP * self.metrics.density;
@@ -558,7 +562,7 @@ impl Keyboard {
                             if step != 0.0 {
                                 return Some(Fired::ClipboardScroll(step));
                             }
-                        } else if matches!(press.key, Some(KeyId::Clipboard(_))) {
+                        } else if self.layout.is_clipboard() {
                             // **只有剪贴板那几格**能「往左滑删一条」——表情页的格子没有
                             // 「删」这回事（emoji 是随包的数据，不是用户的东西）。
                             // 这一条是 2026-09-21 补的：把滚动判定扩到表情格时忘了把
