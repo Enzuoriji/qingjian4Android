@@ -96,6 +96,11 @@ impl Renderer {
             y += row_height + gap_y;
         }
 
+        // 剪贴板空着时中间写一句：不写的话整块键盘上只剩底下那四个控制键，看着像坏了
+        if layout.is_clipboard() && state.clipboard.is_empty() {
+            self.draw_blank_clipboard(&mut canvas, theme, scale, content_width, rows_height);
+        }
+
         Ok(RenderedKeyboard {
             rendered: Rendered {
                 pixmap: canvas.into_pixmap(),
@@ -107,6 +112,33 @@ impl Renderer {
             },
             keys,
         })
+    }
+
+    /// 剪贴板一条都没有时，键盘中间写一句话（[`BLANK_CLIPBOARD`]）。
+    ///
+    /// 用淡一档的颜色（`label_hint`）——它是句说明，不是键帽上的字。
+    fn draw_blank_clipboard(
+        &mut self,
+        canvas: &mut Canvas,
+        theme: &KeyboardTheme,
+        scale: f32,
+        width: f32,
+        height: f32,
+    ) {
+        let style = TextStyle::new(
+            theme.font.scaled(scale),
+            theme.font.size,
+            theme.label_hint,
+            theme.text_gamma,
+        );
+        let size = self.measure(BLANK_CLIPBOARD, &style);
+        self.draw_text(
+            canvas,
+            BLANK_CLIPBOARD,
+            &style,
+            (width - size.width) / 2.0,
+            (height - size.height) / 2.0,
+        );
     }
 
     /// 画一个键：圆角键帽，再加上文字或图标。`slot` 是 `(x, y, 宽, 高)`。
@@ -122,7 +154,8 @@ impl Renderer {
         let (x, y, width, height) = slot;
         let text = label(key, state);
         // 剪贴板这一屏没那么多条：这一格整个不画（连键帽都不画），免得空一块白格子
-        if matches!(key.id, KeyId::Clipboard(_)) && text.is_empty() {
+        let sheet = matches!(key.id, KeyId::Clipboard(_));
+        if sheet && text.is_empty() {
             return;
         }
         let pressed = state.pressed == Some(key.id);
@@ -131,8 +164,12 @@ impl Renderer {
         if key.id == KeyId::Shift && state.shift == ShiftState::Locked {
             cap = theme.accent;
         }
+        // 剪贴板那种格子是**一张卡片**：左右各缩一点，别铺到屏幕边上——一条通到两边
+        // 看着像一整块面板，缩出两条缝才是一条条分开的（搜狗那些剪贴板条目就是这样）。
+        // 命中区照旧是整行宽（`render_keyboard` 报的是没缩过的 slot），手指点哪都算数。
+        let inset = if sheet { CARD_INSET * scale } else { 0.0 };
         let radius = (theme.radius * scale).min(width / 2.0).min(height / 2.0);
-        canvas.fill_round_rect(x, y, width, height, radius, cap);
+        canvas.fill_round_rect(x + inset, y, width - inset * 2.0, height, radius, cap);
 
         let (cx, cy) = (x + width / 2.0, y + height / 2.0);
 
@@ -177,9 +214,11 @@ impl Renderer {
                     theme.text_gamma,
                 );
                 let pad = CELL_TEXT_PADDING * scale;
-                let text = self.fit(&text, &style, width - pad * 2.0);
+                // 文字从**卡片**左边起算，不是从格子的边起算（卡片自己已经缩进去一点了）
+                let left = x + inset + pad;
+                let text = self.fit(&text, &style, width - (inset + pad) * 2.0);
                 let size = self.measure(&text, &style);
-                self.draw_text(canvas, &text, &style, x + pad, cy - size.height / 2.0);
+                self.draw_text(canvas, &text, &style, left, cy - size.height / 2.0);
             }
             _ => {
                 let style = TextStyle::new(
@@ -212,7 +251,17 @@ const MAIN_SHIFT: f32 = 0.10;
 /// 剪贴板那种「一段话」的格子，字离左右边缘各留多少（点）。
 ///
 /// 居中的键帽不留白也好看（字就一个），左边对齐的一长串贴边就难看了。
+/// 从**卡片**的边算起，不是从格子的边（卡片自己还缩了 [`CARD_INSET`]）。
 const CELL_TEXT_PADDING: f32 = 8.0;
+
+/// 剪贴板那种卡片，左右各缩进来多少（点）。
+///
+/// 格子本身是铺满整宽的，卡片再缩这么一点——通到屏幕两边就成「一整块面板」了，
+/// 缩出两条缝才看得出一条条分开。
+const CARD_INSET: f32 = 4.0;
+
+/// 剪贴板一条都没有时，键盘中间那行字。
+const BLANK_CLIPBOARD: &str = "暂无剪贴板内容";
 
 /// 键帽上写什么字。图标键（Shift / 退格）由 [`Renderer::draw_key`] 提前分走，不会走到这里。
 fn label(key: &Key, state: &KeyboardState) -> String {
@@ -267,11 +316,16 @@ fn label(key: &Key, state: &KeyboardState) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{KeyHit, label};
+    use super::{CARD_INSET, KeyHit, label};
     use crate::fonts::FontLibrary;
     use crate::keyboard::{InputMode, Key, KeyId, KeyboardLayout, KeyboardState, Panel};
     use crate::renderer::Renderer;
     use crate::theme::KeyboardTheme;
+
+    /// 没有系统字体（CI 容器）就跳过——下面几个测试都要画字。
+    fn renderer() -> Option<Renderer> {
+        FontLibrary::system("zh-CN").ok().map(Renderer::new)
+    }
 
     /// 逗号与句号**跟着中 / 英走**。
     ///
@@ -301,8 +355,7 @@ mod tests {
 
     /// 键上图标（⇧ / ⌫）的边长**占键高的比例**，量的是画出来的深色像素。
     fn icon_ratio(scale: f32) -> Option<(f32, f32)> {
-        let library = FontLibrary::system("zh-CN").ok()?;
-        let mut renderer = Renderer::new(library);
+        let mut renderer = renderer()?;
         let layout = KeyboardLayout::letters();
         let out = renderer
             .render_keyboard(
@@ -456,16 +509,16 @@ mod tests {
             clipboard_page: page,
             ..KeyboardState::default()
         };
-        let cell = |index| Key::new(KeyId::Clipboard(index), 2.5);
+        let cell = |index| Key::new(KeyId::Clipboard(index), 5.0);
 
         assert_eq!(label(&cell(0), &state(0)), "第 0 条");
-        assert_eq!(label(&cell(5), &state(0)), "第 5 条", "第一屏六格");
-        assert_eq!(label(&cell(0), &state(1)), "第 6 条", "第二屏从第七条起");
-        assert_eq!(label(&cell(1), &state(1)), "第 7 条");
+        assert_eq!(label(&cell(4), &state(0)), "第 4 条", "第一屏五条");
+        assert_eq!(label(&cell(0), &state(1)), "第 5 条", "第二屏从第六条起");
+        assert_eq!(label(&cell(2), &state(1)), "第 7 条");
         assert_eq!(
-            label(&cell(2), &state(1)),
+            label(&cell(3), &state(1)),
             "",
-            "这一屏只剩两条，第三格该是空的"
+            "这一屏只剩三条，第四格该是空的"
         );
     }
 
@@ -474,9 +527,65 @@ mod tests {
     fn an_empty_clipboard_draws_no_cells() {
         let state = KeyboardState::default();
         assert_eq!(
-            label(&Key::new(KeyId::Clipboard(0), 2.5), &state),
+            label(&Key::new(KeyId::Clipboard(0), 5.0), &state),
             "",
             "一条都没有时第一格也是空的"
+        );
+    }
+
+    /// 剪贴板那一条是**一张卡片**：比格子窄一点，左右各缩 [`CARD_INSET`]，不铺到屏幕两边。
+    ///
+    /// 用户 2026-09-21 要「仿搜狗的样式」——一条通到屏幕两边就成了「一整块面板」，
+    /// 缩出两条缝才看得出一条条分开。命中区不受影响，还是整行宽（手指点哪都算数）。
+    #[test]
+    fn the_clipboard_entries_are_cards() {
+        let Some(mut renderer) = renderer() else {
+            return;
+        };
+        let entries = ["你好".to_owned(), "世界".to_owned()];
+        let state = KeyboardState {
+            clipboard: &entries,
+            ..KeyboardState::default()
+        };
+        let scale = 2.0;
+        let out = renderer
+            .render_keyboard(
+                &KeyboardLayout::clipboard(),
+                &state,
+                360.0,
+                0.0,
+                &KeyboardTheme::light(),
+                scale,
+            )
+            .unwrap();
+
+        let hit = out
+            .keys
+            .iter()
+            .find(|key| key.id == KeyId::Clipboard(0))
+            .expect("该有第一格");
+        // 卡片是近白（252）、底色是浅灰（220）——沿这一格的中线扫一遍，取白的那一段
+        // （字是黑的，只夹在中间，不影响两头）
+        let pixmap = &out.rendered.pixmap;
+        let line = (hit.y + hit.height / 2.0) as u32;
+        let mut span = hit.x as u32..(hit.x + hit.width) as u32;
+        let white = |x: u32| {
+            pixmap
+                .pixel(x, line)
+                .is_some_and(|p| p.red() > 240 && p.green() > 240)
+        };
+        let left = span.clone().find(|&x| white(x)).expect("该扫到卡片");
+        let right = span.rfind(|&x| white(x)).expect("该扫到卡片");
+
+        let inset = (left as f32 - hit.x) / scale;
+        assert!(
+            (inset - CARD_INSET).abs() < 1.0,
+            "卡片左边该缩进来 {CARD_INSET} 点，实际 {inset}"
+        );
+        let inset = (hit.x + hit.width - 1.0 - right as f32) / scale;
+        assert!(
+            (inset - CARD_INSET).abs() < 1.0,
+            "卡片右边该缩进来 {CARD_INSET} 点，实际 {inset}"
         );
     }
 }

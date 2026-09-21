@@ -2294,7 +2294,7 @@ fn the_clipboard_pages_through_the_entries() {
     assert_eq!(session.clipboard_page, 0, "第一屏再往前翻该不动");
 }
 
-/// 第二屏点的是**整份里第 7 条**（本屏第 1 格），不是第一条。
+/// 第二屏点的是**本屏第一条**（整份里第 6 个），不是整份第一条。
 #[test]
 fn the_second_page_pastes_the_right_entry() {
     let Some(mut session) = ready() else {
@@ -2308,12 +2308,12 @@ fn the_second_page_pastes_the_right_entry() {
     tap_key(&mut session, KeyId::ClipboardPage(1));
     tap_key(&mut session, KeyId::Clipboard(0));
 
-    // 最新在最前，整份是 [第7, 第6, 第5, 第4, 第3, 第2, 第1, 第0]：
-    // 第二屏第一格 = 整份第 7 个（从 0 数）= 「第 1 条」
+    // 最新在最前，整份是 [第7, 第6, 第5, 第4, 第3, 第2, 第1, 第0]，一屏五条：
+    // 第二屏第一格 = 整份第 6 个（从 0 数）= 「第 2 条」
     assert_eq!(
         session.take_commit().as_deref(),
-        Some("第 1 条"),
-        "第二屏第一格该是整份第 7 个，不是第一个"
+        Some("第 2 条"),
+        "第二屏第一格该是整份第 6 个，不是第一个"
     );
 }
 
@@ -2323,17 +2323,18 @@ fn deleting_the_last_page_falls_back_a_page() {
     let Some(mut session) = ready() else {
         return;
     };
-    for index in 0..7 {
+    // 六条：正好一屏五条 + 第二屏一条
+    for index in 0..6 {
         session.note_clipboard(&format!("第 {index} 条"));
     }
     open_clipboard(&mut session);
     tap_key(&mut session, KeyId::ClipboardPage(1));
-    assert_eq!(session.clipboard_page, 1, "七条该有第二屏");
+    assert_eq!(session.clipboard_page, 1, "六条该有第二屏");
 
     // 第二屏只有一条，删掉它就只剩一屏了
     swipe_left(&mut session, KeyId::Clipboard(0));
 
-    assert_eq!(session.clipboard.len(), 6);
+    assert_eq!(session.clipboard.len(), 5);
     assert_eq!(session.clipboard_page, 0, "只剩一屏了，页码该收回来");
     assert_eq!(session.frame.footer, None, "一屏就没有页码");
 }

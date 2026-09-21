@@ -10,8 +10,12 @@ use super::panel::Panel;
 /// 单位宽取最挤的那一行，所以各页的行宽一致、格子边缘对得齐。
 const ROW_UNITS: f32 = 5.0;
 
-/// 剪贴板一屏几条（三行两格）。
-pub const CLIPBOARD_CELLS: usize = 6;
+/// 剪贴板一屏几条：**一条一行**，五行记录 + 第六行控制。
+///
+/// 2026-09-21 从「三行两格、一屏六条」改成这个（用户要「仿搜狗」）：两列时一条只摊到
+/// 半屏宽，十来个字就被截了，而剪贴板里多的是长句和网址——一行一条、占满整宽才认得出。
+/// 代价是一屏少一条，翻页顶上。
+pub const CLIPBOARD_CELLS: usize = 5;
 
 /// 工具页上那几行的名字，顺序就是 [`KeyboardLayout::tools`] 的行序。
 ///
@@ -219,33 +223,37 @@ impl KeyboardLayout {
         }
     }
 
-    /// 剪贴板页：三行两格的记录 + 一行控制。
+    /// 剪贴板页：**一条记录占一整行**，最后一行是控制。
     ///
-    /// 记录格 2.5 个单位、控制行四个 1 个单位的键——都是 5 个单位一行，
-    /// 所以**六格的左右边与别的页对得齐**（单位宽取最挤的那一行，这里是记录行）。
+    /// 记录格与别的页一样是 5 个单位一行（铺满整宽、左右边对得齐），
+    /// 控制行四个 1 个单位的键窄一点居中。
     pub fn clipboard() -> Self {
-        let cell = |index: usize| Key::new(KeyId::Clipboard(index), ROW_UNITS / 2.0);
-        Self {
-            rows: vec![
-                KeyRow {
-                    keys: vec![cell(0), cell(1)],
-                },
-                KeyRow {
-                    keys: vec![cell(2), cell(3)],
-                },
-                KeyRow {
-                    keys: vec![cell(4), cell(5)],
-                },
-                KeyRow {
-                    keys: vec![
-                        Key::new(KeyId::Panel(Panel::Letters), 1.0),
-                        Key::new(KeyId::ClipboardPage(-1), 1.0),
-                        Key::new(KeyId::ClipboardPage(1), 1.0),
-                        Key::new(KeyId::ClipboardClear, 1.0),
-                    ],
-                },
+        let mut rows: Vec<KeyRow> = (0..CLIPBOARD_CELLS)
+            .map(|index| KeyRow {
+                keys: vec![Key::new(KeyId::Clipboard(index), ROW_UNITS)],
+            })
+            .collect();
+        rows.push(KeyRow {
+            keys: vec![
+                Key::new(KeyId::Panel(Panel::Letters), 1.0),
+                Key::new(KeyId::ClipboardPage(-1), 1.0),
+                Key::new(KeyId::ClipboardPage(1), 1.0),
+                Key::new(KeyId::ClipboardClear, 1.0),
             ],
-        }
+        });
+        Self { rows }
+    }
+
+    /// 这一页是不是剪贴板页。
+    ///
+    /// 渲染器要知道这个：**空列表时它得在键盘中间写一句话**，不然整块键盘上只剩底下
+    /// 那四个控制键，看着像坏了（搜狗也是这么写的）。
+    pub fn is_clipboard(&self) -> bool {
+        self.rows.iter().any(|row| {
+            row.keys
+                .iter()
+                .any(|key| matches!(key.id, KeyId::Clipboard(_)))
+        })
     }
 
     /// 某一页的布局。
@@ -287,24 +295,31 @@ impl KeyboardLayout {
 
 #[cfg(test)]
 mod tests {
-    use super::{Key, KeyId, KeyWidth, KeyboardLayout, Panel};
+    use super::{CLIPBOARD_CELLS, Key, KeyId, KeyWidth, KeyboardLayout, Panel};
 
-    /// 剪贴板页：六格铺满整宽，控制行四个键窄一点居中。
+    /// 剪贴板页：**一条记录一行**、每行铺满整宽，控制行四个键窄一点居中。
     ///
-    /// 单位宽取**最挤的那一行**，这里是最上面那三行记录格（两个键、5 个单位）——
-    /// 所以六格的左右边与别的页对得齐，而下面那行四个键是居中的一组。
+    /// 2026-09-21 从「三行两格」改的（用户要仿搜狗）——所以这里守着「一行一个格子」，
+    /// 别退回两列：两列时一条只摊到半屏宽，长句和网址十来个字就被截了。
     #[test]
-    fn the_clipboard_page_cells_fill_the_row() {
+    fn the_clipboard_page_has_one_entry_per_row() {
         let layout = KeyboardLayout::clipboard();
         let (width, gap) = (360.0, 8.0);
         let unit = layout.unit_width(width, gap);
 
-        let cells = &layout.rows()[0];
-        assert_eq!(cells.keys.len(), 2, "一屏两格");
-        assert!(
-            (KeyboardLayout::row_width(cells, unit, gap) - width).abs() < 0.01,
-            "记录那两格该铺满整宽"
+        assert_eq!(
+            layout.rows().len(),
+            CLIPBOARD_CELLS + 1,
+            "记录一行一条，末尾再加一行控制"
         );
+        assert!(layout.is_clipboard(), "这一页该认得自己是剪贴板页");
+        for row in &layout.rows()[..CLIPBOARD_CELLS] {
+            assert_eq!(row.keys.len(), 1, "一行就一条记录");
+            assert!(
+                (KeyboardLayout::row_width(row, unit, gap) - width).abs() < 0.01,
+                "每条记录都该铺满整宽（长文本才放得下）"
+            );
+        }
 
         let control = layout.rows().last().expect("该有控制行");
         assert_eq!(control.keys.len(), 4, "返回 / 上一屏 / 下一屏 / 清空");
@@ -313,6 +328,14 @@ mod tests {
             (width * 0.7..width).contains(&control_width),
             "控制行该窄一点、居中，实际 {control_width}"
         );
+    }
+
+    /// 别的页不该被认成剪贴板页——那句话只写在剪贴板页中间。
+    #[test]
+    fn only_the_clipboard_page_says_it_is_one() {
+        for panel in [Panel::Letters, Panel::Digits, Panel::Symbols, Panel::Tools] {
+            assert!(!KeyboardLayout::of(panel).is_clipboard(), "{panel:?}");
+        }
     }
 
     /// 工具页：每一行整宽（一行 5 个单位，与数字 / 符号页同一个单位宽）。
