@@ -111,6 +111,17 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 不直接用 `displayMetrics` 的高度——有的 ROM 转屏后它还是报竖屏那个值
 （`QingjianImeService.screenHeightPoints`）。横竖屏也由壳判断后一起报。
 
+**候选条那个标（2026-09-21）**：没组句时那条细的最左边，画的是青简的标——`src/logo/`。
+路径数据是生成的（`assets/icon/render-logo-path.py` ← `assets/icon/menu.svg`，见那个 README），
+画法与 `gear.rs` 一样：**画路径不画字形**，先画在一张独立小图上再整张叠到画布。
+
+- **键帽是「形」、竹简是「色」**：键帽用这条的配色（明暗主题都看得见），四片竹简填成
+  App 图标那套绿（`#94BE52` / 深的那片 `#336F33`）。原来 menu.svg 里竹简是镂空的孔，
+  现在填成品牌绿。
+- **形状用菜单栏那个 39×28 的，不用 App 图标的**：App 图标（`logo.png` / Windows 的
+  `qingjian.ico`）是 2 列 × 3 行**六片**细竹简、内容框 1:3.4 的竖条——缩到这条 30 点高的
+  条子里每片只剩 4×7 点，糊成一团。菜单栏那个是横的、四片，塞得进。
+
 **剪贴板页（2026-09-21，K10 的一半）**：面板做成**键盘的第四、五页**（`Panel::Tools` / `Panel::Clipboard`）
 而不是另起一套绘制——四行等高、每行 5 个单位，就自动拿到了位图渲染、命中矩形、按下态与切页机制。
 
