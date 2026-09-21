@@ -22,3 +22,7 @@
 .idea
 *.iml
 *.stackdump
+
+# Python 那些生成脚本互相 import 会留下字节码缓存（assets/icon/*.py）
+__pycache__/
+*.pyc
