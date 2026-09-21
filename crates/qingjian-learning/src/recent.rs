@@ -1,4 +1,7 @@
-//! 剪贴板历史的落盘。
+//! 「最近用过的一串东西」的落盘：剪贴板历史、表情面板的「最近」都是它。
+//!
+//! 两处的形状一模一样——一串用户用过的文本，去重、插最前、有个条数上限、一改就写盘。
+//! 差别只有上限多少与文件名，所以是**一个类型两处用**（泛化之前它叫 `Clipboard`）。
 
 use std::path::{Path, PathBuf};
 
@@ -6,13 +9,16 @@ use qingjian_core::storage::{read_text_lossy, write_atomic_str};
 
 use crate::error::LearningError;
 
-/// 最多记几条——超了丢最旧的。
+/// 剪贴板历史最多记几条——超了丢最旧的。
 ///
 /// 参考项目 fcitx5-android 是可配的（缺省 20，界面里能改），搜狗存 500 条。
 /// 我们存 50：够翻十来屏，也不至于让那个文件长得没法看。
-pub const LIMIT: usize = 50;
+pub const CLIPBOARD_LIMIT: usize = 50;
 
-/// 剪贴板历史的落盘：**一行一条、最新的在最前**。
+/// 表情面板的「最近」记几条。一排格子 15 个，两排够用。
+pub const EMOJI_RECENT_LIMIT: usize = 30;
+
+/// 一串「最近用过的东西」的落盘：**一行一条、最新的在最前**。
 ///
 /// 与这个 crate 里别的表有两点不一样：
 ///
@@ -21,28 +27,47 @@ pub const LIMIT: usize = 50;
 ///   「用户刚复制的那一条」，而输入法进程在安卓上随时会被杀，攒着写就等于白记。
 /// - **内容是任意文本**（可能带换行、制表符），所以每条要转义（见 [`escape`]），
 ///   不然一行一条这个格式会被内容里的换行撑破。
-#[derive(Debug, Default)]
-pub struct Clipboard {
+#[derive(Debug)]
+pub struct Recent {
     /// 历史，最新的在最前。
     entries: Vec<String>,
 
     /// 写回的路径；`None` 只在内存里记（壳没给数据目录时）。
     path: Option<PathBuf>,
+
+    /// 最多记几条——超了丢最旧的。
+    limit: usize,
 }
 
-impl Clipboard {
+impl Default for Recent {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+            path: None,
+            // 只在内存里记时也得有个上限：`truncate(0)` 会把刚记的立刻丢掉。
+            // 真用的时候一律走 `open`，上限由调用方按用途给。
+            limit: CLIPBOARD_LIMIT,
+        }
+    }
+}
+
+impl Recent {
     /// 从文件加载（文件不在就从零开始，头一次 [`Self::remember`] 时建）；
-    /// 读不了就退回只在内存里记——剪贴板丢了不该让输入法起不来。
-    pub fn open(path: impl Into<PathBuf>) -> Self {
+    /// 读不了就退回只在内存里记——这点数据丢了不该让输入法起不来。
+    pub fn open(path: impl Into<PathBuf>, limit: usize) -> Self {
         let path = path.into();
         match read_text_lossy(&path) {
             Ok(text) => Self {
-                entries: text.as_deref().map(parse).unwrap_or_default(),
+                entries: text.as_deref().map(|t| parse(t, limit)).unwrap_or_default(),
                 path: Some(path),
+                limit,
             },
             Err(error) => {
-                tracing::warn!(path = %path.display(), %error, "剪贴板历史读不了，这一次只在内存里记");
-                Self::default()
+                tracing::warn!(path = %path.display(), %error, "最近用过的那串读不了，这一次只在内存里记");
+                Self {
+                    limit,
+                    ..Self::default()
+                }
             }
         }
     }
@@ -72,7 +97,7 @@ impl Clipboard {
         }
         self.entries.retain(|entry| entry != text);
         self.entries.insert(0, text.to_owned());
-        self.entries.truncate(LIMIT);
+        self.entries.truncate(self.limit);
         self.save();
         true
     }
@@ -95,6 +120,17 @@ impl Clipboard {
         self.entries.clear();
         self.save();
         true
+    }
+
+    /// 把不想要的条目去掉（谁说了算由调用方给）。变了就写盘。
+    ///
+    /// 用在「上次记下的东西这回画不出来了」这种时候：字体换了、或者渲染器加载的清单变了。
+    pub fn retain(&mut self, keep: impl Fn(&str) -> bool) {
+        let before = self.entries.len();
+        self.entries.retain(|entry| keep(entry));
+        if self.entries.len() != before {
+            self.save();
+        }
     }
 
     /// 写回文件。**失败只记日志**：内存里那份还在，这一次会话照常用。
@@ -162,18 +198,18 @@ fn unescape(line: &str) -> String {
 }
 
 /// 按行解析。坏行（转义完是空的）跳过，超 [`LIMIT`] 的丢掉——文件被手改过也不至于出事。
-fn parse(text: &str) -> Vec<String> {
+fn parse(text: &str, limit: usize) -> Vec<String> {
     text.lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .map(unescape)
         .filter(|entry| !entry.trim().is_empty())
-        .take(LIMIT)
+        .take(limit)
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Clipboard, LIMIT, escape, unescape};
+    use super::{CLIPBOARD_LIMIT, Recent, escape, unescape};
 
     fn dir(name: &str) -> std::path::PathBuf {
         let dir =
@@ -194,7 +230,7 @@ mod tests {
 
     #[test]
     fn remembers_the_newest_first_and_does_not_repeat() {
-        let mut clipboard = Clipboard::default();
+        let mut clipboard = Recent::default();
         clipboard.remember("一");
         clipboard.remember("二");
         assert_eq!(clipboard.entries(), ["二", "一"], "最新的在最前");
@@ -208,12 +244,15 @@ mod tests {
 
     #[test]
     fn drops_the_oldest_past_the_limit() {
-        let mut clipboard = Clipboard::default();
-        for index in 0..LIMIT + 10 {
+        let mut clipboard = Recent::default();
+        for index in 0..CLIPBOARD_LIMIT + 10 {
             clipboard.remember(&format!("第 {index} 条"));
         }
-        assert_eq!(clipboard.len(), LIMIT);
-        assert_eq!(clipboard.entries()[0], format!("第 {} 条", LIMIT + 9));
+        assert_eq!(clipboard.len(), CLIPBOARD_LIMIT);
+        assert_eq!(
+            clipboard.entries()[0],
+            format!("第 {} 条", CLIPBOARD_LIMIT + 9)
+        );
         assert!(
             !clipboard.entries().contains(&"第 0 条".to_owned()),
             "最旧的该被丢掉了"
@@ -224,14 +263,14 @@ mod tests {
     fn round_trips_through_the_file() {
         let dir = dir("round");
         let path = dir.join("clipboard.tsv");
-        let mut clipboard = Clipboard::open(&path);
+        let mut clipboard = Recent::open(&path, CLIPBOARD_LIMIT);
         assert!(clipboard.is_empty(), "文件还没有，从头开始");
 
         clipboard.remember("带\n换行的");
         clipboard.remember("普通一条");
         assert!(path.is_file(), "记一条就该落盘");
 
-        let reloaded = Clipboard::open(&path);
+        let reloaded = Recent::open(&path, CLIPBOARD_LIMIT);
         assert_eq!(
             reloaded.entries(),
             ["普通一条", "带\n换行的"],
@@ -239,12 +278,15 @@ mod tests {
         );
 
         // 删一条、清空，也都是立刻落盘
-        let mut reopened = Clipboard::open(&path);
+        let mut reopened = Recent::open(&path, CLIPBOARD_LIMIT);
         assert!(reopened.remove(0));
         assert!(!reopened.remove(9), "下标越界什么也不做");
-        assert_eq!(Clipboard::open(&path).entries(), ["带\n换行的"]);
+        assert_eq!(
+            Recent::open(&path, CLIPBOARD_LIMIT).entries(),
+            ["带\n换行的"]
+        );
         assert!(reopened.clear());
-        assert!(Clipboard::open(&path).is_empty());
+        assert!(Recent::open(&path, CLIPBOARD_LIMIT).is_empty());
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -254,7 +296,7 @@ mod tests {
         let dir = dir("broken");
         let path = dir.join("clipboard.tsv");
         std::fs::write(&path, "# 头\n\n好的\n   \n也好的\n").unwrap();
-        let clipboard = Clipboard::open(&path);
+        let clipboard = Recent::open(&path, CLIPBOARD_LIMIT);
         assert_eq!(clipboard.entries(), ["好的", "也好的"], "空行与注释跳过");
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -13,7 +13,7 @@ use std::path::Path;
 
 use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
 use qingjian_dictionary::Dictionary;
-use qingjian_learning::Clipboard;
+use qingjian_learning::{CLIPBOARD_LIMIT, EMOJI_RECENT_LIMIT, Recent};
 use qingjian_render::{
     BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
     Preedit, PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme,
@@ -50,6 +50,9 @@ const CANDIDATE_LIMIT: usize = 80;
 /// 表情面板那两张表（随包资源目录里解出来的，见 `assets/emoji/README.md`）。
 const EMOJI_PANEL_FILE: &str = "emoji-panel.tsv";
 const KAOMOJI_PANEL_FILE: &str = "kaomoji-panel.tsv";
+
+/// 「最近用过的表情」落在数据目录里的文件名。
+const EMOJI_RECENT_FILE: &str = "emoji-recent.tsv";
 
 /// 剪贴板历史落在数据目录里的文件名（同目录下还有解出来的词库与 emoji 表）。
 const CLIPBOARD_FILE: &str = "clipboard.tsv";
@@ -98,6 +101,9 @@ struct EmojiPanel {
 
 /// 标签条一屏摆几个分类。
 const EMOJI_GROUP_SLOTS: usize = 3;
+
+/// 「最近用过的」那个分类在标签条上叫什么（它是**插在最前面**的第 0 类，不是表里的）。
+const RECENT_LABEL: &str = "最近";
 
 /// 一屏摆几个表情（与 `qingjian_render` 的 `EMOJI_COLS × EMOJI_ROWS` 是同一个数）。
 const EMOJI_SLOTS: usize = 15;
@@ -161,6 +167,27 @@ impl EmojiPanel {
     /// 标签条一共几屏（至少 1）。
     fn screens(&self) -> usize {
         self.names.len().div_ceil(EMOJI_GROUP_SLOTS).max(1)
+    }
+
+    /// 把「最近用过的」摆到最前面当一类（一条都没有时不摆）。
+    ///
+    /// emoji 与颜文字**共用一份**最近记录（搜狗那个「最近」也是不分类型的）——
+    /// 刚用过的那个排第一，下次进来一眼就能点到。
+    fn set_recent(&mut self, recent: &[String]) {
+        let has = self.names.first().is_some_and(|name| name == RECENT_LABEL);
+        if recent.is_empty() {
+            if has {
+                self.names.remove(0);
+                self.items.remove(0);
+            }
+            return;
+        }
+        if has {
+            self.items[0] = recent.to_vec();
+        } else {
+            self.names.insert(0, RECENT_LABEL.to_owned());
+            self.items.insert(0, recent.to_vec());
+        }
     }
 
     /// 把画不出来的条目去掉——「画不画得出来」由调用方判（那边有渲染器，知道字体里
@@ -274,7 +301,10 @@ pub struct Session {
     /// **落盘的**（`qingjian-learning` 的 [`Clipboard`]，数据目录里那个 `clipboard.tsv`）：
     /// 输入法进程在安卓上被杀得很勤，只在内存里的话「刚复制的那条」说没就没。
     /// 每次改动它自己就写盘，这里不用管。
-    clipboard: Clipboard,
+    clipboard: Recent,
+
+    /// 「最近用过的表情」，emoji 与颜文字共用一份（落盘）。
+    emoji_recent: Recent,
 
     /// 表情面板的两份数据（emoji 与颜文字共用一套机制，各喂一份）。
     ///
@@ -398,6 +428,17 @@ impl Session {
             kaomoji_panel.retain(|text| renderer.covers(text));
         }
 
+        // 「最近用过的」插在最前面当一类（顺序在 `retain` 之后：滤掉的那些不该再出现）
+        let mut emoji_recent = data_dir.map_or_else(Recent::default, |dir| {
+            Recent::open(dir.join(EMOJI_RECENT_FILE), EMOJI_RECENT_LIMIT)
+        });
+        // 上次用过、但这回画不出来的（换了字体之类）就别留着了
+        if let Some(renderer) = renderer.as_ref() {
+            emoji_recent.retain(|text| renderer.covers(text));
+        }
+        emoji_panel.set_recent(emoji_recent.entries());
+        kaomoji_panel.set_recent(emoji_recent.entries());
+
         Ok(Self {
             engine,
             renderer,
@@ -416,12 +457,13 @@ impl Session {
             scroll: 0.0,
             fling: None,
             scrolled: None,
+            emoji_recent,
             emoji: emoji_panel,
             kaomoji: kaomoji_panel,
             emoji_group_screen: 0,
             emoji_scroll: 0.0,
-            clipboard: data_dir.map_or_else(Clipboard::default, |dir| {
-                Clipboard::open(dir.join(CLIPBOARD_FILE))
+            clipboard: data_dir.map_or_else(Recent::default, |dir| {
+                Recent::open(dir.join(CLIPBOARD_FILE), CLIPBOARD_LIMIT)
             }),
             clipboard_fling: None,
             clipboard_scrolled: None,
@@ -1356,7 +1398,14 @@ impl Session {
         let Some(text) = self.emoji_panel().visible(first).get(index).cloned() else {
             return;
         };
-        self.commit_text(text);
+        self.commit_text(text.clone());
+        // 用过就记进「最近」，下次进来排在最前面（两页共用一份，所以两页都要更新）
+        if self.emoji_recent.remember(&text) {
+            let recent = self.emoji_recent.entries().to_vec();
+            self.emoji.set_recent(&recent);
+            self.kaomoji.set_recent(&recent);
+            self.mark_keyboard_dirty();
+        }
     }
 
     /// 点了分类标签：切到那一类。`index` 是**这一屏里的第几个**，要换算回整份里的下标。
