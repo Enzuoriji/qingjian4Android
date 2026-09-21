@@ -10,7 +10,7 @@ import android.view.View
 import android.view.WindowInsets
 
 /** 按住多久开始连发（毫秒）。 */
-private const val REPEAT_DELAY_MS = 400L
+private const val REPEAT_DELAY_MS = 300L
 
 /** 连发间隔（毫秒）。400 + 50 的话，按住一秒能重复十来次。 */
 private const val REPEAT_INTERVAL_MS = 50L
@@ -76,7 +76,7 @@ class QingjianSurfaceView(context: Context) : View(context) {
      * 连发 / 移光标共用的一拍：每 50ms 把所有按着的手指各报一次，再排下一拍。
      *
      * 两者要的时机不一样，所以分了两个回调：**长按连发**要按够 [`REPEAT_DELAY_MS`] 才算，
-     * **移光标**是拖动当中就走（等 400ms 才动就太迟了）。
+     * **移光标**是拖动当中就走（等 300ms 才动就太迟了）。
      */
     private val ticker = object : Runnable {
         override fun run() {

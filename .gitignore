@@ -3,6 +3,7 @@
 .DS_Store
 *.app
 .env
+*.bat
 /logs
 /data
 .playwright-mcp/

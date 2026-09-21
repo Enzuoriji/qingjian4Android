@@ -303,7 +303,7 @@ macOS / Windows / CLI 都显式 `with_learner(FrequencyLearner)`，只有 `Sessi
   键「还落在同一个键上」就一直算按着（键大，抖几像素不该掉字），候选条「挪出触摸阈值」才算没挪窝（横向拖是滑动选词的手势）；
   共用的 `within_slop` 在 `src/touch.rs`，阈值那点事只留一个版本。
 - **取角标改成长按字母键弹一排选项**（2026-09-21，撤掉「键上滑动」）。
-  长按够 400ms（壳的心跳来问 `Session::repeat` → `Keyboard::begin_choice`）弹出
+  长按够 300ms（壳的心跳来问 `Session::repeat` → `Keyboard::begin_choice`）弹出
   **`[大写][符号][小写]`** 三格，默认中间那个；手指左右滑过 `Chooser::STEP`（16 点）换一格，
   松手兑现所选。选中的那格在气泡里垫一块底色（`Popup::Choices`；`popup_for` 第四个数
   从 bool 改成「形态」编码：0 普通 / 1 松手清空 / 2 起是选中下标——手指滑一下就得重画）。
@@ -311,7 +311,7 @@ macOS / Windows / CLI 都显式 `with_learner(FrequencyLearner)`，只有 `Sessi
   小写走 `Letter`（照常进拼音）、符号走 `Literal`。
   **撤掉滑动取角标的原因**：真机上快打会误蹦符号，而那条路**治不好**——
   「手指出了键 = 作废」与阈值线重合（都在半个键宽上），把方向收成只认往下、阈值提到 22
-  都只是压概率。长按是有意的动作，快打按不到 400ms，**误触面直接归零**。
+  都只是压概率。长按是有意的动作，快打按不到 300ms，**误触面直接归零**。
   `SWIPE` 22 点现在只剩 ⌫ 上滑清空一处用。
 - **认成手势的手指不再因「滑出键外」作废**：`hinted` / `cursor_started` / `clearing` 三个都排掉了；
   而且 `hinted` 认出来的**那一刻会把之前记下的 `sliding` 抹掉**——往下滑够 22 点之前手指可能
