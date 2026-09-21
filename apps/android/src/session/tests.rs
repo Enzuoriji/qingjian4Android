@@ -1657,7 +1657,7 @@ fn clearing_suppresses_the_backspace_repeat() {
     session.touch(MotionAction::Move, POINTER, x, y - up);
     session.take_commands();
 
-    // 壳那边按够 400ms 会开始敲连发
+    // 壳那边按够 300ms 会开始敲连发
     for _ in 0..10 {
         session.repeat(POINTER);
     }
@@ -2016,7 +2016,7 @@ fn showing_the_keyboard_again_goes_back_to_letters_without_dropping_the_pinyin()
 /// **长按字母键弹出那排选项，默认（没滑就松手）打的是符号。**
 ///
 /// 2026-09-21 定的：取代原先「在键上往下滑取角标」。那个手势真机上快打仍会误蹦符号，
-/// 换成长按——快打按不到 400ms，误触面直接归零。
+/// 换成长按——快打按不到 300ms（壳的 `REPEAT_DELAY_MS`），误触面直接归零。
 /// 那排是 **大写 / 符号 / 小写**，默认停在中间那个。
 #[test]
 fn long_pressing_a_letter_key_types_its_symbol_by_default() {
@@ -2026,7 +2026,7 @@ fn long_pressing_a_letter_key_types_its_symbol_by_default() {
     let (x, y) = key_centre(&session, KeyId::Letter('q'));
 
     session.touch(MotionAction::Down, POINTER, x, y);
-    // 壳按够 400ms 来问一次——这一下开的不是连发，是那排选项
+    // 壳按够 300ms 来问一次——这一下开的不是连发，是那排选项
     session.repeat(POINTER);
     session.touch(MotionAction::Up, POINTER, x, y);
 
