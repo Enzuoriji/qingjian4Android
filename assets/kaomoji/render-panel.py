@@ -22,6 +22,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 SOURCE = ROOT / "data/kaomoji/kaomoji.json"
+EMOJI_TEST = ROOT / "data/emoji/emoji-test.txt"
 # 生成到 ../emoji/ 下：gradle 是把目录**平铺**进 assets 根的，两个目录都有 README
 # 与脚本会撞名（`mergeReleaseAssets` 直接报 Duplicate resources），所以只挂那一个目录。
 OUT = HERE.parent / "emoji" / "kaomoji-panel.tsv"
@@ -63,11 +64,27 @@ PER_CATEGORY = 40
 MAX_CHARS = 24
 
 
+def emoji_points():
+    """Unicode 那张 emoji 表里出现过的码点。
+
+    拿来滤掉颜文字里「本身就是 emoji」的那几条：`☺︎` 这种字符字体里当然有，
+    过了字形那一关，渲染器就按**彩色 emoji** 画出来——摆在颜文字堆里格格不入。
+    """
+    points = set()
+    for line in EMOJI_TEST.read_text(encoding="utf-8").splitlines():
+        if line.startswith("#") or ";" not in line:
+            continue
+        for code in line.split(";")[0].split():
+            points.add(int(code, 16))
+    return points
+
+
 def main():
     if not SOURCE.is_file():
         sys.exit(f"没有 {SOURCE.relative_to(ROOT)}，先按文件头那条 curl 下载")
     table = json.loads(SOURCE.read_text(encoding="utf-8"))
 
+    emojis = emoji_points()
     rows = []
     for name, label in CATEGORIES:
         items = table.get(name)
@@ -78,6 +95,10 @@ def main():
         for item in items:
             text = item.strip()
             if not text or text in seen or len(text) > MAX_CHARS:
+                continue
+            # 就一两个字符、还落在 emoji 表里的，那是 emoji 不是颜文字（`☺︎`）。
+            # 长的那几条里夹着 emoji 表里的符号是常事（`♥` 之类），不能一竿子打翻
+            if len(text) <= 2 and any(ord(c) in emojis for c in text):
                 continue
             seen.add(text)
             rows.append((label, text))
