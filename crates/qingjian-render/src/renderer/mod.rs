@@ -54,6 +54,16 @@ pub struct Renderer {
     text: TextPainter,
 }
 
+impl Renderer {
+    /// 这段文本**画得出来**吗（转发给文字测绘，见 [`TextPainter::covers`]）。
+    ///
+    /// 渲染器只加载清单里那几个字体、不扫系统，所以有些字符没有字形，画出来是豆腐块。
+    /// 表情面板加载数据时用它过一遍。
+    pub fn covers(&self, text: &str) -> bool {
+        self.text.covers(text)
+    }
+}
+
 /// 一次渲染期间的上下文：主题按倍数换算后的像素值。
 pub(super) struct Metrics<'a> {
     pub(super) theme: &'a Theme,

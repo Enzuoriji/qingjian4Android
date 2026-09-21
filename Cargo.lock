@@ -2840,6 +2840,7 @@ dependencies = [
  "tiny-skia",
  "tracing",
  "tracing-subscriber",
+ "ttf-parser",
  "unicode-script",
  "windows",
 ]

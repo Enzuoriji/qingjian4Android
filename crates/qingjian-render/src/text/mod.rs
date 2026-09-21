@@ -32,6 +32,33 @@ pub(crate) struct TextPainter {
 }
 
 impl TextPainter {
+    /// 这段文本**每个字符都画得出来**吗。
+    ///
+    /// 渲染器**只加载清单里那几个字体、不扫系统**（启动快、各平台画出来一致），
+    /// 所以有些字符压根没有字形——颜文字里的 `⑅`、`╹`、`∀` 这些，画出来就是一排豆腐块。
+    /// 表情面板加载数据时拿它过一遍，画不出来的条目干脆不收。
+    ///
+    /// 空白与**变体选择符 / 零宽连接符**一律放行——它们本来就不占字形，
+    /// 但 emoji 序列（`👨‍👩‍👧`）和 `☺︎` 这类要靠它们才拼得对。
+    pub(crate) fn covers(&self, text: &str) -> bool {
+        text.chars().all(|c| self.covers_char(c))
+    }
+
+    fn covers_char(&self, c: char) -> bool {
+        if c.is_whitespace() || matches!(c, '\u{200D}' | '\u{FE0E}' | '\u{FE0F}') {
+            return true;
+        }
+        self.font_system.db().faces().any(|face| {
+            self.font_system
+                .db()
+                .with_face_data(face.id, |data, index| {
+                    ttf_parser::Face::parse(data, index)
+                        .is_ok_and(|face| face.glyph_index(c).is_some())
+                })
+                .unwrap_or(false)
+        })
+    }
+
     pub(crate) fn new(library: FontLibrary) -> Self {
         let mut font_system = library.into_font_system();
         let buffer = Buffer::new(&mut font_system, Metrics::new(16.0, 19.0));

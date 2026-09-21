@@ -163,6 +163,25 @@ impl EmojiPanel {
         self.names.len().div_ceil(EMOJI_GROUP_SLOTS).max(1)
     }
 
+    /// 把画不出来的条目去掉——「画不画得出来」由调用方判（那边有渲染器，知道字体里
+    /// 有什么字形）。**分类被滤空了就整组去掉**：标签条上留一个点进去什么都没有的分类
+    /// 没意义。
+    fn retain(&mut self, keep: impl Fn(&str) -> bool) {
+        let mut names = Vec::new();
+        let mut items = Vec::new();
+        for (name, group) in self.names.drain(..).zip(self.items.drain(..)) {
+            let kept: Vec<String> = group.into_iter().filter(|item| keep(item)).collect();
+            if kept.is_empty() {
+                continue;
+            }
+            names.push(name);
+            items.push(kept);
+        }
+        self.names = names;
+        self.items = items;
+        self.group = 0;
+    }
+
     /// 当前这一类里，**从第 `first` 行起要画的那几个**。
     ///
     /// 一页放不下（笑脸那一类 172 个），所以要能往下滑——跟剪贴板那份列表同一个做法：
@@ -365,6 +384,20 @@ impl Session {
             engine = engine.with_emoji(table);
         }
 
+        // 面板数据按**渲染器画不画得出来**过一遍：渲染器只加载清单里那几个字体、不扫系统，
+        // 颜文字里那些 `⑅`、`╹`、`∀` 没有字形，摆到面板上就是一排豆腐块；
+        // emoji 那边同一张表已经按字形滤过了，这里再过一道是同一条规矩。
+        let mut emoji_panel = bundle.map_or_else(EmojiPanel::default, |dir| {
+            EmojiPanel::open(&dir.join(EMOJI_PANEL_FILE))
+        });
+        let mut kaomoji_panel = bundle.map_or_else(EmojiPanel::default, |dir| {
+            EmojiPanel::open(&dir.join(KAOMOJI_PANEL_FILE))
+        });
+        if let Some(renderer) = renderer.as_ref() {
+            emoji_panel.retain(|text| renderer.covers(text));
+            kaomoji_panel.retain(|text| renderer.covers(text));
+        }
+
         Ok(Self {
             engine,
             renderer,
@@ -383,12 +416,8 @@ impl Session {
             scroll: 0.0,
             fling: None,
             scrolled: None,
-            emoji: bundle.map_or_else(EmojiPanel::default, |dir| {
-                EmojiPanel::open(&dir.join(EMOJI_PANEL_FILE))
-            }),
-            kaomoji: bundle.map_or_else(EmojiPanel::default, |dir| {
-                EmojiPanel::open(&dir.join(KAOMOJI_PANEL_FILE))
-            }),
+            emoji: emoji_panel,
+            kaomoji: kaomoji_panel,
             emoji_group_screen: 0,
             emoji_scroll: 0.0,
             clipboard: data_dir.map_or_else(Clipboard::default, |dir| {
