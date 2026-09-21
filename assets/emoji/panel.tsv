@@ -1,0 +1,1934 @@
+# 表情面板的排布：分组\temoji\t中文名\t英文名，按 Unicode 的 CLDR 顺序（面板就照这个排）
+# 由 render-panel.py 从 Unicode emoji-test.txt 生成（Unicode License v3），别手改
+# Smileys & Emotion
+Smileys & Emotion	😀	嘿嘿	grinning face
+Smileys & Emotion	😃	哈哈	grinning face with big eyes
+Smileys & Emotion	😄	笑	grinning face with smiling eyes
+Smileys & Emotion	😁	嘻嘻	beaming face with smiling eyes
+Smileys & Emotion	😆	笑	grinning squinting face
+Smileys & Emotion	😅	冷汗	grinning face with sweat
+Smileys & Emotion	🤣	笑	rolling on the floor laughing
+Smileys & Emotion	😂	笑	face with tears of joy
+Smileys & Emotion	🙂	呵呵	slightly smiling face
+Smileys & Emotion	🙃	脸	upside-down face
+Smileys & Emotion	🫠	冷笑	melting face
+Smileys & Emotion	🫫	cracking face	cracking face
+Smileys & Emotion	😉	媚眼	winking face
+Smileys & Emotion	😊	害羞	smiling face with smiling eyes
+Smileys & Emotion	😇	光环	smiling face with halo
+Smileys & Emotion	🥰	爱慕	smiling face with hearts
+Smileys & Emotion	😍	红心	smiling face with heart-eyes
+Smileys & Emotion	🤩	兴奋	star-struck
+Smileys & Emotion	😘	亲亲	face blowing a kiss
+Smileys & Emotion	😗	亲亲	kissing face
+Smileys & Emotion	☺️	smiling face	smiling face
+Smileys & Emotion	😚	亲亲	kissing face with closed eyes
+Smileys & Emotion	😙	亲亲	kissing face with smiling eyes
+Smileys & Emotion	🥲	喜悦	smiling face with tear
+Smileys & Emotion	😋	口水	face savoring food
+Smileys & Emotion	😛	吐舌	face with tongue
+Smileys & Emotion	😜	单眼	winking face with tongue
+Smileys & Emotion	🤪	大眼	zany face
+Smileys & Emotion	😝	可怕	squinting face with tongue
+Smileys & Emotion	🤑	发财	money-mouth face
+Smileys & Emotion	🤗	抱	smiling face with open hands
+Smileys & Emotion	🤭	不说	face with hand over mouth
+Smileys & Emotion	🫢	哇塞	face with open eyes and hand over mouth
+Smileys & Emotion	🫣	偷看	face with peeking eye
+Smileys & Emotion	🤫	安静	shushing face
+Smileys & Emotion	🤔	想	thinking face
+Smileys & Emotion	🫡	军队	saluting face
+Smileys & Emotion	🤐	嘴	zipper-mouth face
+Smileys & Emotion	🤨	怀疑	face with raised eyebrow
+Smileys & Emotion	😐	冷漠	neutral face
+Smileys & Emotion	😑	无语	expressionless face
+Smileys & Emotion	😶	安静	face without mouth
+Smileys & Emotion	🫥	内向	dotted line face
+Smileys & Emotion	😶‍🌫️	face in clouds	face in clouds
+Smileys & Emotion	😏	假笑	smirking face
+Smileys & Emotion	😒	不屑	unamused face
+Smileys & Emotion	🙄	无语	face with rolling eyes
+Smileys & Emotion	😬	尴尬	grimacing face
+Smileys & Emotion	😮‍💨	叹息	face exhaling
+Smileys & Emotion	🤥	说谎	lying face
+Smileys & Emotion	🫨	地震	shaking face
+Smileys & Emotion	🙂‍↔️	head shaking horizontally	head shaking horizontally
+Smileys & Emotion	🙂‍↕️	head shaking vertically	head shaking vertically
+Smileys & Emotion	😌	松口气	relieved face
+Smileys & Emotion	😔	失落	pensive face
+Smileys & Emotion	😪	困	sleepy face
+Smileys & Emotion	🤤	口水	drooling face
+Smileys & Emotion	😴	呼噜	sleeping face
+Smileys & Emotion	🫩	眼	face with bags under eyes
+Smileys & Emotion	😷	医生	face with medical mask
+Smileys & Emotion	🤒	发烧	face with thermometer
+Smileys & Emotion	🤕	受伤	face with head-bandage
+Smileys & Emotion	🤢	恶心	nauseated face
+Smileys & Emotion	🤮	吐	face vomiting
+Smileys & Emotion	🤧	喷嚏	sneezing face
+Smileys & Emotion	🥵	中暑	hot face
+Smileys & Emotion	🥶	冷	cold face
+Smileys & Emotion	🥴	喝醉	woozy face
+Smileys & Emotion	😵	头晕	face with crossed-out eyes
+Smileys & Emotion	😵‍💫	晕	face with spiral eyes
+Smileys & Emotion	🤯	惊吓	exploding head
+Smileys & Emotion	🤠	帽	cowboy hat face
+Smileys & Emotion	🥳	脸	partying face
+Smileys & Emotion	🥸	脸	disguised face
+Smileys & Emotion	😎	脸	smiling face with sunglasses
+Smileys & Emotion	🤓	脸	nerd face
+Smileys & Emotion	🧐	古板	face with monocle
+Smileys & Emotion	😕	不懂	confused face
+Smileys & Emotion	🫤	困惑	face with diagonal mouth
+Smileys & Emotion	😟	伤心	worried face
+Smileys & Emotion	🙁	委屈	slightly frowning face
+Smileys & Emotion	☹️	frowning face	frowning face
+Smileys & Emotion	😮	吃惊	face with open mouth
+Smileys & Emotion	😯	吃惊	hushed face
+Smileys & Emotion	😲	惊	astonished face
+Smileys & Emotion	😳	脸	flushed face
+Smileys & Emotion	🫪	惊喜	distorted face
+Smileys & Emotion	🥺	脸	pleading face
+Smileys & Emotion	🥹	哭泣	face holding back tears
+Smileys & Emotion	😦	啊	frowning face with open mouth
+Smileys & Emotion	😧	痛	anguished face
+Smileys & Emotion	😨	怕	fearful face
+Smileys & Emotion	😰	汗	anxious face with sweat
+Smileys & Emotion	😥	失望	sad but relieved face
+Smileys & Emotion	😢	哭	crying face
+Smileys & Emotion	😭	哭	loudly crying face
+Smileys & Emotion	😱	吓死	face screaming in fear
+Smileys & Emotion	😖	困惑	confounded face
+Smileys & Emotion	😣	专注	persevering face
+Smileys & Emotion	😞	失望	disappointed face
+Smileys & Emotion	😓	汗	downcast face with sweat
+Smileys & Emotion	😩	累	weary face
+Smileys & Emotion	😫	累	tired face
+Smileys & Emotion	🥱	呵欠	yawning face
+Smileys & Emotion	😤	不爽	face with steam from nose
+Smileys & Emotion	😡	怒	enraged face
+Smileys & Emotion	😠	不爽	angry face
+Smileys & Emotion	🤬	脸	face with symbols on mouth
+Smileys & Emotion	😈	幻想	smiling face with horns
+Smileys & Emotion	👿	幻想	angry face with horns
+Smileys & Emotion	💀	头骨	skull
+Smileys & Emotion	☠️	skull and crossbones	skull and crossbones
+Smileys & Emotion	💩	大便	pile of poo
+Smileys & Emotion	🤡	脸	clown face
+Smileys & Emotion	👹	吓人	ogre
+Smileys & Emotion	👺	妖怪	goblin
+Smileys & Emotion	👻	鬼	ghost
+Smileys & Emotion	👽	外星	alien
+Smileys & Emotion	👾	外星	alien monster
+Smileys & Emotion	🤖	怪物	robot
+Smileys & Emotion	😺	笑	grinning cat
+Smileys & Emotion	😸	笑	grinning cat with smiling eyes
+Smileys & Emotion	😹	快乐	cat with tears of joy
+Smileys & Emotion	😻	猫	smiling cat with heart-eyes
+Smileys & Emotion	😼	奸笑	cat with wry smile
+Smileys & Emotion	😽	亲亲	kissing cat
+Smileys & Emotion	🙀	惊讶	weary cat
+Smileys & Emotion	😿	哭	crying cat
+Smileys & Emotion	😾	猫脸	pouting cat
+Smileys & Emotion	🙈	别看	see-no-evil monkey
+Smileys & Emotion	🙉	堵耳	hear-no-evil monkey
+Smileys & Emotion	🙊	捂嘴	speak-no-evil monkey
+Smileys & Emotion	💌	情书	love letter
+Smileys & Emotion	💘	箭	heart with arrow
+Smileys & Emotion	💝	我爱你	heart with ribbon
+Smileys & Emotion	💖	激动	sparkling heart
+Smileys & Emotion	💗	亲亲	growing heart
+Smileys & Emotion	💓	心动	beating heart
+Smileys & Emotion	💞	旋转	revolving hearts
+Smileys & Emotion	💕	爱情	two hearts
+Smileys & Emotion	💟	心	heart decoration
+Smileys & Emotion	❣️	heart exclamation	heart exclamation
+Smileys & Emotion	💔	伤心	broken heart
+Smileys & Emotion	❤️‍🔥	heart on fire	heart on fire
+Smileys & Emotion	❤️‍🩹	mending heart	mending heart
+Smileys & Emotion	❤️	red heart	red heart
+Smileys & Emotion	🩷	心	pink heart
+Smileys & Emotion	🧡	橙	orange heart
+Smileys & Emotion	💛	黄	yellow heart
+Smileys & Emotion	💚	绿	green heart
+Smileys & Emotion	💙	蓝	blue heart
+Smileys & Emotion	🩵	心	light blue heart
+Smileys & Emotion	💜	紫	purple heart
+Smileys & Emotion	🤎	心	brown heart
+Smileys & Emotion	🖤	心	black heart
+Smileys & Emotion	🩶	心	grey heart
+Smileys & Emotion	🤍	心	white heart
+Smileys & Emotion	💋	唇	kiss mark
+Smileys & Emotion	💯	满分	hundred points
+Smileys & Emotion	💢	怒	anger symbol
+Smileys & Emotion	🫯	争论	fight cloud
+Smileys & Emotion	💥	炸	collision
+Smileys & Emotion	💫	头晕	dizzy
+Smileys & Emotion	💦	汗	sweat droplets
+Smileys & Emotion	💨	尾气	dashing away
+Smileys & Emotion	🕳️	hole	hole
+Smileys & Emotion	💬	发言	speech balloon
+Smileys & Emotion	👁️‍🗨️	eye in speech bubble	eye in speech bubble
+Smileys & Emotion	🗨️	left speech bubble	left speech bubble
+Smileys & Emotion	🗯️	right anger bubble	right anger bubble
+Smileys & Emotion	💭	思想	thought balloon
+Smileys & Emotion	💤	呼噜	ZZZ
+# People & Body
+People & Body	👋	手	waving hand
+People & Body	🤚	手	raised back of hand
+People & Body	🖐️	hand with fingers splayed	hand with fingers splayed
+People & Body	✋	手	raised hand
+People & Body	🖖	手	vulcan salute
+People & Body	🫱	右	rightwards hand
+People & Body	🫲	左	leftwards hand
+People & Body	🫳	手	palm down hand
+People & Body	🫴	手	palm up hand
+People & Body	🫷	推	leftwards pushing hand
+People & Body	🫸	推	rightwards pushing hand
+People & Body	👌	OK	OK hand
+People & Body	🤌	匮乏	pinched fingers
+People & Body	🤏	一点	pinching hand
+People & Body	✌️	victory hand	victory hand
+People & Body	🤞	手	crossed fingers
+People & Body	🫰	手	hand with index finger and thumb crossed
+People & Body	🤟	手	love-you gesture
+People & Body	🤘	摇滚	sign of the horns
+People & Body	🤙	电话	call me hand
+People & Body	👈	手	backhand index pointing left
+People & Body	👉	手	backhand index pointing right
+People & Body	👆	手	backhand index pointing up
+People & Body	🖕	中指	middle finger
+People & Body	👇	手	backhand index pointing down
+People & Body	☝️	index pointing up	index pointing up
+People & Body	🫵	指	index pointing at the viewer
+People & Body	👍	同意	thumbs up
+People & Body	👎	反对	thumbs down
+People & Body	🫹	leftwards thumb sign	leftwards thumb sign
+People & Body	🫺	rightwards thumb sign	rightwards thumb sign
+People & Body	✊	举拳	raised fist
+People & Body	👊	拳	oncoming fist
+People & Body	🤛	拳头	left-facing fist
+People & Body	🤜	拳头	right-facing fist
+People & Body	👏	恭喜	clapping hands
+People & Body	🙌	手	raising hands
+People & Body	🫶	手	heart hands
+People & Body	👐	双手	open hands
+People & Body	🤲	双掌	palms up together
+People & Body	🤝	会面	handshake
+People & Body	🙏	合掌	folded hands
+People & Body	✍️	writing hand	writing hand
+People & Body	💅	护手	nail polish
+People & Body	🤳	手机	selfie
+People & Body	💪	强壮	flexed biceps
+People & Body	🦾	义肢	mechanical arm
+People & Body	🦿	腿	mechanical leg
+People & Body	🦵	腿	leg
+People & Body	🦶	脚	foot
+People & Body	👂	耳	ear
+People & Body	🦻	听障	ear with hearing aid
+People & Body	👃	鼻	nose
+People & Body	🧠	脑	brain
+People & Body	🫀	中心	anatomical heart
+People & Body	🫁	肺	lungs
+People & Body	🦷	牙医	tooth
+People & Body	🦴	叉骨	bone
+People & Body	👀	双眼	eyes
+People & Body	👁️	eye	eye
+People & Body	👅	舌	tongue
+People & Body	👄	嘴	mouth
+People & Body	🫦	口红	biting lip
+People & Body	👶	孩子	baby
+People & Body	🧒	中性	child
+People & Body	👦	男	boy
+People & Body	👧	女	girl
+People & Body	🧑	中性	person
+People & Body	👱	人	person: blond hair
+People & Body	👨	男	man
+People & Body	🧔	人	person: beard
+People & Body	🧔‍♂️	man: beard	man: beard
+People & Body	🧔‍♀️	woman: beard	woman: beard
+People & Body	👨‍🦰	男	man: red hair
+People & Body	👨‍🦱	男	man: curly hair
+People & Body	👨‍🦳	男	man: white hair
+People & Body	👨‍🦲	男	man: bald
+People & Body	👩	女	woman
+People & Body	👩‍🦰	女	woman: red hair
+People & Body	🧑‍🦰	中性	person: red hair
+People & Body	👩‍🦱	女	woman: curly hair
+People & Body	🧑‍🦱	中性	person: curly hair
+People & Body	👩‍🦳	女	woman: white hair
+People & Body	🧑‍🦳	中性	person: white hair
+People & Body	👩‍🦲	女	woman: bald
+People & Body	🧑‍🦲	中性	person: bald
+People & Body	👱‍♀️	woman: blond hair	woman: blond hair
+People & Body	👱‍♂️	man: blond hair	man: blond hair
+People & Body	🧓	中性	older person
+People & Body	👴	祖父	old man
+People & Body	👵	祖母	old woman
+People & Body	🙍	不满	person frowning
+People & Body	🙍‍♂️	man frowning	man frowning
+People & Body	🙍‍♀️	woman frowning	woman frowning
+People & Body	🙎	低落	person pouting
+People & Body	🙎‍♂️	man pouting	man pouting
+People & Body	🙎‍♀️	woman pouting	woman pouting
+People & Body	🙅	手	person gesturing NO
+People & Body	🙅‍♂️	man gesturing NO	man gesturing NO
+People & Body	🙅‍♀️	woman gesturing NO	woman gesturing NO
+People & Body	🙆	手	person gesturing OK
+People & Body	🙆‍♂️	man gesturing OK	man gesturing OK
+People & Body	🙆‍♀️	woman gesturing OK	woman gesturing OK
+People & Body	💁	介绍	person tipping hand
+People & Body	💁‍♂️	man tipping hand	man tipping hand
+People & Body	💁‍♀️	woman tipping hand	woman tipping hand
+People & Body	🙋	手	person raising hand
+People & Body	🙋‍♂️	man raising hand	man raising hand
+People & Body	🙋‍♀️	woman raising hand	woman raising hand
+People & Body	🧏	听力	deaf person
+People & Body	🧏‍♂️	deaf man	deaf man
+People & Body	🧏‍♀️	deaf woman	deaf woman
+People & Body	🙇	冥想	person bowing
+People & Body	🙇‍♂️	man bowing	man bowing
+People & Body	🙇‍♀️	woman bowing	woman bowing
+People & Body	🤦	尴尬	person facepalming
+People & Body	🤦‍♂️	man facepalming	man facepalming
+People & Body	🤦‍♀️	woman facepalming	woman facepalming
+People & Body	🤷	怀疑	person shrugging
+People & Body	🤷‍♂️	man shrugging	man shrugging
+People & Body	🤷‍♀️	woman shrugging	woman shrugging
+People & Body	🧑‍⚕️	health worker	health worker
+People & Body	👨‍⚕️	man health worker	man health worker
+People & Body	👩‍⚕️	woman health worker	woman health worker
+People & Body	🧑‍🎓	学生	student
+People & Body	👨‍🎓	男	man student
+People & Body	👩‍🎓	女	woman student
+People & Body	🧑‍🏫	教师	teacher
+People & Body	👨‍🏫	男	man teacher
+People & Body	👩‍🏫	女	woman teacher
+People & Body	🧑‍⚖️	judge	judge
+People & Body	👨‍⚖️	man judge	man judge
+People & Body	👩‍⚖️	woman judge	woman judge
+People & Body	🧑‍🌾	农民	farmer
+People & Body	👨‍🌾	农夫	man farmer
+People & Body	👩‍🌾	农妇	woman farmer
+People & Body	🧑‍🍳	做饭	cook
+People & Body	👨‍🍳	男	man cook
+People & Body	👩‍🍳	女	woman cook
+People & Body	🧑‍🔧	技工	mechanic
+People & Body	👨‍🔧	男	man mechanic
+People & Body	👩‍🔧	女	woman mechanic
+People & Body	🧑‍🏭	工业	factory worker
+People & Body	👨‍🏭	男	man factory worker
+People & Body	👩‍🏭	女	woman factory worker
+People & Body	🧑‍💼	商人	office worker
+People & Body	👨‍💼	男	man office worker
+People & Body	👩‍💼	女	woman office worker
+People & Body	🧑‍🔬	化学家	scientist
+People & Body	👨‍🔬	男	man scientist
+People & Body	👩‍🔬	女	woman scientist
+People & Body	🧑‍💻	发明	technologist
+People & Body	👨‍💻	男	man technologist
+People & Body	👩‍💻	女	woman technologist
+People & Body	🧑‍🎤	明星	singer
+People & Body	👨‍🎤	男	man singer
+People & Body	👩‍🎤	女	woman singer
+People & Body	🧑‍🎨	画家	artist
+People & Body	👨‍🎨	男	man artist
+People & Body	👩‍🎨	女	woman artist
+People & Body	🧑‍✈️	pilot	pilot
+People & Body	👨‍✈️	man pilot	man pilot
+People & Body	👩‍✈️	woman pilot	woman pilot
+People & Body	🧑‍🚀	火箭	astronaut
+People & Body	👨‍🚀	男	man astronaut
+People & Body	👩‍🚀	女	woman astronaut
+People & Body	🧑‍🚒	消防员	firefighter
+People & Body	👨‍🚒	男	man firefighter
+People & Body	👩‍🚒	女	woman firefighter
+People & Body	👮	交警	police officer
+People & Body	👮‍♂️	man police officer	man police officer
+People & Body	👮‍♀️	woman police officer	woman police officer
+People & Body	🕵️	detective	detective
+People & Body	🕵️‍♂️	man detective	man detective
+People & Body	🕵️‍♀️	woman detective	woman detective
+People & Body	💂	伦敦	guard
+People & Body	💂‍♂️	man guard	man guard
+People & Body	💂‍♀️	woman guard	woman guard
+People & Body	🥷	人物	ninja
+People & Body	👷	头盔	construction worker
+People & Body	👷‍♂️	man construction worker	man construction worker
+People & Body	👷‍♀️	woman construction worker	woman construction worker
+People & Body	🫅	君主	person with crown
+People & Body	🤴	王子	prince
+People & Body	👸	公主	princess
+People & Body	👳	头巾	person wearing turban
+People & Body	👳‍♂️	man wearing turban	man wearing turban
+People & Body	👳‍♀️	woman wearing turban	woman wearing turban
+People & Body	👲	人物	person with skullcap
+People & Body	🧕	头巾	woman with headscarf
+People & Body	🤵	人	person in tuxedo
+People & Body	🤵‍♂️	man in tuxedo	man in tuxedo
+People & Body	🤵‍♀️	woman in tuxedo	woman in tuxedo
+People & Body	👰	人	person with veil
+People & Body	👰‍♂️	man with veil	man with veil
+People & Body	👰‍♀️	woman with veil	woman with veil
+People & Body	🤰	女人	pregnant woman
+People & Body	🫃	充满	pregnant man
+People & Body	🫄	充满	pregnant person
+People & Body	🤱	乳房	breast-feeding
+People & Body	👩‍🍼	人物	woman feeding baby
+People & Body	👨‍🍼	人物	man feeding baby
+People & Body	🧑‍🍼	人	person feeding baby
+People & Body	👼	儿童	baby angel
+People & Body	🎅	圣诞	Santa Claus
+People & Body	🤶	圣诞	Mrs. Claus
+People & Body	🧑‍🎄	人	Mx Claus
+People & Body	🦸	好人	superhero
+People & Body	🦸‍♂️	man superhero	man superhero
+People & Body	🦸‍♀️	woman superhero	woman superhero
+People & Body	🦹	坏蛋	supervillain
+People & Body	🦹‍♂️	man supervillain	man supervillain
+People & Body	🦹‍♀️	woman supervillain	woman supervillain
+People & Body	🧙	召唤	mage
+People & Body	🧙‍♂️	man mage	man mage
+People & Body	🧙‍♀️	woman mage	woman mage
+People & Body	🧚	仙女	fairy
+People & Body	🧚‍♂️	man fairy	man fairy
+People & Body	🧚‍♀️	woman fairy	woman fairy
+People & Body	🧛	利牙	vampire
+People & Body	🧛‍♂️	man vampire	man vampire
+People & Body	🧛‍♀️	woman vampire	woman vampire
+People & Body	🧜	人鱼	merperson
+People & Body	🧜‍♂️	merman	merman
+People & Body	🧜‍♀️	mermaid	mermaid
+People & Body	🧝	神秘	elf
+People & Body	🧝‍♂️	man elf	man elf
+People & Body	🧝‍♀️	woman elf	woman elf
+People & Body	🧞	奇幻	genie
+People & Body	🧞‍♂️	man genie	man genie
+People & Body	🧞‍♀️	woman genie	woman genie
+People & Body	🧟	僵尸	zombie
+People & Body	🧟‍♂️	man zombie	man zombie
+People & Body	🧟‍♀️	woman zombie	woman zombie
+People & Body	🧌	幻想	troll
+People & Body	🫈	多毛	hairy creature
+People & Body	💆	头痛	person getting massage
+People & Body	💆‍♂️	man getting massage	man getting massage
+People & Body	💆‍♀️	woman getting massage	woman getting massage
+People & Body	💇	剪头	person getting haircut
+People & Body	💇‍♂️	man getting haircut	man getting haircut
+People & Body	💇‍♀️	woman getting haircut	woman getting haircut
+People & Body	🚶	徒步	person walking
+People & Body	🚶‍♂️	man walking	man walking
+People & Body	🚶‍♀️	woman walking	woman walking
+People & Body	🚶‍➡️	person walking facing right	person walking facing right
+People & Body	🚶‍♀️‍➡️	woman walking facing right	woman walking facing right
+People & Body	🚶‍♂️‍➡️	man walking facing right	man walking facing right
+People & Body	🧍	人物	person standing
+People & Body	🧍‍♂️	man standing	man standing
+People & Body	🧍‍♀️	woman standing	woman standing
+People & Body	🧎	下跪	person kneeling
+People & Body	🧎‍♂️	man kneeling	man kneeling
+People & Body	🧎‍♀️	woman kneeling	woman kneeling
+People & Body	🧎‍➡️	person kneeling facing right	person kneeling facing right
+People & Body	🧎‍♀️‍➡️	woman kneeling facing right	woman kneeling facing right
+People & Body	🧎‍♂️‍➡️	man kneeling facing right	man kneeling facing right
+People & Body	🧑‍🦯	盲	person with white cane
+People & Body	🧑‍🦯‍➡️	person with white cane facing right	person with white cane facing right
+People & Body	👨‍🦯	男	man with white cane
+People & Body	👨‍🦯‍➡️	man with white cane facing right	man with white cane facing right
+People & Body	👩‍🦯	女	woman with white cane
+People & Body	👩‍🦯‍➡️	woman with white cane facing right	woman with white cane facing right
+People & Body	🧑‍🦼	轮椅	person in motorized wheelchair
+People & Body	🧑‍🦼‍➡️	person in motorized wheelchair facing right	person in motorized wheelchair facing right
+People & Body	👨‍🦼	男	man in motorized wheelchair
+People & Body	👨‍🦼‍➡️	man in motorized wheelchair facing right	man in motorized wheelchair facing right
+People & Body	👩‍🦼	女	woman in motorized wheelchair
+People & Body	👩‍🦼‍➡️	woman in motorized wheelchair facing right	woman in motorized wheelchair facing right
+People & Body	🧑‍🦽	轮椅	person in manual wheelchair
+People & Body	🧑‍🦽‍➡️	person in manual wheelchair facing right	person in manual wheelchair facing right
+People & Body	👨‍🦽	男	man in manual wheelchair
+People & Body	👨‍🦽‍➡️	man in manual wheelchair facing right	man in manual wheelchair facing right
+People & Body	👩‍🦽	女	woman in manual wheelchair
+People & Body	👩‍🦽‍➡️	woman in manual wheelchair facing right	woman in manual wheelchair facing right
+People & Body	🏃	匆忙	person running
+People & Body	🏃‍♂️	man running	man running
+People & Body	🏃‍♀️	woman running	woman running
+People & Body	🏃‍➡️	person running facing right	person running facing right
+People & Body	🏃‍♀️‍➡️	woman running facing right	woman running facing right
+People & Body	🏃‍♂️‍➡️	man running facing right	man running facing right
+People & Body	🧑‍🩰	舞者	ballet dancer
+People & Body	💃	优雅	woman dancing
+People & Body	🕺	男人	man dancing
+People & Body	🕴️	person in suit levitating	person in suit levitating
+People & Body	👯	同好	people with bunny ears
+People & Body	👯‍♂️	men with bunny ears	men with bunny ears
+People & Body	👯‍♀️	women with bunny ears	women with bunny ears
+People & Body	🧖	放松	person in steamy room
+People & Body	🧖‍♂️	man in steamy room	man in steamy room
+People & Body	🧖‍♀️	woman in steamy room	woman in steamy room
+People & Body	🧗	攀岩	person climbing
+People & Body	🧗‍♂️	man climbing	man climbing
+People & Body	🧗‍♀️	woman climbing	woman climbing
+People & Body	🤺	剑	person fencing
+People & Body	🏇	马	horse racing
+People & Body	⛷️	skier	skier
+People & Body	🏂	雪	snowboarder
+People & Body	🏌️	person golfing	person golfing
+People & Body	🏌️‍♂️	man golfing	man golfing
+People & Body	🏌️‍♀️	woman golfing	woman golfing
+People & Body	🏄	冲浪	person surfing
+People & Body	🏄‍♂️	man surfing	man surfing
+People & Body	🏄‍♀️	woman surfing	woman surfing
+People & Body	🚣	划桨	person rowing boat
+People & Body	🚣‍♂️	man rowing boat	man rowing boat
+People & Body	🚣‍♀️	woman rowing boat	woman rowing boat
+People & Body	🏊	游泳	person swimming
+People & Body	🏊‍♂️	man swimming	man swimming
+People & Body	🏊‍♀️	woman swimming	woman swimming
+People & Body	⛹️	person bouncing ball	person bouncing ball
+People & Body	⛹️‍♂️	man bouncing ball	man bouncing ball
+People & Body	⛹️‍♀️	woman bouncing ball	woman bouncing ball
+People & Body	🏋️	person lifting weights	person lifting weights
+People & Body	🏋️‍♂️	man lifting weights	man lifting weights
+People & Body	🏋️‍♀️	woman lifting weights	woman lifting weights
+People & Body	🚴	单车	person biking
+People & Body	🚴‍♂️	man biking	man biking
+People & Body	🚴‍♀️	woman biking	woman biking
+People & Body	🚵	山	person mountain biking
+People & Body	🚵‍♂️	man mountain biking	man mountain biking
+People & Body	🚵‍♀️	woman mountain biking	woman mountain biking
+People & Body	🤸	体操	person cartwheeling
+People & Body	🤸‍♂️	man cartwheeling	man cartwheeling
+People & Body	🤸‍♀️	woman cartwheeling	woman cartwheeling
+People & Body	🤼	体育	people wrestling
+People & Body	🤼‍♂️	men wrestling	men wrestling
+People & Body	🤼‍♀️	women wrestling	women wrestling
+People & Body	🤽	体育	person playing water polo
+People & Body	🤽‍♂️	man playing water polo	man playing water polo
+People & Body	🤽‍♀️	woman playing water polo	woman playing water polo
+People & Body	🤾	球	person playing handball
+People & Body	🤾‍♂️	man playing handball	man playing handball
+People & Body	🤾‍♀️	woman playing handball	woman playing handball
+People & Body	🤹	平衡	person juggling
+People & Body	🤹‍♂️	man juggling	man juggling
+People & Body	🤹‍♀️	woman juggling	woman juggling
+People & Body	🧘	冥想	person in lotus position
+People & Body	🧘‍♂️	man in lotus position	man in lotus position
+People & Body	🧘‍♀️	woman in lotus position	woman in lotus position
+People & Body	🛀	洗澡	person taking bath
+People & Body	🛌	入睡	person in bed
+People & Body	🧑‍🤝‍🧑	人	people holding hands
+People & Body	👭	情侣	women holding hands
+People & Body	👫	情侣	woman and man holding hands
+People & Body	👬	情侣	men holding hands
+People & Body	💏	亲吻	kiss
+People & Body	👩‍❤️‍💋‍👨	kiss: woman, man	kiss: woman, man
+People & Body	👨‍❤️‍💋‍👨	kiss: man, man	kiss: man, man
+People & Body	👩‍❤️‍💋‍👩	kiss: woman, woman	kiss: woman, woman
+People & Body	💑	恋爱	couple with heart
+People & Body	👩‍❤️‍👨	couple with heart: woman, man	couple with heart: woman, man
+People & Body	👨‍❤️‍👨	couple with heart: man, man	couple with heart: man, man
+People & Body	👩‍❤️‍👩	couple with heart: woman, woman	couple with heart: woman, woman
+People & Body	👨‍👩‍👦	亲子	family: man, woman, boy
+People & Body	👨‍👩‍👧	亲子	family: man, woman, girl
+People & Body	👨‍👩‍👧‍👦	亲子	family: man, woman, girl, boy
+People & Body	👨‍👩‍👦‍👦	亲子	family: man, woman, boy, boy
+People & Body	👨‍👩‍👧‍👧	亲子	family: man, woman, girl, girl
+People & Body	👨‍👨‍👦	亲子	family: man, man, boy
+People & Body	👨‍👨‍👧	亲子	family: man, man, girl
+People & Body	👨‍👨‍👧‍👦	亲子	family: man, man, girl, boy
+People & Body	👨‍👨‍👦‍👦	亲子	family: man, man, boy, boy
+People & Body	👨‍👨‍👧‍👧	亲子	family: man, man, girl, girl
+People & Body	👩‍👩‍👦	亲子	family: woman, woman, boy
+People & Body	👩‍👩‍👧	亲子	family: woman, woman, girl
+People & Body	👩‍👩‍👧‍👦	亲子	family: woman, woman, girl, boy
+People & Body	👩‍👩‍👦‍👦	亲子	family: woman, woman, boy, boy
+People & Body	👩‍👩‍👧‍👧	亲子	family: woman, woman, girl, girl
+People & Body	👨‍👦	亲子	family: man, boy
+People & Body	👨‍👦‍👦	亲子	family: man, boy, boy
+People & Body	👨‍👧	亲子	family: man, girl
+People & Body	👨‍👧‍👦	亲子	family: man, girl, boy
+People & Body	👨‍👧‍👧	亲子	family: man, girl, girl
+People & Body	👩‍👦	亲子	family: woman, boy
+People & Body	👩‍👦‍👦	亲子	family: woman, boy, boy
+People & Body	👩‍👧	亲子	family: woman, girl
+People & Body	👩‍👧‍👦	亲子	family: woman, girl, boy
+People & Body	👩‍👧‍👧	亲子	family: woman, girl, girl
+People & Body	🗣️	speaking head	speaking head
+People & Body	👤	人像	bust in silhouette
+People & Body	👥	剪影	busts in silhouette
+People & Body	🫂	再见	people hugging
+People & Body	👪	亲子	family
+People & Body	🧑‍🧑‍🧒	一孩	family: adult, adult, child
+People & Body	🧑‍🧑‍🧒‍🧒	二孩	family: adult, adult, child, child
+People & Body	🧑‍🧒	一孩	family: adult, child
+People & Body	🧑‍🧒‍🧒	二孩	family: adult, child, child
+People & Body	👣	脚印	footprints
+People & Body	🫆	侦探	fingerprint
+# Animals & Nature
+Animals & Nature	🐵	猴	monkey face
+Animals & Nature	🐒	猴	monkey
+Animals & Nature	🦍	动物	gorilla
+Animals & Nature	🦧	动物	orangutan
+Animals & Nature	🐶	狗	dog face
+Animals & Nature	🐕	狗	dog
+Animals & Nature	🦮	盲	guide dog
+Animals & Nature	🐕‍🦺	犬	service dog
+Animals & Nature	🐩	卷毛狗	poodle
+Animals & Nature	🐺	狼	wolf
+Animals & Nature	🦊	动物	fox
+Animals & Nature	🦝	动物	raccoon
+Animals & Nature	🐱	猫	cat face
+Animals & Nature	🐈	猫	cat
+Animals & Nature	🐈‍⬛	猫	black cat
+Animals & Nature	🦁	狮子	lion
+Animals & Nature	🐯	老虎	tiger face
+Animals & Nature	🐅	虎	tiger
+Animals & Nature	🐆	豹	leopard
+Animals & Nature	🐴	马	horse face
+Animals & Nature	🫎	动物	moose
+Animals & Nature	🫏	驴	donkey
+Animals & Nature	🐎	马	horse
+Animals & Nature	🦄	独角兽	unicorn
+Animals & Nature	🦓	斑马	zebra
+Animals & Nature	🦌	鹿	deer
+Animals & Nature	🦬	牛	bison
+Animals & Nature	🐮	乳牛	cow face
+Animals & Nature	🐂	牛	ox
+Animals & Nature	🐃	水牛	water buffalo
+Animals & Nature	🐄	牛	cow
+Animals & Nature	🐷	猪	pig face
+Animals & Nature	🐖	猪	pig
+Animals & Nature	🐗	猪	boar
+Animals & Nature	🐽	猪	pig nose
+Animals & Nature	🐏	羊	ram
+Animals & Nature	🐑	羊	ewe
+Animals & Nature	🐐	山羊	goat
+Animals & Nature	🐪	单峰	camel
+Animals & Nature	🐫	双峰	two-hump camel
+Animals & Nature	🦙	动物	llama
+Animals & Nature	🦒	斑点	giraffe
+Animals & Nature	🐘	象	elephant
+Animals & Nature	🦣	动物	mammoth
+Animals & Nature	🦏	动物	rhinoceros
+Animals & Nature	🦛	动物	hippopotamus
+Animals & Nature	🐭	鼠	mouse face
+Animals & Nature	🐁	鼠	mouse
+Animals & Nature	🐀	耗子	rat
+Animals & Nature	🐹	仓鼠	hamster
+Animals & Nature	🐰	兔	rabbit face
+Animals & Nature	🐇	兔	rabbit
+Animals & Nature	🐿️	chipmunk	chipmunk
+Animals & Nature	🦫	动物	beaver
+Animals & Nature	🦔	刺猬	hedgehog
+Animals & Nature	🦇	蝙蝠	bat
+Animals & Nature	🐻	熊	bear
+Animals & Nature	🐻‍❄️	polar bear	polar bear
+Animals & Nature	🐨	动物	koala
+Animals & Nature	🐼	熊猫	panda
+Animals & Nature	🦥	懒	sloth
+Animals & Nature	🦦	獭	otter
+Animals & Nature	🦨	臭	skunk
+Animals & Nature	🦘	动物	kangaroo
+Animals & Nature	🦡	獾	badger
+Animals & Nature	🐾	爪	paw prints
+Animals & Nature	🦃	火鸡	turkey
+Animals & Nature	🐔	鸡	chicken
+Animals & Nature	🐓	鸡	rooster
+Animals & Nature	🐣	小鸡	hatching chick
+Animals & Nature	🐤	鸡	baby chick
+Animals & Nature	🐥	小鸡	front-facing baby chick
+Animals & Nature	🐦	鸟	bird
+Animals & Nature	🐧	企鹅	penguin
+Animals & Nature	🕊️	dove	dove
+Animals & Nature	🦅	鹰	eagle
+Animals & Nature	🦆	鸭	duck
+Animals & Nature	🦢	动物	swan
+Animals & Nature	🦉	睿智	owl
+Animals & Nature	🦤	鸟	dodo
+Animals & Nature	🪶	羽毛	feather
+Animals & Nature	🦩	华丽	flamingo
+Animals & Nature	🦚	卖弄	peacock
+Animals & Nature	🦜	剽窃	parrot
+Animals & Nature	🪽	升天	wing
+Animals & Nature	🐦‍⬛	鸟	black bird
+Animals & Nature	🪿	鹅	goose
+Animals & Nature	🐦‍🔥	不朽	phoenix
+Animals & Nature	🐸	动物	frog
+Animals & Nature	🐊	鳄鱼	crocodile
+Animals & Nature	🐢	龟	turtle
+Animals & Nature	🦎	蜥蜴	lizard
+Animals & Nature	🐍	蛇	snake
+Animals & Nature	🐲	龙	dragon face
+Animals & Nature	🐉	龙	dragon
+Animals & Nature	🦕	恐龙	sauropod
+Animals & Nature	🦖	恐龙	T-Rex
+Animals & Nature	🐳	鲸	spouting whale
+Animals & Nature	🐋	鲸鱼	whale
+Animals & Nature	🐬	海豚	dolphin
+Animals & Nature	🫍	鲸	orca
+Animals & Nature	🦭	动物	seal
+Animals & Nature	🐟	鱼	fish
+Animals & Nature	🐠	鱼	tropical fish
+Animals & Nature	🐡	河豚	blowfish
+Animals & Nature	🦈	鱼	shark
+Animals & Nature	🐙	鱼	octopus
+Animals & Nature	🐚	螺	spiral shell
+Animals & Nature	🪸	海洋	coral
+Animals & Nature	🪼	刺毛	jellyfish
+Animals & Nature	🦀	蟹	crab
+Animals & Nature	🦞	浓汤	lobster
+Animals & Nature	🦐	虾	shrimp
+Animals & Nature	🦑	乌贼	squid
+Animals & Nature	🦪	海鲜	oyster
+Animals & Nature	🐌	蜗牛	snail
+Animals & Nature	🦋	昆虫	butterfly
+Animals & Nature	🫌	monarch butterfly	monarch butterfly
+Animals & Nature	🐛	昆虫	bug
+Animals & Nature	🐜	蚂蚁	ant
+Animals & Nature	🐝	勤劳	honeybee
+Animals & Nature	🪲	动物	beetle
+Animals & Nature	🐞	昆虫	lady beetle
+Animals & Nature	🦗	昆虫	cricket
+Animals & Nature	🪳	动物	cockroach
+Animals & Nature	🕷️	spider	spider
+Animals & Nature	🕸️	spider web	spider web
+Animals & Nature	🦂	蝎子	scorpion
+Animals & Nature	🦟	发烧	mosquito
+Animals & Nature	🪰	动物	fly
+Animals & Nature	🪱	动物	worm
+Animals & Nature	🦠	病毒	microbe
+Animals & Nature	💐	生日	bouquet
+Animals & Nature	🌸	花	cherry blossom
+Animals & Nature	💮	花	white flower
+Animals & Nature	🪷	花	lotus
+Animals & Nature	🏵️	rosette	rosette
+Animals & Nature	🌹	优雅	rose
+Animals & Nature	🥀	花	wilted flower
+Animals & Nature	🌺	木槿	hibiscus
+Animals & Nature	🌻	太阳	sunflower
+Animals & Nature	🌼	花	blossom
+Animals & Nature	🌷	开花	tulip
+Animals & Nature	🪻	春天	hyacinth
+Animals & Nature	🌱	苗	seedling
+Animals & Nature	🪴	培育	potted plant
+Animals & Nature	🌲	树	evergreen tree
+Animals & Nature	🌳	树	deciduous tree
+Animals & Nature	🌴	树	palm tree
+Animals & Nature	🌵	干旱	cactus
+Animals & Nature	🌾	稻	sheaf of rice
+Animals & Nature	🌿	草药	herb
+Animals & Nature	☘️	shamrock	shamrock
+Animals & Nature	🍀	幸运	four leaf clover
+Animals & Nature	🍁	枫叶	maple leaf
+Animals & Nature	🍂	叶	fallen leaf
+Animals & Nature	🍃	叶子	leaf fluttering in wind
+Animals & Nature	🪹	树枝	empty nest
+Animals & Nature	🪺	蛋	nest with eggs
+Animals & Nature	🍄	毒蕈	mushroom
+Animals & Nature	🪾	树	leafless tree
+# Food & Drink
+Food & Drink	🍇	水果	grapes
+Food & Drink	🍈	水果	melon
+Food & Drink	🍉	水果	watermelon
+Food & Drink	🍊	柑桔	tangerine
+Food & Drink	🍋	柑橘	lemon
+Food & Drink	🍋‍🟩	橘属	lime
+Food & Drink	🍌	水果	banana
+Food & Drink	🍍	水果	pineapple
+Food & Drink	🥭	水果	mango
+Food & Drink	🍎	红	red apple
+Food & Drink	🍏	青	green apple
+Food & Drink	🍐	梨	pear
+Food & Drink	🍑	桃	peach
+Food & Drink	🍒	樱桃	cherries
+Food & Drink	🍓	水果	strawberry
+Food & Drink	🫐	水果	blueberries
+Food & Drink	🥝	水果	kiwi fruit
+Food & Drink	🍅	水果	tomato
+Food & Drink	🫒	橄榄	olive
+Food & Drink	🥥	棕榈	coconut
+Food & Drink	🥑	水果	avocado
+Food & Drink	🍆	茄子	eggplant
+Food & Drink	🥔	土豆	potato
+Food & Drink	🥕	蔬菜	carrot
+Food & Drink	🌽	包谷	ear of corn
+Food & Drink	🌶️	hot pepper	hot pepper
+Food & Drink	🫑	蔬菜	bell pepper
+Food & Drink	🥒	泡菜	cucumber
+Food & Drink	🫝	pickle	pickle
+Food & Drink	🥬	甘蓝	leafy green
+Food & Drink	🥦	甘蓝	broccoli
+Food & Drink	🧄	蒜	garlic
+Food & Drink	🧅	佐料	onion
+Food & Drink	🥜	坚果	peanuts
+Food & Drink	🫘	豆	beans
+Food & Drink	🌰	杏仁	chestnut
+Food & Drink	🫚	姜	ginger root
+Food & Drink	🫛	荚	pea pod
+Food & Drink	🍄‍🟫	拖沓	brown mushroom
+Food & Drink	🫜	根	root vegetable
+Food & Drink	🍞	小麦	bread
+Food & Drink	🥐	法式	croissant
+Food & Drink	🥖	法式	baguette bread
+Food & Drink	🫓	面包	flatbread
+Food & Drink	🥨	弯曲	pretzel
+Food & Drink	🥯	早餐	bagel
+Food & Drink	🥞	烙饼	pancakes
+Food & Drink	🧇	松饼	waffle
+Food & Drink	🧀	奶酪	cheese wedge
+Food & Drink	🍖	骨	meat on bone
+Food & Drink	🍗	家禽	poultry leg
+Food & Drink	🥩	肉	cut of meat
+Food & Drink	🥓	培根	bacon
+Food & Drink	🍔	汉堡	hamburger
+Food & Drink	🍟	快餐	french fries
+Food & Drink	🍕	披萨	pizza
+Food & Drink	🌭	热狗	hot dog
+Food & Drink	🥪	面包	sandwich
+Food & Drink	🌮	卷饼	taco
+Food & Drink	🌯	卷饼	burrito
+Food & Drink	🫔	粽子	tamale
+Food & Drink	🥙	大饼	stuffed flatbread
+Food & Drink	🧆	肉丸	falafel
+Food & Drink	🥚	蛋	egg
+Food & Drink	🍳	煎	cooking
+Food & Drink	🥘	浅底	shallow pan of food
+Food & Drink	🍲	锅	pot of food
+Food & Drink	🫕	锅	fondue
+Food & Drink	🥣	早餐	bowl with spoon
+Food & Drink	🥗	沙拉	green salad
+Food & Drink	🍿	爆米花	popcorn
+Food & Drink	🧈	牛奶	butter
+Food & Drink	🧂	盐	salt
+Food & Drink	🥫	罐头	canned food
+Food & Drink	🍱	便当	bento box
+Food & Drink	🍘	米	rice cracker
+Food & Drink	🍙	日本	rice ball
+Food & Drink	🍚	米	cooked rice
+Food & Drink	🍛	饭	curry rice
+Food & Drink	🍜	拉面	steaming bowl
+Food & Drink	🍝	意粉	spaghetti
+Food & Drink	🍠	地瓜	roasted sweet potato
+Food & Drink	🍢	卡博	oden
+Food & Drink	🍣	寿司	sushi
+Food & Drink	🍤	对虾	fried shrimp
+Food & Drink	🍥	鱼	fish cake with swirl
+Food & Drink	🥮	月饼	moon cake
+Food & Drink	🍡	团子	dango
+Food & Drink	🥟	水饺	dumpling
+Food & Drink	🥠	签餅	fortune cookie
+Food & Drink	🥡	外卖	takeout box
+Food & Drink	🍦	甜点	soft ice cream
+Food & Drink	🍧	冰	shaved ice
+Food & Drink	🍨	冰	ice cream
+Food & Drink	🍩	甜	doughnut
+Food & Drink	🍪	曲奇	cookie
+Food & Drink	🎂	庆祝	birthday cake
+Food & Drink	🍰	奶油	shortcake
+Food & Drink	🧁	甜点	cupcake
+Food & Drink	🥧	派	pie
+Food & Drink	🍫	甜品	chocolate bar
+Food & Drink	🍬	糖	candy
+Food & Drink	🍭	糖	lollipop
+Food & Drink	🍮	奶黄	custard
+Food & Drink	🍯	蜂蜜	honey pot
+Food & Drink	🍼	奶	baby bottle
+Food & Drink	🥛	奶	glass of milk
+Food & Drink	☕	咖啡	hot beverage
+Food & Drink	🫖	壶	teapot
+Food & Drink	🍵	茶	teacup without handle
+Food & Drink	🍶	酒	sake
+Food & Drink	🍾	喝酒	bottle with popping cork
+Food & Drink	🍷	酒	wine glass
+Food & Drink	🍸	酒	cocktail glass
+Food & Drink	🍹	喝酒	tropical drink
+Food & Drink	🍺	酒	beer mug
+Food & Drink	🍻	啤酒	clinking beer mugs
+Food & Drink	🥂	杯	clinking glasses
+Food & Drink	🥃	杯	tumbler glass
+Food & Drink	🫗	倒出	pouring liquid
+Food & Drink	🥤	果汁	cup with straw
+Food & Drink	🧋	茶	bubble tea
+Food & Drink	🧃	吸管	beverage box
+Food & Drink	🧉	茶	mate
+Food & Drink	🧊	冰	ice
+Food & Drink	🥢	筷子	chopsticks
+Food & Drink	🍽️	fork and knife with plate	fork and knife with plate
+Food & Drink	🍴	刀	fork and knife
+Food & Drink	🥄	匙	spoon
+Food & Drink	🔪	刀	kitchen knife
+Food & Drink	🫙	罐	jar
+Food & Drink	🏺	水瓶	amphora
+# Travel & Places
+Travel & Places	🌍	世界	globe showing Europe-Africa
+Travel & Places	🌎	世界	globe showing Americas
+Travel & Places	🌏	世界	globe showing Asia-Australia
+Travel & Places	🌐	世界	globe with meridians
+Travel & Places	🗺️	world map	world map
+Travel & Places	🗾	地图	map of Japan
+Travel & Places	🧭	定向	compass
+Travel & Places	🏔️	snow-capped mountain	snow-capped mountain
+Travel & Places	⛰️	mountain	mountain
+Travel & Places	🛘	山	landslide
+Travel & Places	🌋	山	volcano
+Travel & Places	🗻	山	mount fuji
+Travel & Places	🏕️	camping	camping
+Travel & Places	🏖️	beach with umbrella	beach with umbrella
+Travel & Places	🏜️	desert	desert
+Travel & Places	🏝️	desert island	desert island
+Travel & Places	🏞️	national park	national park
+Travel & Places	🏟️	stadium	stadium
+Travel & Places	🏛️	classical building	classical building
+Travel & Places	🏗️	building construction	building construction
+Travel & Places	🧱	砖	brick
+Travel & Places	🪨	固体	rock
+Travel & Places	🪵	原木	wood
+Travel & Places	🛖	圆屋	hut
+Travel & Places	🏘️	houses	houses
+Travel & Places	🏚️	derelict house	derelict house
+Travel & Places	🏠	住家	house
+Travel & Places	🏡	住家	house with garden
+Travel & Places	🏢	建筑	office building
+Travel & Places	🏣	建筑	Japanese post office
+Travel & Places	🏤	建筑	post office
+Travel & Places	🏥	医生	hospital
+Travel & Places	🏦	建筑	bank
+Travel & Places	🏨	建筑	hotel
+Travel & Places	🏩	建筑	love hotel
+Travel & Places	🏪	商店	convenience store
+Travel & Places	🏫	学校	school
+Travel & Places	🏬	商场	department store
+Travel & Places	🏭	工厂	factory
+Travel & Places	🏯	城堡	Japanese castle
+Travel & Places	🏰	城堡	castle
+Travel & Places	💒	婚礼	wedding
+Travel & Places	🗼	塔	Tokyo tower
+Travel & Places	🗽	塑像	Statue of Liberty
+Travel & Places	⛪	基督	church
+Travel & Places	🕌	宗教	mosque
+Travel & Places	🛕	佛寺	hindu temple
+Travel & Places	🕍	会堂	synagogue
+Travel & Places	⛩️	shinto shrine	shinto shrine
+Travel & Places	🕋	天房	kaaba
+Travel & Places	⛲	喷泉	fountain
+Travel & Places	⛺	帐篷	tent
+Travel & Places	🌁	雾	foggy
+Travel & Places	🌃	夜晚	night with stars
+Travel & Places	🏙️	cityscape	cityscape
+Travel & Places	🌄	山	sunrise over mountains
+Travel & Places	🌅	太阳	sunrise
+Travel & Places	🌆	城市	cityscape at dusk
+Travel & Places	🌇	夕阳	sunset
+Travel & Places	🌉	桥	bridge at night
+Travel & Places	♨️	hot springs	hot springs
+Travel & Places	🎠	木马	carousel horse
+Travel & Places	🛝	滑梯	playground slide
+Travel & Places	🎡	摩天轮	ferris wheel
+Travel & Places	🎢	游乐园	roller coaster
+Travel & Places	💈	旋转	barber pole
+Travel & Places	🎪	帐篷	circus tent
+Travel & Places	🚂	守车	locomotive
+Travel & Places	🚃	旅行	railway car
+Travel & Places	🚄	动车	high-speed train
+Travel & Places	🚅	动车	bullet train
+Travel & Places	🚆	到站	train
+Travel & Places	🚇	地铁	metro
+Travel & Places	🚈	到站	light rail
+Travel & Places	🚉	地铁	station
+Travel & Places	🚊	捷运	tram
+Travel & Places	🚝	单轨	monorail
+Travel & Places	🚞	山区	mountain railway
+Travel & Places	🚋	轨道	tram car
+Travel & Places	🚌	公交	bus
+Travel & Places	🚍	公交	oncoming bus
+Travel & Places	🚎	电车	trolleybus
+Travel & Places	🚐	小巴	minibus
+Travel & Places	🚑	急救	ambulance
+Travel & Places	🚒	火灾	fire engine
+Travel & Places	🚓	巡逻	police car
+Travel & Places	🚔	汽车	oncoming police car
+Travel & Places	🚕	小黄	taxi
+Travel & Places	🚖	优步	oncoming taxi
+Travel & Places	🚗	开车	automobile
+Travel & Places	🚘	开车	oncoming automobile
+Travel & Places	🚙	开车	sport utility vehicle
+Travel & Places	🛻	车	pickup truck
+Travel & Places	🚚	卡车	delivery truck
+Travel & Places	🚛	卡车	articulated lorry
+Travel & Places	🚜	拖拉机	tractor
+Travel & Places	🏎️	racing car	racing car
+Travel & Places	🏍️	motorcycle	motorcycle
+Travel & Places	🛵	摩托车	motor scooter
+Travel & Places	🦽	轮椅	manual wheelchair
+Travel & Places	🦼	轮椅	motorized wheelchair
+Travel & Places	🛺	三脚鸡	auto rickshaw
+Travel & Places	🚲	单车	bicycle
+Travel & Places	🛴	滑板车	kick scooter
+Travel & Places	🛹	板	skateboard
+Travel & Places	🛼	旱冰	roller skate
+Travel & Places	🚏	公交站	bus stop
+Travel & Places	🛣️	motorway	motorway
+Travel & Places	🛤️	railway track	railway track
+Travel & Places	🛢️	oil drum	oil drum
+Travel & Places	⛽	加油	fuel pump
+Travel & Places	🛞	圆圈	wheel
+Travel & Places	🚨	灯	police car light
+Travel & Places	🚥	交通灯	horizontal traffic light
+Travel & Places	🚦	交叉口	vertical traffic light
+Travel & Places	🛑	停止	stop sign
+Travel & Places	🚧	施工	construction
+Travel & Places	🛙	lighthouse	lighthouse
+Travel & Places	⚓	锚	anchor
+Travel & Places	🛟	安全	ring buoy
+Travel & Places	⛵	船	sailboat
+Travel & Places	🛶	独木舟	canoe
+Travel & Places	🚤	快艇	speedboat
+Travel & Places	🛳️	passenger ship	passenger ship
+Travel & Places	⛴️	ferry	ferry
+Travel & Places	🛥️	motor boat	motor boat
+Travel & Places	🚢	船	ship
+Travel & Places	✈️	airplane	airplane
+Travel & Places	🛩️	small airplane	small airplane
+Travel & Places	🛫	值机	airplane departure
+Travel & Places	🛬	到达	airplane arrival
+Travel & Places	🪂	帆伞	parachute
+Travel & Places	💺	位子	seat
+Travel & Places	🚁	旅行	helicopter
+Travel & Places	🚟	悬挂	suspension railway
+Travel & Places	🚠	空中	mountain cableway
+Travel & Places	🚡	空中	aerial tramway
+Travel & Places	🛰️	satellite	satellite
+Travel & Places	🚀	发射	rocket
+Travel & Places	🛸	飞碟	flying saucer
+Travel & Places	🛎️	bellhop bell	bellhop bell
+Travel & Places	🧳	包装	luggage
+Travel & Places	⌛	时间	hourglass done
+Travel & Places	⏳	沙	hourglass not done
+Travel & Places	⌚	表	watch
+Travel & Places	⏰	钟	alarm clock
+Travel & Places	⏱️	stopwatch	stopwatch
+Travel & Places	⏲️	timer clock	timer clock
+Travel & Places	🕰️	mantelpiece clock	mantelpiece clock
+Travel & Places	🕛	00	twelve o’clock
+Travel & Places	🕧	12	twelve-thirty
+Travel & Places	🕐	00	one o’clock
+Travel & Places	🕜	30	one-thirty
+Travel & Places	🕑	00	two o’clock
+Travel & Places	🕝	30	two-thirty
+Travel & Places	🕒	00	three o’clock
+Travel & Places	🕞	30	three-thirty
+Travel & Places	🕓	00	four o’clock
+Travel & Places	🕟	30	four-thirty
+Travel & Places	🕔	00	five o’clock
+Travel & Places	🕠	30	five-thirty
+Travel & Places	🕕	00	six o’clock
+Travel & Places	🕡	30	six-thirty
+Travel & Places	🕖	00	seven o’clock
+Travel & Places	🕢	30	seven-thirty
+Travel & Places	🕗	00	eight o’clock
+Travel & Places	🕣	30	eight-thirty
+Travel & Places	🕘	00	nine o’clock
+Travel & Places	🕤	30	nine-thirty
+Travel & Places	🕙	00	ten o’clock
+Travel & Places	🕥	10	ten-thirty
+Travel & Places	🕚	00	eleven o’clock
+Travel & Places	🕦	11	eleven-thirty
+Travel & Places	🌑	新月	new moon
+Travel & Places	🌒	弯月	waxing crescent moon
+Travel & Places	🌓	月亮	first quarter moon
+Travel & Places	🌔	月亮	waxing gibbous moon
+Travel & Places	🌕	月亮	full moon
+Travel & Places	🌖	月亮	waning gibbous moon
+Travel & Places	🌗	月亮	last quarter moon
+Travel & Places	🌘	弯月	waning crescent moon
+Travel & Places	🌙	弯月	crescent moon
+Travel & Places	🌚	新月	new moon face
+Travel & Places	🌛	月亮	first quarter moon face
+Travel & Places	🌜	月亮	last quarter moon face
+Travel & Places	🌡️	thermometer	thermometer
+Travel & Places	☀️	sun	sun
+Travel & Places	🌝	月亮	full moon face
+Travel & Places	🌞	太阳	sun with face
+Travel & Places	🪐	土星	ringed planet
+Travel & Places	⭐	星星	star
+Travel & Places	🌟	发光	glowing star
+Travel & Places	🌠	夜晚	shooting star
+Travel & Places	🌌	太空	milky way
+Travel & Places	☁️	cloud	cloud
+Travel & Places	⛅	阴	sun behind cloud
+Travel & Places	⛈️	cloud with lightning and rain	cloud with lightning and rain
+Travel & Places	🌤️	sun behind small cloud	sun behind small cloud
+Travel & Places	🌥️	sun behind large cloud	sun behind large cloud
+Travel & Places	🌦️	sun behind rain cloud	sun behind rain cloud
+Travel & Places	🌧️	cloud with rain	cloud with rain
+Travel & Places	🌨️	cloud with snow	cloud with snow
+Travel & Places	🌩️	cloud with lightning	cloud with lightning
+Travel & Places	🌪️	tornado	tornado
+Travel & Places	🌫️	fog	fog
+Travel & Places	🌬️	wind face	wind face
+Travel & Places	🌀	台风	cyclone
+Travel & Places	🌈	同志	rainbow
+Travel & Places	🌂	伞	closed umbrella
+Travel & Places	☂️	umbrella	umbrella
+Travel & Places	☔	伞	umbrella with rain drops
+Travel & Places	⛱️	umbrella on ground	umbrella on ground
+Travel & Places	⚡	危险	high voltage
+Travel & Places	❄️	snowflake	snowflake
+Travel & Places	☃️	snowman	snowman
+Travel & Places	⛄	下雪	snowman without snow
+Travel & Places	☄️	comet	comet
+Travel & Places	🪋	meteor	meteor
+Travel & Places	🔥	火	fire
+Travel & Places	💧	水	droplet
+Travel & Places	🌊	浪	water wave
+# Activities
+Activities	🎃	灯	jack-o-lantern
+Activities	🎄	树	Christmas tree
+Activities	🎆	庆典	fireworks
+Activities	🎇	庆祝	sparkler
+Activities	🧨	光亮	firecracker
+Activities	✨	星星	sparkles
+Activities	🎈	庆祝	balloon
+Activities	🎉	兴奋	party popper
+Activities	🎊	球	confetti ball
+Activities	🎋	树	tanabata tree
+Activities	🎍	庆祝	pine decoration
+Activities	🎎	人偶	Japanese dolls
+Activities	🎏	庆祝	carp streamer
+Activities	🎐	风	wind chime
+Activities	🎑	中秋	moon viewing ceremony
+Activities	🧧	利事	red envelope
+Activities	🎀	丝带	ribbon
+Activities	🎁	包装	wrapped gift
+Activities	🎗️	reminder ribbon	reminder ribbon
+Activities	🎟️	admission tickets	admission tickets
+Activities	🎫	票	ticket
+Activities	🎖️	military medal	military medal
+Activities	🏆	冠军	trophy
+Activities	🏅	奖牌	sports medal
+Activities	🥇	奖牌	1st place medal
+Activities	🥈	亚军	2nd place medal
+Activities	🥉	奖牌	3rd place medal
+Activities	⚽	球	soccer ball
+Activities	⚾	球	baseball
+Activities	🥎	球	softball
+Activities	🏀	球	basketball
+Activities	🏐	球	volleyball
+Activities	🏈	球	american football
+Activities	🏉	球	rugby football
+Activities	🎾	球	tennis
+Activities	🥏	圆盘	flying disc
+Activities	🎳	球	bowling
+Activities	🏏	球	cricket game
+Activities	🏑	球	field hockey
+Activities	🏒	球	ice hockey
+Activities	🥍	球	lacrosse
+Activities	🏓	球	ping pong
+Activities	🏸	球拍	badminton
+Activities	🥊	手套	boxing glove
+Activities	🥋	制服	martial arts uniform
+Activities	🥅	球网	goal net
+Activities	⛳	果岭	flag in hole
+Activities	⛸️	ice skate	ice skate
+Activities	🎣	钓竿	fishing pole
+Activities	🤿	浮潜	diving mask
+Activities	🎽	上衣	running shirt
+Activities	🎿	雪	skis
+Activities	🛷	下雪	sled
+Activities	🥌	冰壶	curling stone
+Activities	🎯	命中	bullseye
+Activities	🪀	玩具	yo-yo
+Activities	🪁	翱翔	kite
+Activities	🔫	枪	water pistol
+Activities	🎱	台球	pool 8 ball
+Activities	🔮	球	crystal ball
+Activities	🪄	女巫	magic wand
+Activities	🎮	手柄	video game
+Activities	🕹️	joystick	joystick
+Activities	🎰	游戏	slot machine
+Activities	🎲	色子	game die
+Activities	🧩	图片	puzzle piece
+Activities	🧸	熊	teddy bear
+Activities	🪅	庆祝	piñata
+Activities	🪩	派对	mirror ball
+Activities	🪆	套娃	nesting dolls
+Activities	♠️	spade suit	spade suit
+Activities	♥️	heart suit	heart suit
+Activities	♦️	diamond suit	diamond suit
+Activities	♣️	club suit	club suit
+Activities	♟️	chess pawn	chess pawn
+Activities	🃏	大王	joker
+Activities	🀄	牌局	mahjong red dragon
+Activities	🎴	卡牌	flower playing cards
+Activities	🎭	剧院	performing arts
+Activities	🖼️	framed picture	framed picture
+Activities	🎨	创意	artist palette
+Activities	🧵	线	thread
+Activities	🪡	针	sewing needle
+Activities	🧶	毛线	yarn
+Activities	🪢	结	knot
+# Objects
+Objects	👓	服饰	glasses
+Objects	🕶️	sunglasses	sunglasses
+Objects	🥽	护目	goggles
+Objects	🥼	医生	lab coat
+Objects	🦺	安全	safety vest
+Objects	👔	工作	necktie
+Objects	👕	T恤	t-shirt
+Objects	👖	休闲	jeans
+Objects	🧣	包紧	scarf
+Objects	🧤	手	gloves
+Objects	🧥	外套	coat
+Objects	🧦	袜	socks
+Objects	👗	衣服	dress
+Objects	👘	和服	kimono
+Objects	🥻	印度	sari
+Objects	🩱	泳衣	one-piece swimsuit
+Objects	🩲	内裤	briefs
+Objects	🩳	内裤	shorts
+Objects	👙	泳装	bikini
+Objects	👚	女	woman’s clothes
+Objects	🪭	扇	folding hand fan
+Objects	👛	血拼	purse
+Objects	👜	包包	handbag
+Objects	👝	手拿	clutch bag
+Objects	🛍️	shopping bags	shopping bags
+Objects	🎒	包	backpack
+Objects	🩴	鞋	thong sandal
+Objects	👞	鞋	man’s shoe
+Objects	👟	跑	running shoe
+Objects	🥾	鞋	hiking boot
+Objects	🥿	便鞋	flat shoe
+Objects	👠	鞋	high-heeled shoe
+Objects	👡	女	woman’s sandal
+Objects	🩰	舞蹈	ballet shoes
+Objects	👢	女	woman’s boot
+Objects	🪮	发夹	hair pick
+Objects	👑	国王	crown
+Objects	👒	女	woman’s hat
+Objects	🎩	帽子	top hat
+Objects	🎓	学位	graduation cap
+Objects	🧢	帽子	billed cap
+Objects	🪖	军事	military helmet
+Objects	⛑️	rescue worker’s helmet	rescue worker’s helmet
+Objects	📿	宗教	prayer beads
+Objects	💄	化妆	lipstick
+Objects	💍	戒指	ring
+Objects	💎	婚礼	gem stone
+Objects	🔇	声音	muted speaker
+Objects	🔈	喇叭	speaker low volume
+Objects	🔉	中等	speaker medium volume
+Objects	🔊	大声	speaker high volume
+Objects	📢	喇叭	loudspeaker
+Objects	📣	呼喊	megaphone
+Objects	📯	号	postal horn
+Objects	🔔	叮当	bell
+Objects	🔕	铃	bell with slash
+Objects	🎼	乐谱	musical score
+Objects	🎵	乐谱	musical note
+Objects	🎶	乐谱	musical notes
+Objects	🎙️	studio microphone	studio microphone
+Objects	🎚️	level slider	level slider
+Objects	🎛️	control knobs	control knobs
+Objects	🎤	麦	microphone
+Objects	🎧	耳塞	headphone
+Objects	📻	娱乐	radio
+Objects	🎷	乐器	saxophone
+Objects	🎺	乐器	trumpet
+Objects	🪊	乐器	trombone
+Objects	🪗	乐器	accordion
+Objects	🎸	乐器	guitar
+Objects	🎹	乐器	musical keyboard
+Objects	🎻	乐器	violin
+Objects	🪕	弹奏	banjo
+Objects	🥁	鼓	drum
+Objects	🪘	鼓	long drum
+Objects	🪇	乐器	maracas
+Objects	🪈	乐器	flute
+Objects	🪉	乐器	harp
+Objects	📱	手机	mobile phone
+Objects	📲	手机	mobile phone with arrow
+Objects	☎️	telephone	telephone
+Objects	📞	听筒	telephone receiver
+Objects	📟	呼机	pager
+Objects	📠	传真	fax machine
+Objects	🔋	电	battery
+Objects	🪫	电子	low battery
+Objects	🔌	插头	electric plug
+Objects	💻	pc	laptop
+Objects	🖥️	desktop computer	desktop computer
+Objects	🖨️	printer	printer
+Objects	⌨️	keyboard	keyboard
+Objects	🖱️	computer mouse	computer mouse
+Objects	🖲️	trackball	trackball
+Objects	💽	md	computer disk
+Objects	💾	便携	floppy disk
+Objects	💿	cd	optical disk
+Objects	📀	光盘	dvd
+Objects	🧮	算盘	abacus
+Objects	🎥	录像	movie camera
+Objects	🎞️	film frames	film frames
+Objects	📽️	film projector	film projector
+Objects	🎬	场记	clapper board
+Objects	📺	电视	television
+Objects	📷	拍照	camera
+Objects	📸	拍照	camera with flash
+Objects	📹	录像	video camera
+Objects	📼	磁带	videocassette
+Objects	🔍	工具	magnifying glass tilted left
+Objects	🔎	工具	magnifying glass tilted right
+Objects	🕯️	candle	candle
+Objects	💡	主意	light bulb
+Objects	🔦	工具	flashlight
+Objects	🏮	喜庆	red paper lantern
+Objects	🪔	油	diya lamp
+Objects	📔	写作	notebook with decorative cover
+Objects	📕	书	closed book
+Objects	📖	书	open book
+Objects	📗	书	green book
+Objects	📘	书	blue book
+Objects	📙	书	orange book
+Objects	📚	书	books
+Objects	📓	本子	notebook
+Objects	📒	记账	ledger
+Objects	📃	卷曲	page with curl
+Objects	📜	卷纸	scroll
+Objects	📄	文书	page facing up
+Objects	📰	纸	newspaper
+Objects	🗞️	rolled-up newspaper	rolled-up newspaper
+Objects	📑	书签	bookmark tabs
+Objects	🔖	书签	bookmark
+Objects	🏷️	label	label
+Objects	🪙	富有	coin
+Objects	💰	钱	money bag
+Objects	🪎	劫掠	treasure chest
+Objects	💴	日元	yen banknote
+Objects	💵	现金	dollar banknote
+Objects	💶	欧元	euro banknote
+Objects	💷	现金	pound banknote
+Objects	💸	钱	money with wings
+Objects	💳	卡	credit card
+Objects	🧾	会计	receipt
+Objects	💹	上扬	chart increasing with yen
+Objects	✉️	envelope	envelope
+Objects	📧	信件	e-mail
+Objects	📨	信件	incoming envelope
+Objects	📩	信件	envelope with arrow
+Objects	📤	信件	outbox tray
+Objects	📥	信件	inbox tray
+Objects	📦	包裹	package
+Objects	📫	信箱	closed mailbox with raised flag
+Objects	📪	信箱	closed mailbox with lowered flag
+Objects	📬	信箱	open mailbox with raised flag
+Objects	📭	信箱	open mailbox with lowered flag
+Objects	📮	信箱	postbox
+Objects	🗳️	ballot box with ballot	ballot box with ballot
+Objects	✏️	pencil	pencil
+Objects	✒️	black nib	black nib
+Objects	🖋️	fountain pen	fountain pen
+Objects	🖊️	pen	pen
+Objects	🖌️	paintbrush	paintbrush
+Objects	🖍️	crayon	crayon
+Objects	📝	便条	memo
+Objects	🪌	eraser	eraser
+Objects	💼	包	briefcase
+Objects	📁	办公	file folder
+Objects	📂	办公	open file folder
+Objects	🗂️	card index dividers	card index dividers
+Objects	📅	日历	calendar
+Objects	📆	日历	tear-off calendar
+Objects	🗒️	spiral notepad	spiral notepad
+Objects	🗓️	spiral calendar	spiral calendar
+Objects	📇	卡片	card index
+Objects	📈	上升	chart increasing
+Objects	📉	下跌	chart decreasing
+Objects	📊	图形	bar chart
+Objects	📋	夹子	clipboard
+Objects	📌	固定	pushpin
+Objects	📍	位置	round pushpin
+Objects	📎	纸夹	paperclip
+Objects	🖇️	linked paperclips	linked paperclips
+Objects	📏	尺	straight ruler
+Objects	📐	尺	triangular ruler
+Objects	✂️	scissors	scissors
+Objects	🗃️	card file box	card file box
+Objects	🗄️	file cabinet	file cabinet
+Objects	🗑️	wastebasket	wastebasket
+Objects	🔒	锁	locked
+Objects	🔓	锁	unlocked
+Objects	🔏	笔	locked with pen
+Objects	🔐	锁	locked with key
+Objects	🔑	密码	key
+Objects	🗝️	old key	old key
+Objects	🪍	net with handle	net with handle
+Objects	🔨	修理	hammer
+Objects	🪓	斧头	axe
+Objects	⛏️	pick	pick
+Objects	⚒️	hammer and pick	hammer and pick
+Objects	🛠️	hammer and wrench	hammer and wrench
+Objects	🗡️	dagger	dagger
+Objects	⚔️	crossed swords	crossed swords
+Objects	💣	炸弹	bomb
+Objects	🪃	反弹	boomerang
+Objects	🏹	弓	bow and arrow
+Objects	🛡️	shield	shield
+Objects	🪚	锯	carpentry saw
+Objects	🔧	工具	wrench
+Objects	🪛	工具	screwdriver
+Objects	🔩	工具	nut and bolt
+Objects	⚙️	gear	gear
+Objects	🗜️	clamp	clamp
+Objects	⚖️	balance scale	balance scale
+Objects	🦯	盲	white cane
+Objects	🔗	网址	link
+Objects	⛓️‍💥	broken chain	broken chain
+Objects	⛓️	chains	chains
+Objects	🪝	卖点	hook
+Objects	🧰	工具	toolbox
+Objects	🧲	吸引	magnet
+Objects	🪜	台阶	ladder
+Objects	🪏	铲	shovel
+Objects	⚗️	alembic	alembic
+Objects	🧪	化学	test tube
+Objects	🧫	培养	petri dish
+Objects	🧬	基因	dna
+Objects	🔬	实验	microscope
+Objects	🔭	天体	telescope
+Objects	📡	卫星	satellite antenna
+Objects	💉	医学	syringe
+Objects	🩸	医疗	drop of blood
+Objects	💊	药	pill
+Objects	🩹	伤口	adhesive bandage
+Objects	🩼	受伤	crutch
+Objects	🩺	医生	stethoscope
+Objects	🩻	医生	x-ray
+Objects	🚪	门	door
+Objects	🛗	电梯	elevator
+Objects	🪞	化妆	mirror
+Objects	🪟	开窗	window
+Objects	🛏️	bed	bed
+Objects	🛋️	couch and lamp	couch and lamp
+Objects	🪑	坐下	chair
+Objects	🚽	wc	toilet
+Objects	🪠	便便	plunger
+Objects	🚿	喷头	shower
+Objects	🛁	沐浴	bathtub
+Objects	🪤	奶酪	mouse trap
+Objects	🪒	刀	razor
+Objects	🧴	乳液	lotion bottle
+Objects	🧷	别针	safety pin
+Objects	🧹	女巫	broom
+Objects	🧺	筐	basket
+Objects	🧻	卷纸	roll of paper
+Objects	🪣	桶	bucket
+Objects	🧼	皂	soap
+Objects	🫧	打嗝	bubbles
+Objects	🪥	刷	toothbrush
+Objects	🧽	吸收	sponge
+Objects	🧯	压制	fire extinguisher
+Objects	🛒	购物	shopping cart
+Objects	🚬	烟	cigarette
+Objects	⚰️	coffin	coffin
+Objects	🪦	公墓	headstone
+Objects	⚱️	funeral urn	funeral urn
+Objects	🧿	珠子	nazar amulet
+Objects	🪬	手	hamsa
+Objects	🗿	摩埃	moai
+Objects	🪧	告示	placard
+Objects	🪪	id	identification card
+# Symbols
+Symbols	🏧	标识	ATM sign
+Symbols	🚮	倒垃圾	litter in bin sign
+Symbols	🚰	水	potable water
+Symbols	♿	残疾	wheelchair symbol
+Symbols	🚹	厕所	men’s room
+Symbols	🚺	厕所	women’s room
+Symbols	🚻	wc	restroom
+Symbols	🚼	婴儿	baby symbol
+Symbols	🚾	厕所	water closet
+Symbols	🛂	安检	passport control
+Symbols	🛃	海关	customs
+Symbols	🛄	提取	baggage claim
+Symbols	🛅	寄存	left luggage
+Symbols	⚠️	warning	warning
+Symbols	🚸	交通	children crossing
+Symbols	⛔	交通	no entry
+Symbols	🚫	不准	prohibited
+Symbols	🚳	严禁	no bicycles
+Symbols	🚭	严禁	no smoking
+Symbols	🚯	严禁	no littering
+Symbols	🚱	水	non-potable water
+Symbols	🚷	严禁	no pedestrians
+Symbols	📵	严禁	no mobile phones
+Symbols	🔞	禁止	no one under eighteen
+Symbols	☢️	radioactive	radioactive
+Symbols	☣️	biohazard	biohazard
+Symbols	⬆️	up arrow	up arrow
+Symbols	↗️	up-right arrow	up-right arrow
+Symbols	➡️	right arrow	right arrow
+Symbols	↘️	down-right arrow	down-right arrow
+Symbols	⬇️	down arrow	down arrow
+Symbols	↙️	down-left arrow	down-left arrow
+Symbols	⬅️	left arrow	left arrow
+Symbols	↖️	up-left arrow	up-left arrow
+Symbols	↕️	up-down arrow	up-down arrow
+Symbols	↔️	left-right arrow	left-right arrow
+Symbols	↩️	right arrow curving left	right arrow curving left
+Symbols	↪️	left arrow curving right	left arrow curving right
+Symbols	⤴️	right arrow curving up	right arrow curving up
+Symbols	⤵️	right arrow curving down	right arrow curving down
+Symbols	🔃	刷新	clockwise vertical arrows
+Symbols	🔄	倒转	counterclockwise arrows button
+Symbols	🔙	回退	BACK arrow
+Symbols	🔚	箭头	END arrow
+Symbols	🔛	on	ON! arrow
+Symbols	🔜	箭头	SOON arrow
+Symbols	🔝	顶	TOP arrow
+Symbols	🛐	地点	place of worship
+Symbols	⚛️	atom symbol	atom symbol
+Symbols	🕉️	om	om
+Symbols	✡️	star of David	star of David
+Symbols	☸️	wheel of dharma	wheel of dharma
+Symbols	☯️	yin yang	yin yang
+Symbols	✝️	latin cross	latin cross
+Symbols	☦️	orthodox cross	orthodox cross
+Symbols	☪️	star and crescent	star and crescent
+Symbols	☮️	peace symbol	peace symbol
+Symbols	🕎	宗教	menorah
+Symbols	🔯	命运	dotted six-pointed star
+Symbols	🪯	信仰	khanda
+Symbols	♈	公羊	Aries
+Symbols	♉	公牛	Taurus
+Symbols	♊	双子	Gemini
+Symbols	♋	巨蟹	Cancer
+Symbols	♌	星座	Leo
+Symbols	♍	星座	Virgo
+Symbols	♎	平衡	Libra
+Symbols	♏	天蝎	Scorpio
+Symbols	♐	射手	Sagittarius
+Symbols	♑	山羊	Capricorn
+Symbols	♒	水	Aquarius
+Symbols	♓	鱼	Pisces
+Symbols	⛎	蛇	Ophiuchus
+Symbols	🔀	交叉	shuffle tracks button
+Symbols	🔁	循环	repeat button
+Symbols	🔂	循环	repeat single button
+Symbols	▶️	play button	play button
+Symbols	⏩	向前	fast-forward button
+Symbols	⏭️	next track button	next track button
+Symbols	⏯️	play or pause button	play or pause button
+Symbols	◀️	reverse button	reverse button
+Symbols	⏪	倒回	fast reverse button
+Symbols	⏮️	last track button	last track button
+Symbols	🔼	上	upwards button
+Symbols	⏫	上	fast up button
+Symbols	🔽	下	downwards button
+Symbols	⏬	下	fast down button
+Symbols	⏸️	pause button	pause button
+Symbols	⏹️	stop button	stop button
+Symbols	⏺️	record button	record button
+Symbols	⏏️	eject button	eject button
+Symbols	🎦	剧院	cinema
+Symbols	🔅	低	dim button
+Symbols	🔆	亮	bright button
+Symbols	📶	条	antenna bars
+Symbols	🛜	宽带	wireless
+Symbols	📳	手机	vibration mode
+Symbols	📴	关机	mobile phone off
+Symbols	♀️	female sign	female sign
+Symbols	♂️	male sign	male sign
+Symbols	⚧️	transgender symbol	transgender symbol
+Symbols	✖️	multiply	multiply
+Symbols	➕	加	plus
+Symbols	➖	减	minus
+Symbols	➗	除	divide
+Symbols	🟰	回答	heavy equals sign
+Symbols	♾️	infinity	infinity
+Symbols	‼️	double exclamation mark	double exclamation mark
+Symbols	⁉️	exclamation question mark	exclamation question mark
+Symbols	❓	标点	red question mark
+Symbols	❔	空心	white question mark
+Symbols	❕	叹号	white exclamation mark
+Symbols	❗	叹号	red exclamation mark
+Symbols	〰️	wavy dash	wavy dash
+Symbols	💱	兑换	currency exchange
+Symbols	💲	现金	heavy dollar sign
+Symbols	⚕️	medical symbol	medical symbol
+Symbols	♻️	recycling symbol	recycling symbol
+Symbols	⚜️	fleur-de-lis	fleur-de-lis
+Symbols	🔱	工具	trident emblem
+Symbols	📛	名牌	name badge
+Symbols	🔰	军警	Japanese symbol for beginner
+Symbols	⭕	红	hollow red circle
+Symbols	✅	勾	check mark button
+Symbols	☑️	check box with check	check box with check
+Symbols	✔️	check mark	check mark
+Symbols	❌	交叉	cross mark
+Symbols	❎	叉	cross mark button
+Symbols	➰	单环	curly loop
+Symbols	➿	双环	double curly loop
+Symbols	〽️	part alternation mark	part alternation mark
+Symbols	✳️	eight-spoked asterisk	eight-spoked asterisk
+Symbols	✴️	eight-pointed star	eight-pointed star
+Symbols	❇️	sparkle	sparkle
+Symbols	©️	copyright	copyright
+Symbols	®️	registered	registered
+Symbols	™️	trade mark	trade mark
+Symbols	🫟	喷洒	splatter
+Symbols	#️⃣	keycap: #	keycap: #
+Symbols	*️⃣	keycap: *	keycap: *
+Symbols	0️⃣	keycap: 0	keycap: 0
+Symbols	1️⃣	keycap: 1	keycap: 1
+Symbols	2️⃣	keycap: 2	keycap: 2
+Symbols	3️⃣	keycap: 3	keycap: 3
+Symbols	4️⃣	keycap: 4	keycap: 4
+Symbols	5️⃣	keycap: 5	keycap: 5
+Symbols	6️⃣	keycap: 6	keycap: 6
+Symbols	7️⃣	keycap: 7	keycap: 7
+Symbols	8️⃣	keycap: 8	keycap: 8
+Symbols	9️⃣	keycap: 9	keycap: 9
+Symbols	🔟	按键	keycap: 10
+Symbols	🔠	字母	input latin uppercase
+Symbols	🔡	打字	input latin lowercase
+Symbols	🔢	打字	input numbers
+Symbols	🔣	字符	input symbols
+Symbols	🔤	字母	input latin letters
+Symbols	🅰️	A button (blood type)	A button (blood type)
+Symbols	🆎	ab	AB button (blood type)
+Symbols	🅱️	B button (blood type)	B button (blood type)
+Symbols	🆑	cl	CL button
+Symbols	🆒	按键	COOL button
+Symbols	🆓	免费	FREE button
+Symbols	ℹ️	information	information
+Symbols	🆔	id	ID button
+Symbols	Ⓜ️	circled M	circled M
+Symbols	🆕	按键	NEW button
+Symbols	🆖	ng	NG button
+Symbols	🅾️	O button (blood type)	O button (blood type)
+Symbols	🆗	ok	OK button
+Symbols	🅿️	P button	P button
+Symbols	🆘	按键	SOS button
+Symbols	🆙	up	UP! button
+Symbols	🆚	vs	VS button
+Symbols	🈁	按键	Japanese “here” button
+Symbols	🈂️	Japanese “service charge” button	Japanese “service charge” button
+Symbols	🈷️	Japanese “monthly amount” button	Japanese “monthly amount” button
+Symbols	🈶	按键	Japanese “not free of charge” button
+Symbols	🈯	保留	Japanese “reserved” button
+Symbols	🉐	按键	Japanese “bargain” button
+Symbols	🈹	打折	Japanese “discount” button
+Symbols	🈚	免费	Japanese “free of charge” button
+Symbols	🈲	禁	Japanese “prohibited” button
+Symbols	🉑	可	Japanese “acceptable” button
+Symbols	🈸	申	Japanese “application” button
+Symbols	🈴	合	Japanese “passing grade” button
+Symbols	🈳	空	Japanese “vacancy” button
+Symbols	㊗️	Japanese “congratulations” button	Japanese “congratulations” button
+Symbols	㊙️	Japanese “secret” button	Japanese “secret” button
+Symbols	🈺	营	Japanese “open for business” button
+Symbols	🈵	座位	Japanese “no vacancy” button
+Symbols	🔴	圆	red circle
+Symbols	🟠	圆	orange circle
+Symbols	🟡	圆	yellow circle
+Symbols	🟢	圆	green circle
+Symbols	🔵	圆	blue circle
+Symbols	🟣	圆	purple circle
+Symbols	🟤	圆	brown circle
+Symbols	⚫	圆	black circle
+Symbols	⚪	圆	white circle
+Symbols	🟥	红	red square
+Symbols	🟧	橙	orange square
+Symbols	🟨	黄	yellow square
+Symbols	🟩	绿	green square
+Symbols	🟦	蓝	blue square
+Symbols	🟪	紫	purple square
+Symbols	🟫	棕	brown square
+Symbols	⬛	大	black large square
+Symbols	⬜	大	white large square
+Symbols	◼️	black medium square	black medium square
+Symbols	◻️	white medium square	white medium square
+Symbols	◾	black medium-small square	black medium-small square
+Symbols	◽	white medium-small square	white medium-small square
+Symbols	▪️	black small square	black small square
+Symbols	▫️	white small square	white small square
+Symbols	🔶	大	large orange diamond
+Symbols	🔷	大	large blue diamond
+Symbols	🔸	小	small orange diamond
+Symbols	🔹	小	small blue diamond
+Symbols	🔺	向上	red triangle pointed up
+Symbols	🔻	向下	red triangle pointed down
+Symbols	💠	圆	diamond with a dot
+Symbols	🔘	单独	radio button
+Symbols	🔳	按钮	white square button
+Symbols	🔲	几何	black square button
+# Flags
+Flags	🏁	方格	chequered flag
+Flags	🚩	旗	triangular flag
+Flags	🎌	旗	crossed flags
+Flags	🏴	黑旗	black flag
+Flags	🏳️	white flag	white flag
+Flags	🏳️‍🌈	rainbow flag	rainbow flag
+Flags	🏳️‍⚧️	transgender flag	transgender flag
+Flags	🏴‍☠️	pirate flag	pirate flag
+Flags	🇦🇨	旗	flag: Ascension Island
+Flags	🇦🇩	旗	flag: Andorra
+Flags	🇦🇪	旗	flag: United Arab Emirates
+Flags	🇦🇫	旗	flag: Afghanistan
+Flags	🇦🇬	旗	flag: Antigua & Barbuda
+Flags	🇦🇮	旗	flag: Anguilla
+Flags	🇦🇱	旗	flag: Albania
+Flags	🇦🇲	旗	flag: Armenia
+Flags	🇦🇴	旗	flag: Angola
+Flags	🇦🇶	旗	flag: Antarctica
+Flags	🇦🇷	旗	flag: Argentina
+Flags	🇦🇸	旗	flag: American Samoa
+Flags	🇦🇹	旗	flag: Austria
+Flags	🇦🇺	旗	flag: Australia
+Flags	🇦🇼	旗	flag: Aruba
+Flags	🇦🇽	旗	flag: Åland Islands
+Flags	🇦🇿	旗	flag: Azerbaijan
+Flags	🇧🇦	旗	flag: Bosnia & Herzegovina
+Flags	🇧🇧	旗	flag: Barbados
+Flags	🇧🇩	旗	flag: Bangladesh
+Flags	🇧🇪	旗	flag: Belgium
+Flags	🇧🇫	旗	flag: Burkina Faso
+Flags	🇧🇬	旗	flag: Bulgaria
+Flags	🇧🇭	旗	flag: Bahrain
+Flags	🇧🇮	旗	flag: Burundi
+Flags	🇧🇯	旗	flag: Benin
+Flags	🇧🇱	旗	flag: St. Barthélemy
+Flags	🇧🇲	旗	flag: Bermuda
+Flags	🇧🇳	旗	flag: Brunei
+Flags	🇧🇴	旗	flag: Bolivia
+Flags	🇧🇶	旗	flag: Caribbean Netherlands
+Flags	🇧🇷	旗	flag: Brazil
+Flags	🇧🇸	旗	flag: Bahamas
+Flags	🇧🇹	旗	flag: Bhutan
+Flags	🇧🇻	旗	flag: Bouvet Island
+Flags	🇧🇼	旗	flag: Botswana
+Flags	🇧🇾	旗	flag: Belarus
+Flags	🇧🇿	旗	flag: Belize
+Flags	🇨🇦	旗	flag: Canada
+Flags	🇨🇨	旗	flag: Cocos (Keeling) Islands
+Flags	🇨🇩	旗	flag: Congo - Kinshasa
+Flags	🇨🇫	旗	flag: Central African Republic
+Flags	🇨🇬	旗	flag: Congo - Brazzaville
+Flags	🇨🇭	旗	flag: Switzerland
+Flags	🇨🇮	旗	flag: Côte d’Ivoire
+Flags	🇨🇰	旗	flag: Cook Islands
+Flags	🇨🇱	旗	flag: Chile
+Flags	🇨🇲	旗	flag: Cameroon
+Flags	🇨🇳	旗	flag: China
+Flags	🇨🇴	旗	flag: Colombia
+Flags	🇨🇵	旗	flag: Clipperton Island
+Flags	🇨🇶	旗	flag: Sark
+Flags	🇨🇷	旗	flag: Costa Rica
+Flags	🇨🇺	旗	flag: Cuba
+Flags	🇨🇻	旗	flag: Cape Verde
+Flags	🇨🇼	旗	flag: Curaçao
+Flags	🇨🇽	旗	flag: Christmas Island
+Flags	🇨🇾	旗	flag: Cyprus
+Flags	🇨🇿	旗	flag: Czechia
+Flags	🇩🇪	旗	flag: Germany
+Flags	🇩🇬	旗	flag: Diego Garcia
+Flags	🇩🇯	旗	flag: Djibouti
+Flags	🇩🇰	旗	flag: Denmark
+Flags	🇩🇲	旗	flag: Dominica
+Flags	🇩🇴	旗	flag: Dominican Republic
+Flags	🇩🇿	旗	flag: Algeria
+Flags	🇪🇦	旗	flag: Ceuta & Melilla
+Flags	🇪🇨	旗	flag: Ecuador
+Flags	🇪🇪	旗	flag: Estonia
+Flags	🇪🇬	旗	flag: Egypt
+Flags	🇪🇭	旗	flag: Western Sahara
+Flags	🇪🇷	旗	flag: Eritrea
+Flags	🇪🇸	旗	flag: Spain
+Flags	🇪🇹	旗	flag: Ethiopia
+Flags	🇪🇺	旗	flag: European Union
+Flags	🇫🇮	旗	flag: Finland
+Flags	🇫🇯	旗	flag: Fiji
+Flags	🇫🇰	旗	flag: Falkland Islands
+Flags	🇫🇲	旗	flag: Micronesia
+Flags	🇫🇴	旗	flag: Faroe Islands
+Flags	🇫🇷	旗	flag: France
+Flags	🇬🇦	旗	flag: Gabon
+Flags	🇬🇧	旗	flag: United Kingdom
+Flags	🇬🇩	旗	flag: Grenada
+Flags	🇬🇪	旗	flag: Georgia
+Flags	🇬🇫	旗	flag: French Guiana
+Flags	🇬🇬	旗	flag: Guernsey
+Flags	🇬🇭	旗	flag: Ghana
+Flags	🇬🇮	旗	flag: Gibraltar
+Flags	🇬🇱	旗	flag: Greenland
+Flags	🇬🇲	旗	flag: Gambia
+Flags	🇬🇳	旗	flag: Guinea
+Flags	🇬🇵	旗	flag: Guadeloupe
+Flags	🇬🇶	旗	flag: Equatorial Guinea
+Flags	🇬🇷	旗	flag: Greece
+Flags	🇬🇸	旗	flag: South Georgia & South Sandwich Islands
+Flags	🇬🇹	旗	flag: Guatemala
+Flags	🇬🇺	旗	flag: Guam
+Flags	🇬🇼	旗	flag: Guinea-Bissau
+Flags	🇬🇾	旗	flag: Guyana
+Flags	🇭🇰	旗	flag: Hong Kong SAR China
+Flags	🇭🇲	旗	flag: Heard Island & McDonald Islands
+Flags	🇭🇳	旗	flag: Honduras
+Flags	🇭🇷	旗	flag: Croatia
+Flags	🇭🇹	旗	flag: Haiti
+Flags	🇭🇺	旗	flag: Hungary
+Flags	🇮🇨	旗	flag: Canary Islands
+Flags	🇮🇩	旗	flag: Indonesia
+Flags	🇮🇪	旗	flag: Ireland
+Flags	🇮🇱	旗	flag: Israel
+Flags	🇮🇲	旗	flag: Isle of Man
+Flags	🇮🇳	旗	flag: India
+Flags	🇮🇴	旗	flag: British Indian Ocean Territory
+Flags	🇮🇶	旗	flag: Iraq
+Flags	🇮🇷	旗	flag: Iran
+Flags	🇮🇸	旗	flag: Iceland
+Flags	🇮🇹	旗	flag: Italy
+Flags	🇯🇪	旗	flag: Jersey
+Flags	🇯🇲	旗	flag: Jamaica
+Flags	🇯🇴	旗	flag: Jordan
+Flags	🇯🇵	旗	flag: Japan
+Flags	🇰🇪	旗	flag: Kenya
+Flags	🇰🇬	旗	flag: Kyrgyzstan
+Flags	🇰🇭	旗	flag: Cambodia
+Flags	🇰🇮	旗	flag: Kiribati
+Flags	🇰🇲	旗	flag: Comoros
+Flags	🇰🇳	旗	flag: St. Kitts & Nevis
+Flags	🇰🇵	旗	flag: North Korea
+Flags	🇰🇷	旗	flag: South Korea
+Flags	🇰🇼	旗	flag: Kuwait
+Flags	🇰🇾	旗	flag: Cayman Islands
+Flags	🇰🇿	旗	flag: Kazakhstan
+Flags	🇱🇦	旗	flag: Laos
+Flags	🇱🇧	旗	flag: Lebanon
+Flags	🇱🇨	旗	flag: St. Lucia
+Flags	🇱🇮	旗	flag: Liechtenstein
+Flags	🇱🇰	旗	flag: Sri Lanka
+Flags	🇱🇷	旗	flag: Liberia
+Flags	🇱🇸	旗	flag: Lesotho
+Flags	🇱🇹	旗	flag: Lithuania
+Flags	🇱🇺	旗	flag: Luxembourg
+Flags	🇱🇻	旗	flag: Latvia
+Flags	🇱🇾	旗	flag: Libya
+Flags	🇲🇦	旗	flag: Morocco
+Flags	🇲🇨	旗	flag: Monaco
+Flags	🇲🇩	旗	flag: Moldova
+Flags	🇲🇪	旗	flag: Montenegro
+Flags	🇲🇫	旗	flag: St. Martin
+Flags	🇲🇬	旗	flag: Madagascar
+Flags	🇲🇭	旗	flag: Marshall Islands
+Flags	🇲🇰	旗	flag: North Macedonia
+Flags	🇲🇱	旗	flag: Mali
+Flags	🇲🇲	旗	flag: Myanmar (Burma)
+Flags	🇲🇳	旗	flag: Mongolia
+Flags	🇲🇴	旗	flag: Macao SAR China
+Flags	🇲🇵	旗	flag: Northern Mariana Islands
+Flags	🇲🇶	旗	flag: Martinique
+Flags	🇲🇷	旗	flag: Mauritania
+Flags	🇲🇸	旗	flag: Montserrat
+Flags	🇲🇹	旗	flag: Malta
+Flags	🇲🇺	旗	flag: Mauritius
+Flags	🇲🇻	旗	flag: Maldives
+Flags	🇲🇼	旗	flag: Malawi
+Flags	🇲🇽	旗	flag: Mexico
+Flags	🇲🇾	旗	flag: Malaysia
+Flags	🇲🇿	旗	flag: Mozambique
+Flags	🇳🇦	旗	flag: Namibia
+Flags	🇳🇨	旗	flag: New Caledonia
+Flags	🇳🇪	旗	flag: Niger
+Flags	🇳🇫	旗	flag: Norfolk Island
+Flags	🇳🇬	旗	flag: Nigeria
+Flags	🇳🇮	旗	flag: Nicaragua
+Flags	🇳🇱	旗	flag: Netherlands
+Flags	🇳🇴	旗	flag: Norway
+Flags	🇳🇵	旗	flag: Nepal
+Flags	🇳🇷	旗	flag: Nauru
+Flags	🇳🇺	旗	flag: Niue
+Flags	🇳🇿	旗	flag: New Zealand
+Flags	🇴🇲	旗	flag: Oman
+Flags	🇵🇦	旗	flag: Panama
+Flags	🇵🇪	旗	flag: Peru
+Flags	🇵🇫	旗	flag: French Polynesia
+Flags	🇵🇬	旗	flag: Papua New Guinea
+Flags	🇵🇭	旗	flag: Philippines
+Flags	🇵🇰	旗	flag: Pakistan
+Flags	🇵🇱	旗	flag: Poland
+Flags	🇵🇲	旗	flag: St. Pierre & Miquelon
+Flags	🇵🇳	旗	flag: Pitcairn Islands
+Flags	🇵🇷	旗	flag: Puerto Rico
+Flags	🇵🇸	旗	flag: Palestinian Territories
+Flags	🇵🇹	旗	flag: Portugal
+Flags	🇵🇼	旗	flag: Palau
+Flags	🇵🇾	旗	flag: Paraguay
+Flags	🇶🇦	旗	flag: Qatar
+Flags	🇷🇪	旗	flag: Réunion
+Flags	🇷🇴	旗	flag: Romania
+Flags	🇷🇸	旗	flag: Serbia
+Flags	🇷🇺	旗	flag: Russia
+Flags	🇷🇼	旗	flag: Rwanda
+Flags	🇸🇦	旗	flag: Saudi Arabia
+Flags	🇸🇧	旗	flag: Solomon Islands
+Flags	🇸🇨	旗	flag: Seychelles
+Flags	🇸🇩	旗	flag: Sudan
+Flags	🇸🇪	旗	flag: Sweden
+Flags	🇸🇬	旗	flag: Singapore
+Flags	🇸🇭	旗	flag: St. Helena, Ascension & Tristan da Cunha
+Flags	🇸🇮	旗	flag: Slovenia
+Flags	🇸🇯	旗	flag: Svalbard & Jan Mayen
+Flags	🇸🇰	旗	flag: Slovakia
+Flags	🇸🇱	旗	flag: Sierra Leone
+Flags	🇸🇲	旗	flag: San Marino
+Flags	🇸🇳	旗	flag: Senegal
+Flags	🇸🇴	旗	flag: Somalia
+Flags	🇸🇷	旗	flag: Suriname
+Flags	🇸🇸	旗	flag: South Sudan
+Flags	🇸🇹	旗	flag: São Tomé & Príncipe
+Flags	🇸🇻	旗	flag: El Salvador
+Flags	🇸🇽	旗	flag: Sint Maarten
+Flags	🇸🇾	旗	flag: Syria
+Flags	🇸🇿	旗	flag: Eswatini
+Flags	🇹🇦	旗	flag: Tristan da Cunha
+Flags	🇹🇨	旗	flag: Turks & Caicos Islands
+Flags	🇹🇩	旗	flag: Chad
+Flags	🇹🇫	旗	flag: French Southern and Antarctic Lands
+Flags	🇹🇬	旗	flag: Togo
+Flags	🇹🇭	旗	flag: Thailand
+Flags	🇹🇯	旗	flag: Tajikistan
+Flags	🇹🇰	旗	flag: Tokelau
+Flags	🇹🇱	旗	flag: Timor-Leste
+Flags	🇹🇲	旗	flag: Turkmenistan
+Flags	🇹🇳	旗	flag: Tunisia
+Flags	🇹🇴	旗	flag: Tonga
+Flags	🇹🇷	旗	flag: Türkiye
+Flags	🇹🇹	旗	flag: Trinidad & Tobago
+Flags	🇹🇻	旗	flag: Tuvalu
+Flags	🇹🇼	旗	flag: Taiwan
+Flags	🇹🇿	旗	flag: Tanzania
+Flags	🇺🇦	旗	flag: Ukraine
+Flags	🇺🇬	旗	flag: Uganda
+Flags	🇺🇲	旗	flag: U.S. Outlying Islands
+Flags	🇺🇳	旗	flag: United Nations
+Flags	🇺🇸	旗	flag: United States
+Flags	🇺🇾	旗	flag: Uruguay
+Flags	🇺🇿	旗	flag: Uzbekistan
+Flags	🇻🇦	旗	flag: Vatican City
+Flags	🇻🇨	旗	flag: St. Vincent & Grenadines
+Flags	🇻🇪	旗	flag: Venezuela
+Flags	🇻🇬	旗	flag: British Virgin Islands
+Flags	🇻🇮	旗	flag: U.S. Virgin Islands
+Flags	🇻🇳	旗	flag: Vietnam
+Flags	🇻🇺	旗	flag: Vanuatu
+Flags	🇼🇫	旗	flag: Wallis & Futuna
+Flags	🇼🇸	旗	flag: Samoa
+Flags	🇽🇰	旗	flag: Kosovo
+Flags	🇾🇪	旗	flag: Yemen
+Flags	🇾🇹	旗	flag: Mayotte
+Flags	🇿🇦	旗	flag: South Africa
+Flags	🇿🇲	旗	flag: Zambia
+Flags	🇿🇼	旗	flag: Zimbabwe
+Flags	🏴󠁧󠁢󠁥󠁮󠁧󠁿	旗	flag: England
+Flags	🏴󠁧󠁢󠁳󠁣󠁴󠁿	旗	flag: Scotland
+Flags	🏴󠁧󠁢󠁷󠁬󠁳󠁿	旗	flag: Wales
