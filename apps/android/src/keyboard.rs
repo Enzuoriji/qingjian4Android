@@ -558,7 +558,12 @@ impl Keyboard {
                             if step != 0.0 {
                                 return Some(Fired::ClipboardScroll(step));
                             }
-                        } else {
+                        } else if matches!(press.key, Some(KeyId::Clipboard(_))) {
+                            // **只有剪贴板那几格**能「往左滑删一条」——表情页的格子没有
+                            // 「删」这回事（emoji 是随包的数据，不是用户的东西）。
+                            // 这一条是 2026-09-21 补的：把滚动判定扩到表情格时忘了把
+                            // 删除留给剪贴板，于是表情格左滑会弹「松手删除」的气泡，
+                            // 而抬手兑现的 `DeleteClipboard` 删的其实是**剪贴板**里第 N 条。
                             press.deleting = dx <= -DELETE_SWIPE * self.metrics.density;
                         }
                     }

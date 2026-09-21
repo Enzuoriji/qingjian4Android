@@ -2403,6 +2403,30 @@ fn the_strip_stops_at_the_candidate_limit() {
     );
 }
 
+/// 表情页的格子上**往左滑什么也不删**。
+///
+/// 那里没有「删」这回事（emoji 是随包数据，不是用户的东西），而抬手兑现的
+/// `DeleteClipboard` 删的是**剪贴板**里第 N 条——2026-09-21 把滚动判定扩到表情格时
+/// 忘了把删除留给剪贴板，表情格左滑会弹「松手删除」的气泡、抬手还可能误删剪贴板。
+#[test]
+fn swiping_left_on_an_emoji_deletes_nothing() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("留着的那条");
+    tap_bar(&mut session, BarHitId::Tools);
+    tap_key(&mut session, KeyId::Tool(1));
+    assert_eq!(session.panel, Panel::Emoji, "该在表情页");
+
+    swipe_left(&mut session, KeyId::Emoji(0));
+
+    assert_eq!(
+        session.clipboard.entries(),
+        ["留着的那条"],
+        "表情格上左滑不该动到剪贴板"
+    );
+}
+
 /// 剪贴板历史**落盘**：换一个会话（＝进程重启）它还在。
 ///
 /// 别的剪贴板测试都用内存态（`ready()` 的数据目录传 `None`），这条特意走一遍真文件。
