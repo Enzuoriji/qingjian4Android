@@ -1,4 +1,4 @@
-//! 青简那个标的两部分路径：**一枚键帽 + 四片竹简**（竹简是挖空的孔）。
+//! 青简那个标的路径：**四片竹简**（`menu.svg` 里那个键帽的第一段不画，见文件尾的说明）。
 //!
 //! **这个文件是生成的**，路径数据来自 `assets/icon/menu.svg`：
 //!
@@ -13,22 +13,6 @@
 #![allow(clippy::approx_constant)]
 
 use tiny_skia::{Path, PathBuilder};
-
-/// 键帽的外形（39×28 的圆角矩形）。
-pub(super) fn keycap() -> Option<Path> {
-    let mut builder = PathBuilder::new();
-    builder.move_to(31.0, 0.0);
-    builder.line_to(8.0, 0.0);
-    builder.cubic_to(3.58, 0.0, 0.0, 3.58, 0.0, 8.0);
-    builder.line_to(0.0, 20.0);
-    builder.cubic_to(0.0, 24.42, 3.58, 28.0, 8.0, 28.0);
-    builder.line_to(31.0, 28.0);
-    builder.cubic_to(35.42, 28.0, 39.0, 24.42, 39.0, 20.0);
-    builder.line_to(39.0, 8.0);
-    builder.cubic_to(39.0, 3.58, 35.42, 0.0, 31.0, 0.0);
-    builder.close();
-    builder.finish()
-}
 
 /// 第 1 片竹简——**挖空**用的（见 `draw_logo`）。
 pub(super) fn slip0() -> Option<Path> {
@@ -117,3 +101,13 @@ pub(super) fn slip3() -> Option<Path> {
 
 /// 四片竹简，`slip0` 起。
 pub(super) const SLIPS: [fn() -> Option<Path>; 4] = [slip0, slip1, slip2, slip3];
+
+/// 四片竹简合起来的包围盒（svg 坐标）：`(左, 上, 右, 下)`。
+///
+/// 画的时候按**这个框**等比缩，不是按整个 viewBox——viewBox 里竹简只占中间一小块
+/// （39×28 里大约 14×21），照 viewBox 缩的话四周全是留白、标看着就小。
+pub(super) const SLIPS_BOX: (f32, f32, f32, f32) = (13.3386, 3.12607, 25.6614, 24.8739);
+
+// 第一段（那枚 39×28 的圆角键帽）**不画**：2026-09-21 用户说「灰色的边框去掉」，
+// 那条候选条上只留四片绿竹简。想加回来就照 slip0 的样子补一个 keycap()，
+// 它画法与竹简一样，只是那段是「填满」的、竹简是「填在它上面的色」。

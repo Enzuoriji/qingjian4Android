@@ -55,8 +55,12 @@ const CELL_PADDING: f32 = 4.0;
 /// 词太长装不下时截断补的记号。
 const ELLIPSIS: &str = "…";
 
-/// 那个标（青简的键帽 + 四片竹简）画多高（点）。
-const LOGO_HEIGHT: f32 = 17.0;
+/// 那个标（四片竹简）画多高（点）。**量的是竹简本身**，不含 svg 里的留白——
+/// 这条细的才 30 点，标占 24 点已经快顶满了。
+const LOGO_HEIGHT: f32 = 24.0;
+
+/// 标离左边留多少（点）——贴着边不好看，也别留太多（用户要「靠左」）。
+const LOGO_LEFT: f32 = 5.0;
 
 /// 标左右各留的空白（点）——图标本身就窄，不留白手指点不准。
 const LOGO_PAD: f32 = 7.0;
@@ -170,19 +174,14 @@ impl Renderer {
         };
         let height = m.px(LOGO_HEIGHT);
         let pad = m.px(LOGO_PAD);
-        let left = m.padding();
-        let width = crate::logo::draw_logo(
-            canvas,
-            left + pad,
-            band.centre(height),
-            height,
-            m.theme.colors.index,
-        );
+        let left = m.px(LOGO_LEFT);
+        let width = crate::logo::draw_logo(canvas, left, band.centre(height), height);
+        // 命中区从条子左边缘起、比标大一圈：标本身窄，按它算手指点不准
         hits.push(BarHit {
             id: BarHitId::Tools,
-            x: left,
+            x: 0.0,
             y: band.top,
-            width: width + pad * 2.0,
+            width: left + width + pad * 2.0,
             height: band.height,
         });
 
@@ -191,7 +190,7 @@ impl Renderer {
         };
         let style = m.index_style();
         let text = self.measure(footer, &style);
-        let x = left + width + pad * 3.0;
+        let x = left + width + pad * 2.0;
         self.draw_text(canvas, footer, &style, x, band.centre(text.height));
     }
 

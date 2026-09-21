@@ -95,6 +95,37 @@ def num(v):
     return text if "." in text or "e" in text else text + ".0"
 
 
+def bbox_of(paths, steps=24):
+    """这几段子路径的包围盒（**按曲线真正走到的点算**，不是照控制点——控制点会外扩）。"""
+    xs, ys = [], []
+
+    def walk(x0, y0, segments):
+        x, y = x0, y0
+        for cmd, args in segments:
+            if cmd == "move_to":
+                x, y = args
+                xs.append(x)
+                ys.append(y)
+            elif cmd == "line_to":
+                x, y = args
+                xs.append(x)
+                ys.append(y)
+            elif cmd == "cubic_to":
+                (ax, ay, bx, by, cx, cy) = args
+                for i in range(steps + 1):
+                    t = i / steps
+                    u = 1 - t
+                    px = u**3 * x + 3 * u**2 * t * ax + 3 * u * t**2 * bx + t**3 * cx
+                    py = u**3 * y + 3 * u**2 * t * ay + 3 * u * t**2 * by + t**3 * cy
+                    xs.append(px)
+                    ys.append(py)
+                x, y = cx, cy
+
+    for segments in paths:
+        walk(0.0, 0.0, segments)
+    return min(xs), min(ys), max(xs), max(ys)
+
+
 def emit_call(name, args):
     return f"    builder.{name}({', '.join(num(a) for a in args)});"
 
@@ -114,10 +145,12 @@ def main():
     if not match:
         sys.exit("menu.svg 里没找到 path 的 d")
     paths = parse(match.group(1))
+    # 第一段是键帽、后四段是竹简。**键帽现在不画**（2026-09-21 用户要去掉那个灰框），
+    # 但这条断言留着：svg 一变（段数不对）就该有人来看一眼
     if len(paths) != 5:
         sys.exit(f"该是一枚键帽 + 四片竹简（5 段子路径），实际 {len(paths)} 段")
 
-    header = '''//! 青简那个标的两部分路径：**一枚键帽 + 四片竹简**（竹简是挖空的孔）。
+    header = '''//! 青简那个标的路径：**四片竹简**（`menu.svg` 里那个键帽的第一段不画，见文件尾的说明）。
 //!
 //! **这个文件是生成的**，路径数据来自 `assets/icon/menu.svg`：
 //!
@@ -133,13 +166,7 @@ def main():
 
 use tiny_skia::{Path, PathBuilder};
 '''
-    body = [
-        emit_function(
-            "keycap",
-            "键帽的外形（39×28 的圆角矩形）。",
-            paths[0],
-        )
-    ]
+    body = []
     for index, slip in enumerate(paths[1:]):
         body.append(
             emit_function(
@@ -151,6 +178,18 @@ use tiny_skia::{Path, PathBuilder};
     body.append(
         """/// 四片竹简，`slip0` 起。
 pub(super) const SLIPS: [fn() -> Option<Path>; 4] = [slip0, slip1, slip2, slip3];"""
+    )
+    x0, y0, x1, y1 = bbox_of(paths[1:])
+    body.append(
+        f"""/// 四片竹简合起来的包围盒（svg 坐标）：`(左, 上, 右, 下)`。
+///
+/// 画的时候按**这个框**等比缩，不是按整个 viewBox——viewBox 里竹简只占中间一小块
+/// （39×28 里大约 14×21），照 viewBox 缩的话四周全是留白、标看着就小。
+pub(super) const SLIPS_BOX: (f32, f32, f32, f32) = ({num(x0)}, {num(y0)}, {num(x1)}, {num(y1)});
+
+// 第一段（那枚 39×28 的圆角键帽）**不画**：2026-09-21 用户说「灰色的边框去掉」，
+// 那条候选条上只留四片绿竹简。想加回来就照 slip0 的样子补一个 keycap()，
+// 它画法与竹简一样，只是那段是「填满」的、竹简是「填在它上面的色」。"""
     )
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
