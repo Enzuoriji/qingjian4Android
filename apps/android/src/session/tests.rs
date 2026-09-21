@@ -3,8 +3,8 @@
 //! 喂的是真实坐标，走的是完整触摸链路——点位从渲染器真正画出来的命中矩形里取，
 //! 所以布局一改、命中算错，这里先炸。「能打字能选词」这条验收因此是可断言的。
 
-use super::Session;
 use super::flags;
+use super::{CANDIDATE_LIMIT, Session};
 use crate::action::{Act, Command};
 use crate::touch::MotionAction;
 use qingjian_core::CandidateKind;
@@ -2378,6 +2378,29 @@ fn a_long_drag_stops_at_the_end_of_the_list() {
         "六条比一屏多一条，只该滚一格"
     );
     assert_eq!(session.clipboard_first(), 1, "滚一格就该从第二条起");
+}
+
+/// 候选几百个时，候选条也只铺前 [`CANDIDATE_LIMIT`] 个。
+///
+/// 每个格子都要量一次文本宽度（走一次 cosmic-text 排版），全铺下来敲一下卡一帧——
+/// 用户报的「快速敲 n 再敲 i，i 会卡住」就是它：`ni` 出 501 个候选，那一帧 45ms。
+#[test]
+fn the_strip_stops_at_the_candidate_limit() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "ni");
+
+    assert!(
+        session.candidates.len() > CANDIDATE_LIMIT,
+        "「ni」该有好几百个候选，实际 {}",
+        session.candidates.len()
+    );
+    assert_eq!(
+        session.strip.len(),
+        CANDIDATE_LIMIT,
+        "铺的格子数该被上限夹住——放开了量宽度，敲一下就卡"
+    );
 }
 
 /// 剪贴板历史**落盘**：换一个会话（＝进程重启）它还在。

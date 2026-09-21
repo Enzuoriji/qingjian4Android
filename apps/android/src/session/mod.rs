@@ -34,6 +34,19 @@ const GRID_EPSILON: f32 = 1e-4;
 /// 随包资源目录里的 emoji 字体名（`assets/emoji/README.md` 写了为什么要带它）。
 const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
 
+/// 候选条最多铺多少格。
+///
+/// 引擎给的是**整份**候选，而高频音节能出几百个（`ni` 是 501 个）。候选条要**逐格量文本宽度**
+/// 才能排版（走一次 cosmic-text 排版），五百格纯属白干。
+///
+/// 铺 80 个够滚十几屏，再往后没人看。**别再让它跟着候选数走**：引擎那边多出候选是常事。
+///
+/// **注意它没治好「敲 ni 卡一下」**（2026-09-21 查的）：宿主机上量过，候选条渲染一次 18µs、
+/// 键盘一次 363µs，都不是大头；而同一台模拟器上「敲 n」那一拍 16ms、「敲 ni」63ms——
+/// 那 4 倍差距不在渲染侧（引擎 CLI 量出来 1.47ms）。**剩下的嫌疑在跨语言那一段**
+/// （取位图 → 过 JNI → Kotlin 建 Bitmap），下次查从那儿分段计时。
+const CANDIDATE_LIMIT: usize = 80;
+
 /// 剪贴板历史落在数据目录里的文件名（同目录下还有解出来的词库与 emoji 表）。
 const CLIPBOARD_FILE: &str = "clipboard.tsv";
 
@@ -961,10 +974,14 @@ impl Session {
     ///
     /// 组句一变就得重铺（候选整份换了）；密度或明暗变了也得（带子的位置是像素算的，
     /// 字号跟着主题走）。渲染器不可用时给空的那份——那时候候选条本来就画不出来。
+    ///
+    /// **只铺前 [`CANDIDATE_LIMIT`] 个**：这一步要逐格量宽度，引擎那边动不动几百个候选，
+    /// 全铺下来就是几十毫秒（见那个常数的注释）。
     fn relayout(&mut self) {
         let rows: Vec<Row> = self
             .candidates
             .iter()
+            .take(CANDIDATE_LIMIT)
             .enumerate()
             .map(|(i, candidate)| row(i, candidate))
             .collect();
