@@ -10,10 +10,12 @@
 
 - **词库不是问题**：安卓装的 `.qj` 与产品数据里的 `data/generated/dict.qj` **候选逐行相同**，
   只是 `.qj` 元数据（名称 / 许可 / 署名）不一样。对照方法与结论见下面「已查证」。
-- **问题是配套没接**：`Session::open`（`apps/android/src/session/mod.rs`）调了八样——
+- **问题是配套没接**：`Session::open`（`apps/android/src/session/mod.rs`）调了九样——
   词库、emoji 表（`with_emoji`）、emoji 字体、**用户学习（`with_learner`）**、
   **英文词表（`with_english`）**、**语言模型（`with_language_model`）**、
-  **释义表两本（`with_translator` / `with_english_translator`）**（后五样都是 2026-09-22 接上的）。
+  **释义表两本（`with_translator` / `with_english_translator`）**、
+  **领域词库（`set_extra_dictionaries`）**（后六样都是 2026-09-22 接上的）。
+  只剩 **E7 配置**（`qingjian-platform::Config`）没接。
 - 桌面（`apps/macos/src/host/init.rs`）调了：`with_learner`、`with_translator`、`with_english_translator`、
   `with_english`、`with_emoji`、`with_language_model`，另有本地小模型 `set_async_sentence_scorer` 与整份配置。
 
@@ -27,7 +29,7 @@
 | 语言模型 `lm.qj` | ✅ | ✅ **2026-09-22** | — | 44 MB（进包约 18 MB） |
 | 英文词表 | ✅ | ✅ **2026-09-22** | — | 2.3 MB |
 | 释义表 `glossary-*.qj` | ✅ | ✅ **2026-09-22** | — | 四本共约 51 MB |
-| **领域词库 11 本** | ✅ | ❌ | 专业词查不到 | 7.4 MB |
+| 领域词库 11 本 | ✅ | ✅ **2026-09-22** | — | 7.4 MB |
 | **配置（模糊音等）** | ✅ | ❌ | 口音适配、每页候选数、自定义短语都没有 | — |
 | 本地整句小模型 `model.qjm` | ✅ | ❌ | 「停顿一下由小模型重排候选」没有了 | 54 MB |
 | 云联想 | ✅ | ❌ | 云端整句补全没有了 | — |
@@ -284,6 +286,21 @@ diff a.txt b.txt                   # 只差耗时行，候选完全相同
 范本：`crates/qingjian-platform` 的 `extra_dictionaries`。
 
 **验收**：专业词（比如医学、法律）能查出来。
+
+**2026-09-22 已做。** 实况：
+
+- 11 本放在 APK 的 **assets 子目录** `dicts/` 里（assets 根上已经摊着词库、词表、模型、释义表了），
+  壳解到 `filesDir/bundle/dicts/` 再交给 `extra_dictionaries::load`。
+  **打包时跳过 `._xxx.qj`**——那是 macOS 打的 163 字节元数据，拷进去只会让加载器多报几条「读不了」。
+- **有几本挂几本**：壳那边用 `assets.list("dicts")` 问包里有啥、名字不写死；Rust 那边把目录里
+  几本的名字都算进 `domains`。
+- **缺省全开**（2026-09-22 用户定的）：桌面那边缺省只开 `idioms`（成语四字全拼几乎不歧义、收益稳，
+  其余「按需打开」），安卓现在还没有设置页（E7），先全开——**等 E7 做出来再决定要不要回到那套**。
+  这个决定记在 `crate-notes` 与代码注释里，别到时候以为是漏了。
+- **验收**：模拟器上敲 `quangutong` → **「醛固酮」排第一**（主词库里没有这个词，不带医学那本时
+  出来的是 全不同 / 颧骨 / 全），下面还跟着译文 `n. aldosterone`（E4 也一起生效）。
+  截图见 `screenshots/2026-09-22_领域词库_*.png`。
+- **包体 58 → 60 MB**。日志里 11 本各自报了词条数与许可（`MIT AND Unicode-3.0`）。
 
 ### E7 设置页 + 配置 —— 2.5 天（2026-09-22 从「配置 1 天」扩成这个）
 

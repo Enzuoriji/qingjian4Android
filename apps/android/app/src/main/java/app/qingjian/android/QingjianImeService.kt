@@ -127,18 +127,22 @@ class QingjianImeService : InputMethodService() {
      * 标记文件记的是**这个 APK 是什么时候装的**（`lastUpdateTime`），所以升级一次就自动重解一遍，
      * 不用维护版本号。字体 10 MB，不这么记的话每次启动都要白拷。
      *
-     * `required = false` 的是**可选**资源（英文词表、语言模型）：打包时找不到源文件就不会进包，
-     * 那是正常情况，日志降一档别吓人，调用方也不该因此放弃别的资源。
+     * `name` 可以带子目录（`dicts/medicine.qj`）。标记文件**不跟着建子目录**，
+     * 把斜杠换成下划线摊在 `filesDir` 根上——那只是一张便签，没必要跟着目录结构走。
+     *
+     * `required = false` 的是**可选**资源（英文词表、语言模型、释义表、领域词库）：
+     * 打包时找不到源文件就不会进包，那是正常情况，日志降一档别吓人，
+     * 调用方也不该因此放弃别的资源。
      */
     private fun ensureBundled(name: String, dir: File = filesDir, required: Boolean = true): File? {
         val target = File(dir, name)
-        val stamp = File(filesDir, ".$name.installed")
+        val stamp = File(filesDir, ".${name.replace('/', '_')}.installed")
         val revision = installedAt()
         if (target.isFile && stamp.isFile && stamp.readText() == revision) {
             return target
         }
         return try {
-            dir.mkdirs()
+            target.parentFile?.mkdirs()
             assets.open(name).use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             }
@@ -154,7 +158,7 @@ class QingjianImeService : InputMethodService() {
         }
     }
 
-    /** 随包资源（emoji 字体与 emoji 表、英文词表、语言模型），解到一个子目录里一起交给 Rust。 */
+    /** 随包资源（emoji 字体与 emoji 表、英文词表、语言模型、释义表、领域词库），解到一个目录里交给 Rust。 */
     private fun ensureExtras(): File? {
         val dir = File(filesDir, BUNDLE_DIR)
         for (name in BUNDLE_ASSETS) {
@@ -162,12 +166,17 @@ class QingjianImeService : InputMethodService() {
                 return null
             }
         }
-        // 英文词表、语言模型、释义表**单独解、失败了也不拦**：APK 里没有它们（打包时找不到源文件）
-        // 不该把 emoji 一起拖下水——那边是键盘能不能画出来的事，这些只是少一块功能
-        // （英文模式退回直输 / 整句退化成一元词频 / 候选条不画译文）。
-        // 解不出来就算了，Rust 那边读不到自然退。
+        // 英文词表、语言模型、释义表、领域词库**单独解、失败了也不拦**：APK 里没有它们
+        // （打包时找不到源文件）不该把 emoji 一起拖下水——那边是键盘能不能画出来的事，
+        // 这些只是少一块功能（英文模式退回直输 / 整句退化成一元词频 / 候选条不画译文 /
+        // 专业词查不到）。解不出来就算了，Rust 那边读不到自然退。
         for (name in OPTIONAL_ASSETS) {
             ensureBundled(name, dir, required = false)
+        }
+        // 领域词库是**一个子目录**，有几本解几本：名字不写死在这儿，
+        // 打包时往里放几本这里就跟着解几本（`assets.list` 直接问包里有啥）。
+        for (name in assets.list(DICTS_ASSET_DIR).orEmpty()) {
+            ensureBundled("$DICTS_ASSET_DIR/$name", dir, required = false)
         }
         return dir
     }
@@ -554,6 +563,14 @@ class QingjianImeService : InputMethodService() {
 
         /** 语言模型（44 MB）。**可选的**——没有它整句退化成一元词频，见 [ensureExtras]。 */
         const val LANGUAGE_MODEL_ASSET = "lm.qj"
+
+        /**
+         * 领域词库在 assets 里的子目录（11 本：成语 / 医学 / 法律 / 地名 …）。
+         *
+         * 单独一个子目录是因为 assets 根上已经摊着词库、词表、模型、释义表了。
+         * **有几本解几本**，名字不写死——见 [ensureExtras]。
+         */
+        const val DICTS_ASSET_DIR = "dicts"
 
         /**
          * 可选资源清单：解不出来只是少一块功能，不该拦下 emoji 那几个必需的。

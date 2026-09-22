@@ -472,21 +472,28 @@ K8 的「长按候选 = 删词」当年删不动正是因为这个（那个功�
 而 `docs/contributing.md` 立了「输入优先于学习，为学习增加的延迟算设计错误」。代价是最坏丢不到一分钟。
 
 - **随包资源目录（`filesDir/bundle/`）**：壳把 APK 的 assets 解到这儿，整个目录交给 Rust 当 `bundle`。
-  里头现在有四样：emoji 字体与两张 emoji 表、表情面板两张表（见 `assets/emoji/README.md`）、
-  英文词表 `english.tsv`、语言模型 `lm.qj`、释义表四本 `glossary-{zh,en,ja,es}.qj`。
+  里头现在有五样：emoji 字体与两张 emoji 表、表情面板两张表（见 `assets/emoji/README.md`）、
+  英文词表 `english.tsv`、语言模型 `lm.qj`、释义表四本 `glossary-{zh,en,ja,es}.qj`，
+  外加一个子目录 `dicts/` 放 11 本领域词库。
   **有哪张用哪张**，三种成色：
   - emoji 那几张**缺一张键盘就画不出表情**，所以壳那边「有一个解不出来就整个放弃」（`ensureExtras`）
-  - 其余（英文词表、语言模型、释义表）都**是可选的**，单独解、失败不拦（`required = false`，
-    日志降一档）——少了它们英文模式退回直输、整句退化成一元词频、候选条不画译文，
-    不该把 emoji 一起拖下水。那份清单是 `QingjianImeService.OPTIONAL_ASSETS`
+  - 其余（英文词表、语言模型、释义表、领域词库）都**是可选的**，单独解、失败不拦
+    （`required = false`，日志降一档）——少了它们英文模式退回直输、整句退化成一元词频、
+    候选条不画译文、专业词查不到，不该把 emoji 一起拖下水。那份清单是
+    `QingjianImeService.OPTIONAL_ASSETS`（领域词库那个子目录**有几本解几本**：
+    `assets.list("dicts")` 问包里有啥，名字不写死）
   - Rust 侧读不到哪张就少哪块功能，**都不影响启动**；这条契约有
     `a_broken_bundle_still_opens_the_session` 守着（解包拷一半断了是真会发生的）
+  - **领域词库那个子目录现在全开**（2026-09-22 用户定的）：把目录里几本的名字都算进
+    `DictionariesConfig::domains`。桌面缺省只开 `idioms`（`DEFAULT_DOMAINS`，理由是
+    「成语四字全拼几乎不歧义，收益稳；其余按需打开」），**等 E7 有了设置页再定安卓要不要回到那套**
 
   这个目录原来叫 `emoji`，2026-09-22 加英文词表时改的名（改名会让老安装重解一遍 emoji 字体，
   安卓还没发版，不管）。词库 `dict.qj` **不在这里**：它跟别的产品数据一样单独解到 `filesDir` 根上，
   路径由壳显式传给 `open`。
-- **包体与首次唤起**（2026-09-22 实测）：`filesDir/bundle/` 现在装着约 111 MB
-  （emoji 字体 10.7 + 词表 2.3 + 语言模型 44.4 + 释义表四本约 53）。这些是在 `onCreate` 里
+- **包体与首次唤起**（2026-09-22 实测）：`filesDir/bundle/` 现在装着约 118 MB
+  （emoji 字体 10.7 + 词表 2.3 + 语言模型 44.4 + 释义表四本约 53 + 领域词库 11 本 7.4）。
+  APK 那边 60 MB（x86_64 版）。这些是在 `onCreate` 里
   **同步**拷出来的，所以装完 / 升级后**第一次唤起要等**：进程起来到资产加载完约 **0.6 秒**
   （模拟器上量的，那时只多拷 44 MB 的模型；四本释义表加起来与它差不多量级），
   之后靠 `.名字.installed` 标记跳过。大件都是 mmap（语言模型 12 ms、释义表同样是查表），

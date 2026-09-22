@@ -1065,6 +1065,58 @@ fn english_mode_stays_passthrough_without_the_word_list() {
     );
 }
 
+/// 造一个随包资源目录，里面放一本手写的领域词库（TSV：`词\t音节\t词频`，**音节之间用空格**）。
+///
+/// 名字带 `.qj` 但内容是 TSV——`Dictionary::from_path` 按**魔术字节**认容器，不是按扩展名，
+/// 所以不用先跑一遍打包工具。
+fn bundle_with_dicts(tag: &str, stem: &str, entries: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("qingjian-dicts-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("dicts")).unwrap();
+    std::fs::write(dir.join("dicts").join(format!("{stem}.qj")), entries).unwrap();
+    dir
+}
+
+/// **随包的领域词库挂上了**：那本词库里的词能查出来。
+///
+/// 靶子用「简青」：它**不在主词库里**（敲 `jianqing` 出来的是 减轻 / 奸情 / 捡起 那些），
+/// 只出现在测试自己写的那本里——它冒出来就等于「这本挂上了」。
+#[test]
+fn a_bundled_domain_dictionary_is_loaded() {
+    let Some(dictionary) = dictionary() else {
+        return;
+    };
+    let bundle = bundle_with_dicts("loaded", "medicine", "简青\tjian qing\t100000\n");
+    let open = |bundle: Option<&std::path::Path>| {
+        let mut session = Session::open(&dictionary, "zh-CN", bundle, None).expect("会话该能打开");
+        session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
+        session.keyboard_surface();
+        session.bar_surface();
+        session
+    };
+
+    // 没挂这本词库时：主词库里没有这个词
+    let mut plain = open(None);
+    type_text(&mut plain, "jianqing");
+    assert!(
+        !drawn(&plain).contains(&"简青"),
+        "主词库里本来不该有它，实际画的是 {:?}",
+        drawn(&plain)
+    );
+
+    // 挂上之后：出来了。词频给得高，该排第一
+    let mut session = open(Some(&bundle));
+    type_text(&mut session, "jianqing");
+    assert_eq!(
+        drawn(&session).first().copied(),
+        Some("简青"),
+        "该是那本词库里的词排第一，实际画的是 {:?}",
+        drawn(&session)
+    );
+
+    std::fs::remove_dir_all(&bundle).unwrap();
+}
+
 /// **挂了释义表，候选就带上译文**（候选条因此多画一行小字，那行本身归渲染器测）。
 ///
 /// 释义表是随包资源目录里的 `glossary-<语言>.qj`，壳从 APK 解出来。
@@ -1233,9 +1285,12 @@ fn a_broken_bundle_still_opens_the_session() {
     let dir = std::env::temp_dir().join(format!("qingjian-broken-bundle-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    // 两张都写成半截的：一张不是合法 UTF-8，一张连 `.qj` 的魔数都不对
+    // 三张都写成半截的：一张不是合法 UTF-8，一张连 `.qj` 的魔数都不对，还有一本坏词库
+    // （坏词库由 `extra_dictionaries` 内部跳过，这里守着它别把会话带下水）
     std::fs::write(dir.join("english.tsv"), b"\xff\xfe not a word list").unwrap();
     std::fs::write(dir.join("lm.qj"), b"\x00\x01\x02 garbage").unwrap();
+    std::fs::create_dir_all(dir.join("dicts")).unwrap();
+    std::fs::write(dir.join("dicts").join("medicine.qj"), b"not a dictionary").unwrap();
 
     let mut session =
         Session::open(&dictionary, "zh-CN", Some(&dir), None).expect("坏资源不该让会话打不开");

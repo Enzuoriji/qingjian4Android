@@ -15,6 +15,7 @@ use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, Language, Mark
 use qingjian_dictionary::{Dictionary, WordList};
 use qingjian_learning::{CLIPBOARD_LIMIT, EMOJI_RECENT_LIMIT, FrequencyLearner, Recent};
 use qingjian_lm::BigramModel;
+use qingjian_platform::{DictionariesConfig, extra_dictionaries};
 use qingjian_render::{
     BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
     Preedit, PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme, Tone,
@@ -85,6 +86,9 @@ const LANGUAGE_MODEL_FILE: &str = "lm.qj";
 
 /// 英→中那本释义表（英文模式的候选靠它）。
 const GLOSSARY_ENGLISH_FILE: &str = "glossary-zh.qj";
+
+/// 随包资源目录里领域词库的子目录（成语 / 医学 / 法律 / 地名 …，一个目录好几本 `.qj`）。
+const DICTS_DIR: &str = "dicts";
 
 /// 学习语言缺省用哪本。桌面那边是配置项 `[general] learning_language`，安卓还没有配置文件
 /// （E5 / E7），先写死——**三本（en / ja / es）都随包带着**，换表那步只是改这一个常量，
@@ -519,6 +523,24 @@ impl Session {
                 Err(error) => {
                     tracing::warn!(path = %english.display(), %error, "英→中释义表读不了，英文候选没有中文释义");
                 }
+            }
+            // 领域词库（成语 / 医学 / 法律 / 地名 …）：一个子目录，**有几本挂几本**。
+            // **先全开**（2026-09-22 用户定的）：还没有配置文件（见 E7），就把目录里那几本的
+            // 名字都算进 `domains`。桌面缺省只开 `idioms`（成语四字全拼几乎不歧义、收益稳，
+            // 其余「按需打开」），等设置页做出来再回到那套。
+            let dicts = dir.join(DICTS_DIR);
+            let domains: Vec<String> = extra_dictionaries::list(&dicts)
+                .into_iter()
+                .map(|(stem, _)| stem)
+                .collect();
+            if !domains.is_empty() {
+                let config = DictionariesConfig {
+                    domains,
+                    disabled: Vec::new(),
+                };
+                let loaded = extra_dictionaries::load(Some(&dicts), None, &config);
+                tracing::info!(books = loaded.len(), "领域词库已加载");
+                engine.set_extra_dictionaries(loaded);
             }
         }
         // 用户学习：不挂这个，选过的词、词频、个人 n-gram 一条都不记（引擎缺省是 `NoLearner`）。

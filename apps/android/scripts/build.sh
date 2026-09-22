@@ -228,6 +228,23 @@ for code in zh en ja es; do
 done
 echo "== 释义表（zh + en / ja / es）=="
 
+# 领域词库：成语 / 医学 / 法律 / 地名 那 11 本，**全带**。放在 assets 的**子目录**里
+# （assets 根上已经摊着词库、词表、模型、释义表了），壳解到 filesDir/bundle/dicts/ 再交给
+# extra_dictionaries。**跳过 `._xxx.qj`**：那是 macOS 打的元数据（163 字节），
+# 拷进去只会让加载器多报几条「这文件读不了」。
+DICTS_ASSET="$HERE/app/src/main/assets/dicts"
+rm -rf "$DICTS_ASSET"
+mkdir -p "$DICTS_ASSET"
+dicts=0
+for src in "$ROOT"/data/generated/dicts/*.qj; do
+  [[ -f "$src" ]] || continue
+  name="$(basename "$src")"
+  [[ "$name" == ._* ]] && continue
+  cp "$src" "$DICTS_ASSET/$name"
+  dicts=$((dicts + 1))
+done
+echo "== 领域词库（$dicts 本）=="
+
 # 打 APK
 echo "== 打 APK（$PROFILE）=="
 ( cd "$HERE" && "$GRADLE" --quiet "assemble${PROFILE^}" )

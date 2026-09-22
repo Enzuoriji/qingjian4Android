@@ -20,6 +20,7 @@
 /apps/android/app/src/main/assets/english.tsv
 /apps/android/app/src/main/assets/lm.qj
 /apps/android/app/src/main/assets/glossary-*.qj
+/apps/android/app/src/main/assets/dicts/
 
 # IDE 与崩溃转储
 .idea
