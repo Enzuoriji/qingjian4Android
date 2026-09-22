@@ -12,7 +12,7 @@ use std::ops::Range;
 use std::path::Path;
 
 use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
-use qingjian_dictionary::Dictionary;
+use qingjian_dictionary::{Dictionary, WordList};
 use qingjian_learning::{CLIPBOARD_LIMIT, EMOJI_RECENT_LIMIT, FrequencyLearner, Recent};
 use qingjian_render::{
     BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
@@ -70,6 +70,10 @@ const LEARNING_FILE: &str = "user.tsv";
 
 /// 随包资源目录里的 emoji 表（中文、英文各一张，加载时合成一张）。
 const EMOJI_TABLES: [&str; 2] = ["emoji-zh.tsv", "emoji-en.tsv"];
+
+/// 随包资源目录里的英文词表。挂上它英文模式才有补全与拼错纠正；
+/// 没有就退回直输（字母直接打给应用），见 [`Session::english_candidates`]。
+const ENGLISH_FILE: &str = "english.tsv";
 
 /// 返回给 Kotlin 的位掩码：哪些面变了、有没有话要交给应用。跨语言只传数字。
 pub mod flags {
@@ -277,6 +281,14 @@ pub struct Session {
     /// 中还是英。同样两边都要：键盘按键帽画字，引擎按它决定往哪条路走。
     mode: InputMode,
 
+    /// 英文模式给不给候选（补全与拼错纠正）。**随包的英文词表挂上了才是 `true`**——
+    /// 没词表时引擎给不出候选，硬走组句只会把敲的字母攒在缓冲区里出不去，
+    /// 那时英文模式退回直输（字母直接打给应用）。
+    ///
+    /// 桌面那边这是配置项 `[general] english_candidates`（缺省开）；安卓还没有配置文件
+    /// （见 `docs/plan/android-engine.md` 的 E7），所以先按「词表在不在」定。
+    english_candidates: bool,
+
     /// 键盘现在在哪一页。切页只换布局，键盘本身不高不矮。
     panel: Panel,
 
@@ -396,8 +408,8 @@ impl Session {
     /// 打开词库、建好引擎与渲染器。
     ///
     /// `locale` 决定中日同形字取哪家字形（`zh-CN` / `ja`）。`bundle` 是壳从 APK 里解出来的
-    /// 随包资源目录，里面有 emoji 字体与 emoji 表，有哪张用哪张；`None` 表示没有（用系统的 emoji 字体、
-    /// 不出 emoji 候选）。见 `assets/emoji/README.md`。
+    /// 随包资源目录，里面有 emoji 字体、emoji 表（见 `assets/emoji/README.md`）与英文词表，
+    /// **有哪张用哪张**；`None` 表示都没有（用系统的 emoji 字体、不出 emoji 候选、英文模式退回直输）。
     pub fn open(
         dictionary_path: &Path,
         locale: &str,
@@ -423,6 +435,23 @@ impl Session {
         if let Some(table) = bundle.and_then(load_emoji_tables) {
             tracing::info!(words = table.len(), "emoji 表已加载");
             engine = engine.with_emoji(table);
+        }
+        // 英文词表：挂上它，英文模式才有补全与拼错纠正。
+        // **读不出来只记日志、退回直输**——与学习数据同一个取舍：少一样数据顶多是功能缺一块，
+        // 输入法起不来是另一回事。
+        let mut english_candidates = false;
+        if let Some(dir) = bundle {
+            let path = dir.join(ENGLISH_FILE);
+            match WordList::from_path(&path) {
+                Ok(words) => {
+                    tracing::info!(path = %path.display(), words = words.len(), "英文词表已加载");
+                    engine = engine.with_english(words);
+                    english_candidates = true;
+                }
+                Err(error) => {
+                    tracing::warn!(path = %path.display(), %error, "英文词表读不了，英文模式退回直输");
+                }
+            }
         }
         // 用户学习：不挂这个，选过的词、词频、个人 n-gram 一条都不记（引擎缺省是 `NoLearner`）。
         // 引擎那边上屏时自动记账，这里只负责把它接上、以及给它一个能落盘的地方。
@@ -487,6 +516,7 @@ impl Session {
             keyboard: Some(Keyboard::new()),
             shift: ShiftState::default(),
             mode: InputMode::default(),
+            english_candidates,
             panel: Panel::Letters,
             preedit: None,
             candidates: Vec::new(),
@@ -1078,8 +1108,9 @@ impl Session {
                 };
                 // 切换时把没上屏的拼音丢掉：留着的话，英文模式下那串字母会按英文词算候选
                 self.engine.clear();
+                // 没词表就别让引擎走英文那条路——给不出候选，字母只会攒在缓冲区里出不去
                 self.engine
-                    .set_english_mode(self.mode == InputMode::English);
+                    .set_english_mode(self.mode == InputMode::English && self.english_candidates);
                 self.mark_keyboard_dirty();
                 self.recompose();
             }
@@ -1126,9 +1157,12 @@ impl Session {
     ///
     /// 中文模式：进组句缓冲区，大小写不影响拼音（Shift 只改键帽）。
     ///
-    /// 英文模式：**直输**，字母不进缓冲区、直接打给应用，大小写跟着 Shift 走。
-    /// 引擎的英文候选要另外喂一张英文词表（`Engine::with_english`），安卓这边还没随包带，
-    /// 所以给不了候选——这也是别的壳关掉英文候选时走的那条路。要接候选得先把英文词表生成出来。
+    /// 英文模式分两条：
+    /// - **词表在**（[`Session::english_candidates`]）：字母进组句缓冲区，出补全与拼错纠正。
+    ///   大小写在这儿定好再交给引擎——英文里大小写是有意义的，而引擎只拿到最终字符，
+    ///   候选的大小写由它照着这段输入回推（`Comp` → `Company`、`COMP` → `COMPANY`）。
+    /// - **词表不在**：**直输**，字母不进缓冲区、直接打给应用。这正是桌面壳关掉英文候选
+    ///   （`[general] english_candidates = false`）时走的那条路。
     fn type_letter(&mut self, c: char) {
         if self.english() {
             let c = if self.shift.is_upper() {
@@ -1136,12 +1170,17 @@ impl Session {
             } else {
                 c.to_ascii_lowercase()
             };
-            self.engine.note_passthrough(c);
-            self.commit_text(c.to_string());
-        } else {
-            self.engine.push(c.to_ascii_lowercase());
-            self.recompose();
+            if self.english_candidates {
+                self.engine.push(c);
+                self.recompose();
+            } else {
+                self.engine.note_passthrough(c);
+                self.commit_text(c.to_string());
+            }
+            return;
         }
+        self.engine.push(c.to_ascii_lowercase());
+        self.recompose();
     }
 
     /// 攒下要上屏的文本。

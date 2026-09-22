@@ -147,14 +147,18 @@ class QingjianImeService : InputMethodService() {
         }
     }
 
-    /** emoji 字体与 emoji 表，解到一个子目录里一起交给 Rust。 */
+    /** 随包资源（emoji 字体与 emoji 表、英文词表），解到一个子目录里一起交给 Rust。 */
     private fun ensureExtras(): File? {
         val dir = File(filesDir, BUNDLE_DIR)
-        for (name in EMOJI_ASSETS) {
+        for (name in BUNDLE_ASSETS) {
             if (ensureBundled(name, dir) == null) {
                 return null
             }
         }
+        // 英文词表**单独解、失败了也不拦**：APK 里没有它（打包时找不到源文件）不该把 emoji
+        // 一起拖下水——那边是键盘能不能画出来的事，这边只是英文模式退回直输。
+        // 解不出来就算了，Rust 那边读不到自然走直输那条路。
+        ensureBundled(ENGLISH_ASSET, dir)
         return dir
     }
 
@@ -522,8 +526,11 @@ class QingjianImeService : InputMethodService() {
         /** 随包词库的文件名，放在应用私有目录。 */
         const val DICTIONARY = "dict.qj"
 
-        /** emoji 字体与 emoji 表（在 APK 的 assets 里，启动时解到私有目录的 [BUNDLE_DIR]）。 */
-        val EMOJI_ASSETS = listOf(
+        /**
+         * **必须**解出来的随包资源（在 APK 的 assets 里，启动时解到私有目录的 [BUNDLE_DIR]）：
+         * emoji 字体与 emoji 表。解不出来键盘就画不出表情，所以里面任何一个失败都整个放弃。
+         */
+        val BUNDLE_ASSETS = listOf(
             "NotoColorEmoji.ttf",
             "emoji-zh.tsv",
             "emoji-en.tsv",
@@ -532,8 +539,11 @@ class QingjianImeService : InputMethodService() {
             "kaomoji-panel.tsv",
         )
 
-        /** 随包那几个数据文件解到私有目录时用的子目录名（emoji 与颜文字的表都在里头）。 */
-        const val BUNDLE_DIR = "emoji"
+        /** 英文词表。**可选的**——没有它英文模式退回直输，见 [ensureExtras]。 */
+        const val ENGLISH_ASSET = "english.tsv"
+
+        /** 随包那几个数据文件解到私有目录时用的子目录名（emoji、颜文字、英文词表都在里头）。 */
+        const val BUNDLE_DIR = "bundle"
 
         /** 一次触摸超过这么多毫秒就报一声（约一帧）；打字手感的分水岭。 */
         const val SLOW_TOUCH_MS = 16L

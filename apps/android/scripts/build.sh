@@ -174,6 +174,22 @@ DICT_ASSET="$HERE/app/src/main/assets/dict.qj"
 mkdir -p "$(dirname "$DICT_ASSET")"
 cp "$DICT_OUT" "$DICT_ASSET"
 
+# 英文词表：同样跟着包走（取了就放进随包资源目录，英文模式才有补全与拼错纠正）。
+# 优先顺序与 mac 的 bundle.sh 一致：仓库里那份在前，生成出来的在后。
+# **没有它不算错**——英文模式会退回直输，只是少了候选，见 apps/android/src/session/mod.rs。
+ENGLISH_ASSET="$HERE/app/src/main/assets/english.tsv"
+ENGLISH_SRC=""
+for candidate in "$ROOT/assets/lexicon/english.tsv" "$ROOT/data/generated/english.tsv"; do
+  if [[ -f "$candidate" ]]; then ENGLISH_SRC="$candidate"; break; fi
+done
+if [[ -n "$ENGLISH_SRC" ]]; then
+  echo "== 英文词表（$ENGLISH_SRC）=="
+  cp "$ENGLISH_SRC" "$ENGLISH_ASSET"
+else
+  echo "== 找不到英文词表，英文模式将退回直输 ==" >&2
+  rm -f "$ENGLISH_ASSET"
+fi
+
 # 打 APK
 echo "== 打 APK（$PROFILE）=="
 ( cd "$HERE" && "$GRADLE" --quiet "assemble${PROFILE^}" )

@@ -150,6 +150,17 @@ fn ready() -> Option<Session> {
     Some(session)
 }
 
+/// 临时造一个「随包资源目录」，里面只放一张手写的英文词表（格式：`词\t编码\t词频`）。
+///
+/// 手写而不是拷 `data/generated/english.tsv`：拷的话这条测试就得看产品数据在不在，
+/// 时有时无；而它要测的是「词表挂上了会怎样」，内容越少越稳。
+fn bundle_with_english(words: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("qingjian-bundle-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("english.tsv"), words).unwrap();
+    dir
+}
+
 /// 候选条此刻画出来的词。
 fn drawn(session: &Session) -> Vec<&str> {
     session
@@ -961,6 +972,79 @@ fn shift_gives_uppercase_in_english_mode_only() {
         session.take_commit().as_deref(),
         Some("HI"),
         "锁了 Shift 该是大写"
+    );
+}
+
+/// **英文模式有词表就给候选**：敲 `comp` 出 `Company` / `Compare`。
+///
+/// 词表是随包资源目录里的 `english.tsv`（壳从 APK 解出来，见 `QingjianImeService`），
+/// 这条走真文件；别的用例的 `ready()` 传的是 `None`，那时英文模式退回直输（见下一条）。
+#[test]
+fn english_mode_gives_completions_when_the_word_list_is_there() {
+    let Some(dictionary) = dictionary() else {
+        return;
+    };
+    let bundle = bundle_with_english(
+        "Company\tcompany\t900\nCompare\tcompare\t500\nCompass\tcompass\t300\n",
+    );
+    let mut session =
+        Session::open(&dictionary, "zh-CN", Some(&bundle), None).expect("会话该能打开");
+    session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
+    session.keyboard_surface();
+    session.bar_surface();
+
+    tap_key(&mut session, KeyId::Mode);
+    type_text(&mut session, "comp");
+
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("comp"),
+        "有词表时字母该进组句缓冲区，显示在拼音行上"
+    );
+    let words = drawn(&session);
+    assert!(
+        words.contains(&"Company"),
+        "候选里该有 Company，实际画的是 {words:?}"
+    );
+    assert!(
+        words.contains(&"Compare"),
+        "候选里该有 Compare，实际画的是 {words:?}"
+    );
+
+    // 点一个候选：整段输入一起被吃掉，上屏的是候选词
+    let index = words
+        .iter()
+        .position(|text| *text == "Company")
+        .expect("上面刚断言过有它");
+    tap_bar(&mut session, BarHitId::Candidate(index));
+    assert_eq!(session.take_commit().as_deref(), Some("Company"));
+    assert!(session.candidates.is_empty(), "整段吃完了，候选该清干净");
+
+    std::fs::remove_dir_all(&bundle).unwrap();
+}
+
+/// **没有词表时英文模式仍是直输**：字母不进缓冲区、直接打给应用，候选条空的。
+///
+/// `ready()` 的 `bundle` 传的是 `None`，所以这条同时守着「别把直输那条路悄悄弄丢」——
+/// 没有词表却硬走组句的话，敲的字母会攒在缓冲区里出不去。
+#[test]
+fn english_mode_stays_passthrough_without_the_word_list() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_key(&mut session, KeyId::Mode);
+    type_text(&mut session, "comp");
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("comp"),
+        "没词表时该直输"
+    );
+    assert_eq!(preedit(&session), None, "直输不进缓冲区，拼音行该是空的");
+    assert!(
+        drawn(&session).is_empty(),
+        "没词表时不该有候选，实际画的是 {:?}",
+        drawn(&session)
     );
 }
 

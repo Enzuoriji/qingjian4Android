@@ -10,8 +10,9 @@
 
 - **词库不是问题**：安卓装的 `.qj` 与产品数据里的 `data/generated/dict.qj` **候选逐行相同**，
   只是 `.qj` 元数据（名称 / 许可 / 署名）不一样。对照方法与结论见下面「已查证」。
-- **问题是配套没接**：`Session::open`（`apps/android/src/session/mod.rs`）调了四样——
-  词库、emoji 表（`with_emoji`）、emoji 字体，以及**用户学习（`with_learner`，2026-09-22 接上）**。
+- **问题是配套没接**：`Session::open`（`apps/android/src/session/mod.rs`）调了五样——
+  词库、emoji 表（`with_emoji`）、emoji 字体、**用户学习（`with_learner`，2026-09-22 接上）**，
+  以及**英文词表（`with_english`，2026-09-22 接上）**。
 - 桌面（`apps/macos/src/host/init.rs`）调了：`with_learner`、`with_translator`、`with_english_translator`、
   `with_english`、`with_emoji`、`with_language_model`，另有本地小模型 `set_async_sentence_scorer` 与整份配置。
 
@@ -23,7 +24,7 @@
 | emoji 表 + 字体 | ✅ | ✅ | — | 0.2 + 10.7 MB |
 | 用户学习（落盘） | ✅ | ✅ **2026-09-22** | — | 小 |
 | **语言模型 `lm.qj`** | ✅ | ❌ | 整句 / 联想只按词频排 | 43 MB |
-| **英文词表** | ✅ | ❌ | 英文模式给不了候选，只能直输 | 3 MB |
+| 英文词表 | ✅ | ✅ **2026-09-22** | — | 2.3 MB |
 | **释义表 `glossary-*.qj`** | ✅ | ❌ | 候选旁没有译文与词性（README 的招牌） | 3–22 MB |
 | **领域词库 11 本** | ✅ | ❌ | 专业词查不到 | 7.4 MB |
 | **配置（模糊音等）** | ✅ | ❌ | 口音适配、每页候选数、自定义短语都没有 | — |
@@ -102,6 +103,26 @@ diff a.txt b.txt                   # 只差耗时行，候选完全相同
 接上之后英文模式才有补全与拼错纠正。
 
 **验收**：英文模式敲 `comp` 出 `Company` / `Compare`（现在只能得到字面的 `comp`）。
+
+**2026-09-22 已做。** 实况：
+
+- 词表跟词库一样由 `build.sh` 拷进 APK 的 assets（优先 `assets/lexicon/english.tsv`，
+  退回 `data/generated/english.tsv`，与 mac 的 `bundle.sh` 同序），**没有也不算错**——
+  英文模式退回直输，只是少一块功能。
+- 解包落在随包资源目录里（那个目录原来叫 `emoji`，现在叫 `bundle`：里面已经有 emoji、颜文字、
+  英文词表三样了）。**它是可选的**：`ensureExtras` 里 emoji 那几张是「缺一张就整个放弃」，
+  英文词表单独解、失败不拦，免得把键盘画不出来一起拖下水。
+- 壳侧连带改了 `type_letter`：有词表时字母进组句缓冲区（大小写按 Shift 定好再给引擎，
+  英文里大小写有意义），没词表时保持原样直输。`Session` 里记一个 `english_candidates`——
+  桌面那边这是配置项 `[general] english_candidates`，安卓还没有配置文件（E7），先按「词表在不在」定。
+- **验收的措辞要改**：计划里写的「出 `Company` / `Compare`」是照桌面（敲大写 `Comp` 时引擎
+  把首字母改回去）写的。实测**敲小写 `comp` 出的是 `company` / `companies` / `complete`**，
+  与词表里存的小写一致（`adapt_case` 认大小写）。`compare` 在词表里（词频 4450）但排在
+  那三个后面，敲到 `compa` 才露出来。
+- 验收两条都走了：宿主机两条新测试（临时目录里手写一张小词表 → 敲 `comp` 出 `Company`/`Compare`；
+  以及没词表时仍是直输）；模拟器上切英文模式敲 `comp` → 候选条 `comp | company | companies |
+  complete`，再敲 `a` 收窄成 `company | companies | compared | comparison`，点一条上屏。
+  截图见 `screenshots/2026-09-22_英文候选_*.png`。
 
 ### E3 语言模型 —— 半天（+43 MB 包体）
 
