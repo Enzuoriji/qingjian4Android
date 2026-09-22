@@ -190,6 +190,17 @@ else
   rm -f "$ENGLISH_ASSET"
 fi
 
+# 语言模型：**包里最大的一件**（44 MB，打完包大一圈）。带不带是量过的——长句首选命中
+# 37.5% → 62.5%，见 docs/plan/android-engine.md 的 E3。没有也不算错，整句退化成一元词频。
+LM_ASSET="$HERE/app/src/main/assets/lm.qj"
+if [[ -f "$ROOT/data/generated/lm.qj" ]]; then
+  echo "== 语言模型（44 MB）=="
+  cp "$ROOT/data/generated/lm.qj" "$LM_ASSET"
+else
+  echo "== 找不到 data/generated/lm.qj，整句将退化成一元词频 ==" >&2
+  rm -f "$LM_ASSET"
+fi
+
 # 打 APK
 echo "== 打 APK（$PROFILE）=="
 ( cd "$HERE" && "$GRADLE" --quiet "assemble${PROFILE^}" )

@@ -14,6 +14,7 @@ use std::path::Path;
 use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
 use qingjian_dictionary::{Dictionary, WordList};
 use qingjian_learning::{CLIPBOARD_LIMIT, EMOJI_RECENT_LIMIT, FrequencyLearner, Recent};
+use qingjian_lm::BigramModel;
 use qingjian_render::{
     BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
     Preedit, PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme,
@@ -74,6 +75,12 @@ const EMOJI_TABLES: [&str; 2] = ["emoji-zh.tsv", "emoji-en.tsv"];
 /// 随包资源目录里的英文词表。挂上它英文模式才有补全与拼错纠正；
 /// 没有就退回直输（字母直接打给应用），见 [`Session::english_candidates`]。
 const ENGLISH_FILE: &str = "english.tsv";
+
+/// 随包资源目录里的语言模型（二元）。整句转换靠它；没有就退化成一元词频整句。
+///
+/// **它是包里最大的一件**（44 MB），值不值得带是量过的——长句上首选命中 37.5% → 62.5%，
+/// 见 `docs/plan/android-engine.md` 的 E3。
+const LANGUAGE_MODEL_FILE: &str = "lm.qj";
 
 /// 返回给 Kotlin 的位掩码：哪些面变了、有没有话要交给应用。跨语言只传数字。
 pub mod flags {
@@ -436,11 +443,11 @@ impl Session {
             tracing::info!(words = table.len(), "emoji 表已加载");
             engine = engine.with_emoji(table);
         }
-        // 英文词表：挂上它，英文模式才有补全与拼错纠正。
-        // **读不出来只记日志、退回直输**——与学习数据同一个取舍：少一样数据顶多是功能缺一块，
-        // 输入法起不来是另一回事。
+        // 随包资源里那几样**可选**的数据：在一处读完，**每一样读不出来都只记日志**——
+        // 与学习数据同一个取舍：少一样数据顶多是功能缺一块，输入法起不来是另一回事。
         let mut english_candidates = false;
         if let Some(dir) = bundle {
+            // 英文词表：挂上它，英文模式才有补全与拼错纠正
             let path = dir.join(ENGLISH_FILE);
             match WordList::from_path(&path) {
                 Ok(words) => {
@@ -450,6 +457,22 @@ impl Session {
                 }
                 Err(error) => {
                     tracing::warn!(path = %path.display(), %error, "英文词表读不了，英文模式退回直输");
+                }
+            }
+            // 语言模型：整句转换靠它，没有就退化成一元词频
+            let path = dir.join(LANGUAGE_MODEL_FILE);
+            match BigramModel::from_path(&path) {
+                Ok(model) => {
+                    tracing::info!(
+                        path = %path.display(),
+                        words = model.word_count(),
+                        bigrams = model.bigram_count(),
+                        "语言模型已加载"
+                    );
+                    engine = engine.with_language_model(Box::new(model));
+                }
+                Err(error) => {
+                    tracing::warn!(path = %path.display(), %error, "语言模型读不了，整句退化成一元词频");
                 }
             }
         }

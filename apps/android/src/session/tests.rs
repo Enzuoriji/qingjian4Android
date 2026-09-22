@@ -1048,6 +1048,50 @@ fn english_mode_stays_passthrough_without_the_word_list() {
     );
 }
 
+/// **随包资源坏了不能把输入法带下水**：`english.tsv` / `lm.qj` 读不出来时只记日志、各退各的
+/// （英文模式退回直输、整句退化成一元词频），会话照常打开、中文照常打。
+///
+/// 这不是假想：那几张表是壳从 APK 里解到私有目录的，拷一半断了（磁盘满、进程被杀）就会留下
+/// 一个半截文件。**当初特意没让它们像 emoji 那样「缺一张就整个放弃」**，这条守着那个取舍。
+#[test]
+fn a_broken_bundle_still_opens_the_session() {
+    let Some(dictionary) = dictionary() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("qingjian-broken-bundle-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // 两张都写成半截的：一张不是合法 UTF-8，一张连 `.qj` 的魔数都不对
+    std::fs::write(dir.join("english.tsv"), b"\xff\xfe not a word list").unwrap();
+    std::fs::write(dir.join("lm.qj"), b"\x00\x01\x02 garbage").unwrap();
+
+    let mut session =
+        Session::open(&dictionary, "zh-CN", Some(&dir), None).expect("坏资源不该让会话打不开");
+    session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
+    session.keyboard_surface();
+    session.bar_surface();
+
+    // 中文照常
+    type_text(&mut session, "nihao");
+    assert!(
+        drawn(&session).contains(&"你好"),
+        "中文候选该照常，实际画的是 {:?}",
+        drawn(&session)
+    );
+    session.take_commit();
+
+    // 英文退回直输
+    tap_key(&mut session, KeyId::Mode);
+    type_text(&mut session, "hi");
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("hi"),
+        "词表读不出来时英文该退回直输"
+    );
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn english_mode_punctuation_stays_half_width() {
     let Some(mut session) = ready() else {

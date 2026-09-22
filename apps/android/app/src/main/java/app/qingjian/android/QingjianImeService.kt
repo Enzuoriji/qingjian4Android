@@ -126,8 +126,11 @@ class QingjianImeService : InputMethodService() {
      *
      * 标记文件记的是**这个 APK 是什么时候装的**（`lastUpdateTime`），所以升级一次就自动重解一遍，
      * 不用维护版本号。字体 10 MB，不这么记的话每次启动都要白拷。
+     *
+     * `required = false` 的是**可选**资源（英文词表、语言模型）：打包时找不到源文件就不会进包，
+     * 那是正常情况，日志降一档别吓人，调用方也不该因此放弃别的资源。
      */
-    private fun ensureBundled(name: String, dir: File = filesDir): File? {
+    private fun ensureBundled(name: String, dir: File = filesDir, required: Boolean = true): File? {
         val target = File(dir, name)
         val stamp = File(filesDir, ".$name.installed")
         val revision = installedAt()
@@ -142,12 +145,16 @@ class QingjianImeService : InputMethodService() {
             stamp.writeText(revision)
             target
         } catch (error: IOException) {
-            Log.e(TAG, "随包资源 $name 解不出来", error)
+            if (required) {
+                Log.e(TAG, "随包资源 $name 解不出来", error)
+            } else {
+                Log.w(TAG, "可选的随包资源 $name 不在包里，少一块功能", error)
+            }
             null
         }
     }
 
-    /** 随包资源（emoji 字体与 emoji 表、英文词表），解到一个子目录里一起交给 Rust。 */
+    /** 随包资源（emoji 字体与 emoji 表、英文词表、语言模型），解到一个子目录里一起交给 Rust。 */
     private fun ensureExtras(): File? {
         val dir = File(filesDir, BUNDLE_DIR)
         for (name in BUNDLE_ASSETS) {
@@ -155,10 +162,11 @@ class QingjianImeService : InputMethodService() {
                 return null
             }
         }
-        // 英文词表**单独解、失败了也不拦**：APK 里没有它（打包时找不到源文件）不该把 emoji
-        // 一起拖下水——那边是键盘能不能画出来的事，这边只是英文模式退回直输。
-        // 解不出来就算了，Rust 那边读不到自然走直输那条路。
-        ensureBundled(ENGLISH_ASSET, dir)
+        // 英文词表与语言模型**单独解、失败了也不拦**：APK 里没有它们（打包时找不到源文件）
+        // 不该把 emoji 一起拖下水——那边是键盘能不能画出来的事，这两样只是少一块功能
+        // （英文模式退回直输 / 整句退化成一元词频）。解不出来就算了，Rust 那边读不到自然退。
+        ensureBundled(ENGLISH_ASSET, dir, required = false)
+        ensureBundled(LANGUAGE_MODEL_ASSET, dir, required = false)
         return dir
     }
 
@@ -541,6 +549,9 @@ class QingjianImeService : InputMethodService() {
 
         /** 英文词表。**可选的**——没有它英文模式退回直输，见 [ensureExtras]。 */
         const val ENGLISH_ASSET = "english.tsv"
+
+        /** 语言模型（44 MB）。**可选的**——没有它整句退化成一元词频，见 [ensureExtras]。 */
+        const val LANGUAGE_MODEL_ASSET = "lm.qj"
 
         /** 随包那几个数据文件解到私有目录时用的子目录名（emoji、颜文字、英文词表都在里头）。 */
         const val BUNDLE_DIR = "bundle"

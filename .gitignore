@@ -18,6 +18,7 @@
 /apps/android/app/src/main/jniLibs/**/*.so
 /apps/android/app/src/main/assets/dict.qj
 /apps/android/app/src/main/assets/english.tsv
+/apps/android/app/src/main/assets/lm.qj
 
 # IDE 与崩溃转储
 .idea
