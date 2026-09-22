@@ -161,6 +161,18 @@ fn bundle_with_english(words: &str) -> std::path::PathBuf {
     dir
 }
 
+/// 临时造一个「随包资源目录」，里面只放一张手写的释义表。
+///
+/// 名字带 `.qj` 但内容是 TSV——`Glossary::from_path` 按**魔术字节**认容器，不是按扩展名，
+/// 所以这么写照样能读（这样测试不用先跑一遍打包工具）。
+fn bundle_with_glossary(entries: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("qingjian-glossary-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("glossary-en.qj"), entries).unwrap();
+    dir
+}
+
 /// 候选条此刻画出来的词。
 fn drawn(session: &Session) -> Vec<&str> {
     session
@@ -1045,6 +1057,60 @@ fn english_mode_stays_passthrough_without_the_word_list() {
         drawn(&session).is_empty(),
         "没词表时不该有候选，实际画的是 {:?}",
         drawn(&session)
+    );
+}
+
+/// **挂了释义表，候选就带上译文**（候选条因此多画一行小字，那行本身归渲染器测）。
+///
+/// 释义表是随包资源目录里的 `glossary-<语言>.qj`，壳从 APK 解出来。
+#[test]
+fn a_candidate_carries_its_translation_when_the_glossary_is_there() {
+    let Some(dictionary) = dictionary() else {
+        return;
+    };
+    // TSV 格式：`词\t义项`，义项是 `词性. 译词`
+    let bundle = bundle_with_glossary("你好\tint. hello\n");
+    let mut session =
+        Session::open(&dictionary, "zh-CN", Some(&bundle), None).expect("会话该能打开");
+    session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
+    session.keyboard_surface();
+    session.bar_surface();
+
+    type_text(&mut session, "nihao");
+    let index = session.frame.highlighted.expect("该有高亮候选");
+    let row = &session.frame.rows[index];
+    assert_eq!(row.text, "你好");
+    assert!(
+        row.annotation.iter().any(|(text, _)| text == "hello"),
+        "该带上译文 hello，实际是 {:?}",
+        row.annotation
+    );
+    assert!(
+        row.annotation.iter().any(|(text, _)| text.contains("int.")),
+        "该带上词性，实际是 {:?}",
+        row.annotation
+    );
+
+    std::fs::remove_dir_all(&bundle).unwrap();
+}
+
+/// **没带释义表时注解是空的**，候选条也就不该为它留地方（高度那笔账归渲染器测）。
+#[test]
+fn a_candidate_has_no_annotation_without_the_glossary() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let index = session.frame.highlighted.expect("该有高亮候选");
+    assert!(
+        session.frame.rows[index].annotation.is_empty(),
+        "没释义表时不该有注解，实际是 {:?}",
+        session.frame.rows[index].annotation
+    );
+    assert_eq!(
+        session.bar_height(),
+        qingjian_render::Renderer::bar_height(&session.theme(), true, false),
+        "没释义表时条子该是老高度"
     );
 }
 

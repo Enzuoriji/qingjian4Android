@@ -2635,6 +2635,7 @@ dependencies = [
  "qingjian-learning",
  "qingjian-lm",
  "qingjian-render",
+ "qingjian-translate",
  "thiserror 2.0.20",
  "tracing",
  "tracing-subscriber",

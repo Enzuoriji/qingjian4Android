@@ -111,6 +111,21 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 不直接用 `displayMetrics` 的高度——有的 ROM 转屏后它还是报竖屏那个值
 （`QingjianImeService.screenHeightPoints`）。横竖屏也由壳判断后一起报。
 
+**候选条上那行译文**（2026-09-22，E4）：组句时的高度从 66 点变 **81 点**，多出来的 15 点
+就是候选底下那行小字——`annotation_band_height` = `annotation_font.line_height`（15），
+**不带 `row_padding`**：那一行上下已经有候选行的下留白与条子自己的下留白，再加就顶出条子了。
+
+- 只画**高亮那个**候选的译文（`docs/design/candidate-ui.md` 定的「横排只给高亮的那个在下面
+  单独一行显示」），起点对齐高亮那格的左边缘；一段段顺着画，画到右边缘就截断补省略号
+  （条子通栏，注解爱多长有多长）。
+- 颜色按 `Tone` 走主题里现成的三档：译词 `gloss`、词性 `pos`（比译文更浅）、生词 `fresh`。
+- **高度是会话级的**：`bar_height` / `render_bar` 都多收一个 `annotations` 布尔，
+  **不能**按「这一屏有没有译文」临时定——条子一变高上面的应用就被顶，滚一格跳一下不能接受
+  （`docs/design/keyboard.md` 的「敲一个键不会顶动应用内容」）。那个布尔在会话建立时定死
+  （挂了释义表就为真），两处共用同一个 `composing_height`，天然一致。
+- **只有安卓壳与预览脚本吃这个改动**：`render_bar` / `bar_height` 的调用方只有
+  `apps/android/src/session/mod.rs` 与 `examples/preview.rs`——macOS / Windows 各有各的画法。
+
 **键盘上那几个图标（2026-09-21 换成现成的）**：⇧ 大小写、⌫ 退格、工具页那格的剪贴板，
 路径来自 `assets/icon/material/` 里那几张 Google **Material Symbols**（Apache-2.0）的 svg，
 由 `python assets/icon/render-key-icon-path.py` 转成 Rust 代码（生成物
@@ -447,20 +462,31 @@ K8 的「长按候选 = 删词」当年删不动正是因为这个（那个功�
 
 - **随包资源目录（`filesDir/bundle/`）**：壳把 APK 的 assets 解到这儿，整个目录交给 Rust 当 `bundle`。
   里头现在有四样：emoji 字体与两张 emoji 表、表情面板两张表（见 `assets/emoji/README.md`）、
-  英文词表 `english.tsv`、语言模型 `lm.qj`。**有哪张用哪张**，三种成色：
+  英文词表 `english.tsv`、语言模型 `lm.qj`、释义表四本 `glossary-{zh,en,ja,es}.qj`。
+  **有哪张用哪张**，三种成色：
   - emoji 那几张**缺一张键盘就画不出表情**，所以壳那边「有一个解不出来就整个放弃」（`ensureExtras`）
-  - 英文词表与语言模型**是可选的**，单独解、失败不拦（`required = false`，日志降一档）——
-    少了它们英文模式退回直输、整句退化成一元词频，不该把 emoji 一起拖下水
+  - 其余（英文词表、语言模型、释义表）都**是可选的**，单独解、失败不拦（`required = false`，
+    日志降一档）——少了它们英文模式退回直输、整句退化成一元词频、候选条不画译文，
+    不该把 emoji 一起拖下水。那份清单是 `QingjianImeService.OPTIONAL_ASSETS`
   - Rust 侧读不到哪张就少哪块功能，**都不影响启动**；这条契约有
     `a_broken_bundle_still_opens_the_session` 守着（解包拷一半断了是真会发生的）
 
   这个目录原来叫 `emoji`，2026-09-22 加英文词表时改的名（改名会让老安装重解一遍 emoji 字体，
   安卓还没发版，不管）。词库 `dict.qj` **不在这里**：它跟别的产品数据一样单独解到 `filesDir` 根上，
   路径由壳显式传给 `open`。
-- **包体与首次唤起**（2026-09-22 实测）：`filesDir/bundle/` 现在装着约 60 MB
-  （emoji 字体 10.7 + 词表 2.3 + **语言模型 44.4**）。这些是在 `onCreate` 里**同步**拷出来的，
-  所以装完 / 升级后**第一次唤起要等**：进程起来到资产加载完约 **0.6 秒**（模拟器上量的），
-  之后靠 `.名字.installed` 标记跳过。语言模型本身是 mmap，**加载只要 12 毫秒**。
+- **包体与首次唤起**（2026-09-22 实测）：`filesDir/bundle/` 现在装着约 111 MB
+  （emoji 字体 10.7 + 词表 2.3 + 语言模型 44.4 + 释义表四本约 53）。这些是在 `onCreate` 里
+  **同步**拷出来的，所以装完 / 升级后**第一次唤起要等**：进程起来到资产加载完约 **0.6 秒**
+  （模拟器上量的，那时只多拷 44 MB 的模型；四本释义表加起来与它差不多量级），
+  之后靠 `.名字.installed` 标记跳过。大件都是 mmap（语言模型 12 ms、释义表同样是查表），
+  **加载本身不吃启动时间，吃的是那次拷贝**。
+- **释义表**（2026-09-22，E4）：`glossary-{zh,en,ja,es}.qj` 四本，`zh` 是英→中
+  （英文模式的候选用它，`with_english_translator`），另外三本是学习语言（`with_translator`）。
+  **学习语言现在写死 `Language::English`**（`session/mod.rs` 的 `LEARNING_LANGUAGE`）——
+  桌面那边是配置项 `[general] learning_language`，安卓还没有配置文件（E5 / E7），
+  三本都随包带着，换表那步只是改这一个常量。填 `Row.annotation` 的拼法**照搬桌面**
+  `apps/windows/server/src/ui/candidates/row.rs` 的 `from_candidate`（读音 → 每个义项
+  「词性 + 译词」、义项间 ` · `）——那是同一套逻辑的两个副本，改一边记得看另一边。
 - **英文模式两条路**（`Session::type_letter`）：`bundle` 里有 `english.tsv` 就 `with_english` 挂上，
   同时在 `Session` 里记一个 `english_candidates`，英文模式下字母进组句缓冲区（大小写按 Shift 定好
   再交给引擎，英文里大小写有意义），候选条出补全与拼错纠正；**没词表就退回直输**——

@@ -17,6 +17,7 @@ qingjian-dictionary.workspace = true
 qingjian-learning.workspace = true
 qingjian-lm.workspace = true
 qingjian-render.workspace = true
+qingjian-translate.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 

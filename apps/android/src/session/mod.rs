@@ -11,14 +11,15 @@ mod tests;
 use std::ops::Range;
 use std::path::Path;
 
-use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
+use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, Language, MarkedKind};
 use qingjian_dictionary::{Dictionary, WordList};
 use qingjian_learning::{CLIPBOARD_LIMIT, EMOJI_RECENT_LIMIT, FrequencyLearner, Recent};
 use qingjian_lm::BigramModel;
 use qingjian_render::{
     BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
-    Preedit, PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme,
+    Preedit, PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme, Tone,
 };
+use qingjian_translate::Glossary;
 
 use crate::action::{self, Act, Command};
 use crate::error::SessionError;
@@ -81,6 +82,14 @@ const ENGLISH_FILE: &str = "english.tsv";
 /// **它是包里最大的一件**（44 MB），值不值得带是量过的——长句上首选命中 37.5% → 62.5%，
 /// 见 `docs/plan/android-engine.md` 的 E3。
 const LANGUAGE_MODEL_FILE: &str = "lm.qj";
+
+/// 英→中那本释义表（英文模式的候选靠它）。
+const GLOSSARY_ENGLISH_FILE: &str = "glossary-zh.qj";
+
+/// 学习语言缺省用哪本。桌面那边是配置项 `[general] learning_language`，安卓还没有配置文件
+/// （E5 / E7），先写死——**三本（en / ja / es）都随包带着**，换表那步只是改这一个常量，
+/// 文件名由 `Language::code()` 拼出来。
+const LEARNING_LANGUAGE: Language = Language::English;
 
 /// 返回给 Kotlin 的位掩码：哪些面变了、有没有话要交给应用。跨语言只传数字。
 pub mod flags {
@@ -296,6 +305,13 @@ pub struct Session {
     /// （见 `docs/plan/android-engine.md` 的 E7），所以先按「词表在不在」定。
     english_candidates: bool,
 
+    /// 候选条画不画译文。**随包的释义表挂上了才是 `true`**，整场不变。
+    ///
+    /// 它不只是「画不画」：候选条的高度按它加一行（[`Self::bar_height`]），
+    /// 而高度一变上面的应用内容就被顶——所以**必须是会话级的**，
+    /// 不能看「这一屏有没有译文」临时决定（滚一格就跳一下）。
+    annotations: bool,
+
     /// 键盘现在在哪一页。切页只换布局，键盘本身不高不矮。
     panel: Panel,
 
@@ -446,6 +462,7 @@ impl Session {
         // 随包资源里那几样**可选**的数据：在一处读完，**每一样读不出来都只记日志**——
         // 与学习数据同一个取舍：少一样数据顶多是功能缺一块，输入法起不来是另一回事。
         let mut english_candidates = false;
+        let mut annotations = false;
         if let Some(dir) = bundle {
             // 英文词表：挂上它，英文模式才有补全与拼错纠正
             let path = dir.join(ENGLISH_FILE);
@@ -473,6 +490,34 @@ impl Session {
                 }
                 Err(error) => {
                     tracing::warn!(path = %path.display(), %error, "语言模型读不了，整句退化成一元词频");
+                }
+            }
+            // 释义表：挂了它候选条才有译文可画。两本各管一头——
+            // `translator` 是「中文候选 → 学习语言」，`english_translator` 是「英文候选 → 中文」。
+            let learning = dir.join(format!("glossary-{}.qj", LEARNING_LANGUAGE.code()));
+            match Glossary::from_path(LEARNING_LANGUAGE, &learning) {
+                Ok(glossary) => {
+                    tracing::info!(
+                        path = %learning.display(),
+                        language = LEARNING_LANGUAGE.code(),
+                        "释义表已加载"
+                    );
+                    engine = engine.with_translator(Box::new(glossary));
+                    annotations = true;
+                }
+                Err(error) => {
+                    tracing::warn!(path = %learning.display(), %error, "学习语言的释义表读不了，候选条不画译文");
+                }
+            }
+            let english = dir.join(GLOSSARY_ENGLISH_FILE);
+            match Glossary::from_path(Language::Chinese, &english) {
+                Ok(glossary) => {
+                    tracing::info!(path = %english.display(), "英→中释义表已加载");
+                    engine = engine.with_english_translator(Box::new(glossary));
+                    annotations = true;
+                }
+                Err(error) => {
+                    tracing::warn!(path = %english.display(), %error, "英→中释义表读不了，英文候选没有中文释义");
                 }
             }
         }
@@ -540,6 +585,7 @@ impl Session {
             shift: ShiftState::default(),
             mode: InputMode::default(),
             english_candidates,
+            annotations,
             panel: Panel::Letters,
             preedit: None,
             candidates: Vec::new(),
@@ -683,7 +729,7 @@ impl Session {
     ///
     /// 壳按两张位图的高度自己量视图，所以这个值只要跟着 [`Self::bar_surface`] 一致就行。
     pub fn bar_height(&self) -> f32 {
-        Renderer::bar_height(&self.theme(), self.composing())
+        Renderer::bar_height(&self.theme(), self.composing(), self.annotations)
     }
 
     /// 在组句吗——拼音缓冲区里有没有东西。
@@ -729,7 +775,14 @@ impl Session {
             let scroll = self.strip.local_scroll(self.visible().start, self.scroll);
             let rendered = self.renderer.as_mut().and_then(|renderer| {
                 renderer
-                    .render_bar(&self.frame, self.width, &theme, self.density, scroll)
+                    .render_bar(
+                        &self.frame,
+                        self.width,
+                        &theme,
+                        self.density,
+                        scroll,
+                        self.annotations,
+                    )
                     .ok()
             });
             if rendered.is_none() {
@@ -1227,12 +1280,18 @@ impl Session {
         self.preedit = None;
         if !self.engine.composition().is_empty() {
             match self.engine.query() {
-                Ok(query) => {
+                Ok(mut query) => {
                     let segments = query.marked_segments();
                     self.preedit = Some(Preedit {
                         segments: segments.iter().map(preedit_segment).collect(),
                         cursor: query.marked_cursor(),
                     });
+                    // 译文是**后补的**：先按词级排序出候选，再问释义表把译文贴上。
+                    // 释义表是 mmap 的，这一步就是几次查表，不吃什么时间；
+                    // 贴不上就留空（`docs/design/candidate-ui.md`：译文缺失时那行留空，不显示占位符）。
+                    if self.annotations {
+                        self.engine.annotate(&mut query.candidates);
+                    }
                     self.candidates = query.candidates.items;
                 }
                 Err(_) => {
@@ -1711,9 +1770,39 @@ fn load_emoji_tables(dir: &Path) -> Option<EmojiTable> {
 /// 译文这一轮不画（也就没调 `engine.annotate()`），所以只填序号与词。
 /// 接译文时照 `apps/windows/server/src/ui/candidates/row.rs` 的 `from_candidate` 补上 annotation。
 fn row(index: usize, candidate: &Candidate) -> Row {
-    let mut row = Row::plain(index, candidate.text.as_str());
-    row.cloud = candidate.kind == CandidateKind::Cloud;
-    row
+    let mut annotation = Vec::new();
+    if let Some(reading) = &candidate.reading {
+        annotation.push((reading.clone(), Tone::Gloss));
+    }
+    if let Some(translation) = &candidate.translation {
+        for (i, sense) in translation.senses().iter().enumerate() {
+            if i > 0 || !annotation.is_empty() {
+                annotation.push((" · ".to_owned(), Tone::Faint));
+            }
+            if let Some(pos) = sense.part_of_speech {
+                annotation.push((format!("{pos} "), Tone::Faint));
+            }
+            // 生词用强调色。**现在恒假**——那要词汇记录（`with_vocabulary_tracker`），
+            // 属于另一条线，这轮只把画法接对。
+            let tone = if sense.fresh {
+                Tone::Fresh
+            } else {
+                Tone::Gloss
+            };
+            for segment in sense.furigana() {
+                annotation.push((segment.text, tone));
+                if let Some(reading) = segment.reading {
+                    annotation.push((format!("({reading})"), Tone::Faint));
+                }
+            }
+        }
+    }
+    Row {
+        index: (index + 1).to_string(),
+        text: candidate.text.clone(),
+        annotation,
+        cloud: candidate.kind == CandidateKind::Cloud,
+    }
 }
 
 /// 引擎的 marked 分段 → 渲染器的拼音分段。

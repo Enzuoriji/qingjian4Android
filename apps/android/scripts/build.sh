@@ -129,6 +129,18 @@ if [[ "$SKIP_RUST" -eq 0 ]]; then
   echo "== 编引擎 .so（${ABIS[*]}）=="
   cargo ndk --platform 29 "${ndk_targets[@]}" -o "$HERE/app/src/main/jniLibs" build "${cargo_args[@]}"
 
+  # 这次没要的那些 ABI 得清掉：cargo-ndk 只管往里加、不删旧的，上回编的会一直躺在 jniLibs 里
+  # 跟着打进 APK。`--abi x86_64` 和 `--abi arm64-v8a` 交替跑过就会撞上——手机包白大十几 MB。
+  for dir in "$HERE"/app/src/main/jniLibs/*/; do
+    [[ -d "$dir" ]] || continue
+    stale="$(basename "$dir")"
+    for want in "${ABIS[@]}"; do
+      [[ "$stale" == "$want" ]] && continue 2
+    done
+    echo "== 清掉这次没要的 ABI：$stale =="
+    rm -rf "$dir"
+  done
+
   if [[ "$STRIP" -eq 1 ]]; then
     stripper="$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-strip* 2>/dev/null | head -1)"
     if [[ -n "$stripper" ]]; then
@@ -200,6 +212,21 @@ else
   echo "== 找不到 data/generated/lm.qj，整句将退化成一元词频 ==" >&2
   rm -f "$LM_ASSET"
 fi
+
+# 释义表：`zh` 是英→中（英文模式的候选要用），`en` / `ja` / `es` 是三本学习语言。
+# **全带**（2026-09-22 定的，见 docs/plan/android-engine.md 的 E4）——学习语言还没有设置界面，
+# 先都带上，等设置做出来再让人挑。少了哪本都不算错，候选条不画那一本的译文而已。
+GLOSSARY_ASSETS="$HERE/app/src/main/assets"
+for code in zh en ja es; do
+  src="$ROOT/data/generated/glossary-$code.qj"
+  if [[ -f "$src" ]]; then
+    cp "$src" "$GLOSSARY_ASSETS/glossary-$code.qj"
+  else
+    echo "== 没有 data/generated/glossary-$code.qj，$code 那本释义表不进包 ==" >&2
+    rm -f "$GLOSSARY_ASSETS/glossary-$code.qj"
+  fi
+done
+echo "== 释义表（zh + en / ja / es）=="
 
 # 打 APK
 echo "== 打 APK（$PROFILE）=="

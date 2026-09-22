@@ -162,11 +162,13 @@ class QingjianImeService : InputMethodService() {
                 return null
             }
         }
-        // 英文词表与语言模型**单独解、失败了也不拦**：APK 里没有它们（打包时找不到源文件）
-        // 不该把 emoji 一起拖下水——那边是键盘能不能画出来的事，这两样只是少一块功能
-        // （英文模式退回直输 / 整句退化成一元词频）。解不出来就算了，Rust 那边读不到自然退。
-        ensureBundled(ENGLISH_ASSET, dir, required = false)
-        ensureBundled(LANGUAGE_MODEL_ASSET, dir, required = false)
+        // 英文词表、语言模型、释义表**单独解、失败了也不拦**：APK 里没有它们（打包时找不到源文件）
+        // 不该把 emoji 一起拖下水——那边是键盘能不能画出来的事，这些只是少一块功能
+        // （英文模式退回直输 / 整句退化成一元词频 / 候选条不画译文）。
+        // 解不出来就算了，Rust 那边读不到自然退。
+        for (name in OPTIONAL_ASSETS) {
+            ensureBundled(name, dir, required = false)
+        }
         return dir
     }
 
@@ -552,6 +554,20 @@ class QingjianImeService : InputMethodService() {
 
         /** 语言模型（44 MB）。**可选的**——没有它整句退化成一元词频，见 [ensureExtras]。 */
         const val LANGUAGE_MODEL_ASSET = "lm.qj"
+
+        /**
+         * 可选资源清单：解不出来只是少一块功能，不该拦下 emoji 那几个必需的。
+         *
+         * 释义表四本（`zh` 英→中 + 三本学习语言）都在这儿——没有它候选条就是光秃秃的词。
+         */
+        val OPTIONAL_ASSETS = listOf(
+            ENGLISH_ASSET,
+            LANGUAGE_MODEL_ASSET,
+            "glossary-zh.qj",
+            "glossary-en.qj",
+            "glossary-ja.qj",
+            "glossary-es.qj",
+        )
 
         /** 随包那几个数据文件解到私有目录时用的子目录名（emoji、颜文字、英文词表都在里头）。 */
         const val BUNDLE_DIR = "bundle"

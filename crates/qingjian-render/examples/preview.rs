@@ -229,7 +229,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (theme_name, theme) in [("light", Theme::light()), ("dark", Theme::dark())] {
         for (state_name, bar_frame) in [("empty", Frame::default()), ("page", bar_page())] {
             let started = Instant::now();
-            let rendered = renderer.render_bar(&bar_frame, BAR_WIDTH, &theme, args.scale, 0.0)?;
+            let rendered =
+                renderer.render_bar(&bar_frame, BAR_WIDTH, &theme, args.scale, 0.0, true)?;
             let elapsed = started.elapsed();
             let path = args.out.join(format!("bar-{state_name}-{theme_name}.png"));
             rendered.rendered.pixmap.save_png(&path)?;
@@ -247,8 +248,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!(
         "候选条高度：组句 {:.1}pt、没组句 {:.1}pt（只在「在不在组句」之间变，与候选多少无关）",
-        Renderer::bar_height(&Theme::light(), true),
-        Renderer::bar_height(&Theme::light(), false),
+        Renderer::bar_height(&Theme::light(), true, true),
+        Renderer::bar_height(&Theme::light(), false, false),
     );
 
     for probe in [

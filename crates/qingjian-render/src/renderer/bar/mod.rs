@@ -3,9 +3,13 @@
 //! 与候选窗（`renderer::{vertical,horizontal}`）的差别是结构级的：候选窗的宽高由内容量出来，
 //! 候选条**宽度是屏幕宽**，高度由主题算死、不按内容量（没有 `preferred_size`）。
 //!
-//! 高度只在**「在不在组句」**这一个开关上变：组句当中是定值（候选从 0 个变 6 个不会动），
-//! **没组句时收成细细一条**（[`IDLE_HEIGHT`]，里面就一个标），省下的高度还给应用。
-//! 代价是敲第一个字母时上面的应用内容会被顶一下——明知故犯，见 [`Renderer::bar_height`] 的注释。
+//! 高度只在**两个开关**上变，都是**整场不变的**：①「在不在组句」（候选从 0 个变 6 个不会动），
+//! ②「这个会话画不画译文」。**没组句时收成细细一条**（[`IDLE_HEIGHT`]，里面就一个标），
+//! 省下的高度还给应用。代价是敲第一个字母时上面的应用内容会被顶一下——明知故犯，
+//! 见 [`Renderer::bar_height`] 的注释。
+//!
+//! 译文那行**只画高亮那个候选的**（`docs/design/candidate-ui.md`：横排时只给高亮的那个
+//! 在下面单独一行显示），画在候选行底下、左边缘对齐高亮那格。
 //!
 //! 拼音行直接复用候选窗那一套 [`Renderer::draw_top_line`]——分段、纠错删除线、光标都在里面，
 //! 只有候选行是新写的。命中矩形与键盘一样随位图一并返回，壳只回传原始坐标。
@@ -23,7 +27,7 @@ pub use strip::BarStrip;
 use super::{Metrics, Rendered, Renderer};
 use crate::canvas::Canvas;
 use crate::error::RenderError;
-use crate::frame::{Frame, Row};
+use crate::frame::{Frame, Row, Tone};
 use crate::text::TextStyle;
 use crate::theme::Theme;
 
@@ -84,17 +88,26 @@ impl Renderer {
     /// 「没组句就收起来」那条原则没变（空着一条白带更难受），只是这条细的换成了个有用的按钮：
     /// 剪贴板、以后的设置都挂在这个标上。代价是没打字时应用少那么一条，
     /// 而**打字时的竖向空间一分没多**。
-    pub fn bar_height(theme: &Theme, composing: bool) -> f32 {
+    pub fn bar_height(theme: &Theme, composing: bool, annotations: bool) -> f32 {
         if composing {
-            Self::composing_height(theme)
+            Self::composing_height(theme, annotations)
         } else {
             IDLE_HEIGHT
         }
     }
 
-    /// 组字区的高度（点）：拼音行 + 候选行 + 上下留白。
-    fn composing_height(theme: &Theme) -> f32 {
-        theme.padding * 2.0 + top_line_height(theme) + candidate_row_height(theme)
+    /// 组字区的高度（点）：拼音行 + 候选行 + 上下留白（画译文时再加一行）。
+    ///
+    /// `annotations` 是**会话级**的：挂了释义表就整场为真。**不能**按「这一屏有没有译文」
+    /// 临时决定——候选条一变高，上面的应用内容跟着被顶，滚一格跳一下是不能接受的
+    /// （`docs/design/keyboard.md` 的「敲一个键不会顶动应用内容」）。
+    fn composing_height(theme: &Theme, annotations: bool) -> f32 {
+        let line = if annotations {
+            annotation_band_height(theme)
+        } else {
+            0.0
+        };
+        theme.padding * 2.0 + top_line_height(theme) + candidate_row_height(theme) + line
     }
 
     /// 画候选条，返回位图与每块可点区域。**同一块地方两种画法**（见 [`Self::bar_height`]）：
@@ -109,11 +122,12 @@ impl Renderer {
         theme: &Theme,
         scale: f32,
         scroll: f32,
+        annotations: bool,
     ) -> Result<RenderedBar, RenderError> {
         let m = Metrics { theme, scale };
         let content_width = (width * scale).round().max(1.0);
         let composing = frame.preedit.is_some();
-        let content_height = (Self::bar_height(theme, composing) * scale)
+        let content_height = (Self::bar_height(theme, composing, annotations) * scale)
             .round()
             .max(1.0);
         let mut canvas = Canvas::new(content_width as u32, content_height as u32)?;
@@ -140,7 +154,23 @@ impl Renderer {
                 top: top_band.bottom(),
                 height: m.px(candidate_row_height(theme)),
             };
-            self.draw_bar_rows(&mut canvas, frame, &m, rows_band, &mut hits, scroll);
+            let highlighted_left =
+                self.draw_bar_rows(&mut canvas, frame, &m, rows_band, &mut hits, scroll);
+            // 候选底下那行译文：只画高亮那个的
+            if annotations && let Some(left) = highlighted_left {
+                let line_band = Band {
+                    top: rows_band.bottom(),
+                    height: m.px(annotation_band_height(theme)),
+                };
+                self.draw_highlight_annotation(
+                    &mut canvas,
+                    frame,
+                    &m,
+                    left,
+                    line_band,
+                    content_width - m.padding(),
+                );
+            }
         } else {
             self.draw_bar_tools(&mut canvas, frame, &m, &mut hits);
         }
@@ -301,16 +331,19 @@ impl Renderer {
         band: Band,
         hits: &mut Vec<BarHit>,
         scroll: f32,
-    ) {
+    ) -> Option<f32> {
         if frame.rows.is_empty() {
-            return;
+            return None;
         }
+        // 高亮那格的左边缘，返回给下面那行译文对齐用
+        let mut highlighted_left = None;
         let gap = m.column_gap();
         let widths = self.bar_cell_widths(&frame.rows, m);
         let mut left = m.padding() - scroll;
         for (i, (row, width)) in frame.rows.iter().zip(&widths).enumerate() {
             if Some(i) == frame.highlighted {
                 self.fill_highlight(canvas, m, left, band.top, *width, band.height);
+                highlighted_left = Some(left);
             }
             self.draw_bar_row(canvas, m, row, (left, *width), band);
             // 命中区跟着这一格一起走；画到位图外面的那几格照样报，反正手指落不到那儿
@@ -322,6 +355,51 @@ impl Renderer {
                 height: band.height,
             });
             left += width + gap;
+        }
+        highlighted_left
+    }
+
+    /// 在候选行下面画**高亮那个**的译文。
+    ///
+    /// 起点对齐高亮那格的左边缘（安卓的高亮恒在最左边那个整格上，所以看着就是条子左下方
+    /// 一行小字）。一段一段顺着画，颜色按 [`Tone`]：译词用译文色、词性与分隔符用更浅那档、
+    /// 生词用强调色。**画到右边缘就收**，最后那段装不下截断补省略号——
+    /// 条子宽度是屏幕宽，注解爱多长有多长，不能让它顶出去。
+    fn draw_highlight_annotation(
+        &mut self,
+        canvas: &mut Canvas,
+        frame: &Frame,
+        m: &Metrics,
+        left: f32,
+        band: Band,
+        max_x: f32,
+    ) {
+        let Some(row) = frame.highlighted.and_then(|index| frame.rows.get(index)) else {
+            return;
+        };
+        if row.annotation.is_empty() {
+            return;
+        }
+        let height = m.px(m.theme.annotation_font.line_height);
+        let top = band.centre(height);
+        let mut x = left;
+        for (text, tone) in &row.annotation {
+            let color = match tone {
+                Tone::Gloss => m.theme.colors.gloss,
+                Tone::Fresh => m.theme.colors.fresh,
+                Tone::Faint => m.theme.colors.pos,
+            };
+            let style = m.style(m.theme.annotation_font, color);
+            if x + self.measure(text, &style).width <= max_x {
+                self.draw_text(canvas, text, &style, x, top);
+                x += self.measure(text, &style).width;
+                continue;
+            }
+            let clipped = self.fit(text, &style, max_x - x);
+            if !clipped.is_empty() {
+                self.draw_text(canvas, &clipped, &style, x, top);
+            }
+            break;
         }
     }
 
@@ -464,11 +542,17 @@ fn candidate_row_height(theme: &Theme) -> f32 {
     theme.text_font.line_height + theme.row_padding * 2.0
 }
 
+/// 候选底下那行译文占的高度（点）。**不带 `row_padding`**：那一行的上下已经有了候选行的
+/// 下留白与条子自己的下留白，再加就把它顶到条子外面去了（15 点，不是候选行那样的 27）。
+fn annotation_band_height(theme: &Theme) -> f32 {
+    theme.annotation_font.line_height
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BarHitId, BarStrip, ELLIPSIS, MIN_CELL_WIDTH, Metrics, Renderer};
     use crate::fonts::FontLibrary;
-    use crate::frame::{Frame, Preedit, Row};
+    use crate::frame::{Frame, Preedit, Row, Tone};
     use crate::theme::Theme;
 
     /// 验收用的屏幕宽（点），按一台常见手机的竖屏。
@@ -509,6 +593,70 @@ mod tests {
             .unwrap_or_else(|| panic!("没找到 {id:?}"))
     }
 
+    /// 带注解的那一帧：每条候选都给一段词性 + 一段译词。
+    fn frame_with_annotation(rows: usize) -> Frame {
+        let mut frame = frame(rows);
+        for row in &mut frame.rows {
+            row.annotation = vec![
+                ("int. ".to_owned(), Tone::Faint),
+                ("hello".to_owned(), Tone::Gloss),
+            ];
+        }
+        frame
+    }
+
+    /// **挂了释义表的那条高一截**——那行小字要地方站。是「高一截」不是翻倍。
+    #[test]
+    fn the_bar_makes_room_for_the_annotation_line() {
+        let theme = Theme::light();
+        let plain = Renderer::bar_height(&theme, true, false);
+        let annotated = Renderer::bar_height(&theme, true, true);
+        assert!(
+            annotated > plain,
+            "有译文那行时该高一些：{plain} → {annotated}"
+        );
+        assert!(
+            annotated < plain * 1.5,
+            "是「高一截」不是翻倍：{plain} → {annotated}"
+        );
+    }
+
+    /// **这一截高是会话级的**：同一个会话里，一帧有译文、一帧没有，两帧**一样高**。
+    ///
+    /// 这条守的是「敲一个键不会顶动应用内容」——高度要是跟着「这一屏有没有译文」走，
+    /// 滚动或换候选就会把上面的应用顶一下。
+    #[test]
+    fn the_annotation_height_does_not_follow_one_frames_content() {
+        let Some(mut renderer) = renderer() else {
+            return;
+        };
+        let theme = Theme::light();
+        let annotated = renderer
+            .render_bar(&frame_with_annotation(6), WIDTH, &theme, SCALE, 0.0, true)
+            .unwrap();
+        let bare = renderer
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0, true)
+            .unwrap();
+        assert_eq!(
+            annotated.rendered.content_height, bare.rendered.content_height,
+            "挂了释义表就是同一个高度，跟这一屏有没有译文无关"
+        );
+        assert_eq!(
+            annotated.rendered.content_height,
+            (Renderer::bar_height(&theme, true, true) * SCALE).round() as u32
+        );
+
+        // 没挂释义表时仍是最早那个高度，谁都没被顶
+        let none = renderer
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0, false)
+            .unwrap();
+        assert_eq!(
+            none.rendered.content_height,
+            (Renderer::bar_height(&theme, true, false) * SCALE).round() as u32
+        );
+        assert!(none.rendered.content_height < annotated.rendered.content_height);
+    }
+
     #[test]
     fn height_stays_the_same_whether_there_is_content_or_not() {
         let Some(mut renderer) = renderer() else {
@@ -517,10 +665,10 @@ mod tests {
         let theme = Theme::light();
         // 有拼音但一个候选都没有（`ni'h` 这种还拼不成音节的）也是一个高度
         let bare = renderer
-            .render_bar(&frame(0), WIDTH, &theme, SCALE, 0.0)
+            .render_bar(&frame(0), WIDTH, &theme, SCALE, 0.0, false)
             .unwrap();
         let full = renderer
-            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0)
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0, false)
             .unwrap();
         assert_eq!(
             bare.rendered.content_height, full.rendered.content_height,
@@ -528,7 +676,7 @@ mod tests {
         );
         assert_eq!(
             full.rendered.content_height,
-            (Renderer::bar_height(&theme, true) * SCALE).round() as u32
+            (Renderer::bar_height(&theme, true, false) * SCALE).round() as u32
         );
         assert!(
             candidates(&bare).is_empty(),
@@ -543,8 +691,8 @@ mod tests {
     #[test]
     fn the_bar_shrinks_to_one_thin_strip_when_not_composing() {
         let theme = Theme::light();
-        let idle = Renderer::bar_height(&theme, false);
-        let composing = Renderer::bar_height(&theme, true);
+        let idle = Renderer::bar_height(&theme, false, false);
+        let composing = Renderer::bar_height(&theme, true, false);
 
         assert!(idle > 0.0, "没组句时也该留一条细的（标要地方）");
         // 六成是个宽松的界：这条细的只装一个标，够不着组句时那个高度就行。
@@ -571,7 +719,7 @@ mod tests {
             status: None,
         };
         let out = renderer
-            .render_bar(&bare, WIDTH, &theme, SCALE, 0.0)
+            .render_bar(&bare, WIDTH, &theme, SCALE, 0.0, false)
             .unwrap();
 
         assert_eq!(
@@ -601,7 +749,7 @@ mod tests {
         };
         let theme = Theme::light();
         let out = renderer
-            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0)
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0, false)
             .unwrap();
         let slots = candidates(&out);
         assert_eq!(slots.len(), 6);
@@ -632,10 +780,10 @@ mod tests {
         let theme = Theme::light();
         let scroll = 40.0;
         let rest = renderer
-            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0)
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0, false)
             .unwrap();
         let scrolled = renderer
-            .render_bar(&frame(6), WIDTH, &theme, SCALE, scroll)
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, scroll, false)
             .unwrap();
 
         let (rest, scrolled) = (candidates(&rest), candidates(&scrolled));
@@ -683,7 +831,7 @@ mod tests {
             status: None,
         };
         let out = renderer
-            .render_bar(&mixed, WIDTH, &theme, SCALE, 0.0)
+            .render_bar(&mixed, WIDTH, &theme, SCALE, 0.0, false)
             .unwrap();
         let slots = candidates(&out);
 
@@ -719,7 +867,7 @@ mod tests {
             status: None,
         };
         let out = renderer
-            .render_bar(&all_short, WIDTH, &theme, SCALE, 0.0)
+            .render_bar(&all_short, WIDTH, &theme, SCALE, 0.0, false)
             .unwrap();
 
         let floor = MIN_CELL_WIDTH * SCALE;
@@ -738,7 +886,7 @@ mod tests {
             return;
         };
         let out = renderer
-            .render_bar(&frame(6), WIDTH, &Theme::light(), SCALE, 0.0)
+            .render_bar(&frame(6), WIDTH, &Theme::light(), SCALE, 0.0, false)
             .unwrap();
         let third = button(&out, BarHitId::Candidate(2));
         let inside = (third.x + third.width / 2.0, third.y + third.height / 2.0);
@@ -758,7 +906,7 @@ mod tests {
             return;
         };
         let out = renderer
-            .render_bar(&frame(6), WIDTH, &Theme::light(), SCALE, 0.0)
+            .render_bar(&frame(6), WIDTH, &Theme::light(), SCALE, 0.0, false)
             .unwrap();
         let clear = button(&out, BarHitId::Clear);
         let prev = button(&out, BarHitId::PagePrev);
