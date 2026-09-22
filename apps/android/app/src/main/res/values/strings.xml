@@ -38,7 +38,10 @@
     <string name="settings_cloud_slots">云端补几个候选</string>
     <string name="settings_cloud_slots_value">云端补几个候选：%1$d 个</string>
     <string name="settings_cloud_sentence">整句补全</string>
-    <string name="settings_cloud_note">密钥只写在这台手机的应用私有目录里，不会上传到青简。云联想本身要等接入之后才生效，现在填了也只是先存着。</string>
+    <string name="settings_cloud_test">测试连接</string>
+    <string name="settings_cloud_testing">正在测试…</string>
+    <string name="settings_cloud_test_timeout">等了 30 秒没有回话</string>
+    <string name="settings_cloud_note">密钥只写在这台手机的应用私有目录里，不会上传到青简。开着云联想时，光标附近的一小段文字会直接发给你上面填的那个服务商；密码框里一个字都不发。</string>
 
     <string name="settings_broken">配置文件读不了，先改回来再进这一页：\n\n%1$s</string>
 </resources>

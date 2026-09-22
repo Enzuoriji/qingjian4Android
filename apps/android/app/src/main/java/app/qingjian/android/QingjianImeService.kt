@@ -63,6 +63,21 @@ class QingjianImeService : InputMethodService() {
         }
     }
 
+    /**
+     * 云联想的轮询：**只在有请求在飞时跑**——掩码里还有 [QingjianNative.FLAG_PREDICTING]
+     * 才有下一拍，结果拿到、或者等太久自己就停。
+     *
+     * 结果是**非阻塞取的**（发了请求立刻返回，答案得回来取），所以得有人一直问。
+     * 节拍与电脑版一致（mac 的 `PredictMonitor` 是 50ms 一拍）。
+     */
+    private val predictionTicker = object : Runnable {
+        override fun run() {
+            val view = inputView ?: return
+            if (handle == 0L) return
+            afterInput(view, QingjianNative.pollPrediction(handle), SystemClock.elapsedRealtime())
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
 
@@ -265,6 +280,12 @@ class QingjianImeService : InputMethodService() {
         // 还在滑就按帧接着敲，滑完了就停。**只有这里知道 Rust 那边还在不在跑**，
         // 所以帧的开关也在这儿翻（惯性那几帧跟打字一样走这条收尾，慢了同样会报出来）。
         view.setFlinging(flags and QingjianNative.FLAG_FLING != 0)
+        // 云联想有请求在飞就按拍子问；**没在飞时一个定时器都不跑**（E7 定的那条）。
+        // 先撤再排：每敲一键都重置节拍，等结果这一段时间里不必那么急。
+        handler.removeCallbacks(predictionTicker)
+        if (flags and QingjianNative.FLAG_PREDICTING != 0) {
+            handler.postDelayed(predictionTicker, PREDICTION_POLL_MS)
+        }
         val elapsed = SystemClock.elapsedRealtime() - started
         if (elapsed >= SLOW_TOUCH_MS) {
             Log.w(TAG, "这一下花了 ${elapsed}ms，打字会跟不上手感")
@@ -425,6 +446,11 @@ class QingjianImeService : InputMethodService() {
         // 放在这儿而不是 `onCreate`——那会儿输入法窗口还没显示，
         // 非前台读剪贴板会让系统弹一条「某某读取了剪贴板」的提示（Android 12 起）。
         readClipboard()?.let { QingjianNative.clipboardChanged(handle, it) }
+        // 密码框里不学、不记、**不发云端**——判定在壳这边（引擎那边另有一道闸）。
+        // 每次弹键盘都要重报一遍：换了个输入框就得重新判。
+        QingjianNative.setPrivate(handle, info.isPrivate())
+        // 云联想拿光标前后的文本当上下文，也是每次弹键盘取一次
+        refreshSurrounding()
         // 配置文件变了就重读并应用（用户从设置页回来时必走这一条）。
         // **就挂在这儿，不另排心跳**：键盘每次弹出来这个回调必到，而它是唯一一定到的
         // （BACK 收起键盘时 onFinishInput 不触发，2026-09-22 实测过）。桌面要每秒轮询
@@ -456,6 +482,7 @@ class QingjianImeService : InputMethodService() {
         super.onWindowHidden()
         if (handle == 0L) return
         handler.removeCallbacks(learningTicker)
+        handler.removeCallbacks(predictionTicker)
         QingjianNative.flushLearning(handle)
     }
 
@@ -465,6 +492,7 @@ class QingjianImeService : InputMethodService() {
         // 焦点离开输入框也会走到这儿（切换应用、点到别处）。与 `onWindowHidden` 一样落一次盘，
         // 没有脏数据时是空操作，所以不必判断谁先谁后。
         handler.removeCallbacks(learningTicker)
+        handler.removeCallbacks(predictionTicker)
         QingjianNative.flushLearning(handle)
         // 清空顺带把键盘复位回字母页，掩码里会带 FLAG_KEYBOARD——照同一套收尾重画一遍，
         // 不然键盘收起来再弹出来还停着上一页的键
@@ -548,6 +576,36 @@ class QingjianImeService : InputMethodService() {
         QingjianNative.toBitmap(bytes)?.let(view::setKeyboard)
     }
 
+    /**
+     * 这个输入框是不是密码框。
+     *
+     * 按 `inputType` 的**分类位 + 变体位**判：密码那几种都藏在 variation 里，得掩码取出来比。
+     * 「看得见的密码」（`VISIBLE_PASSWORD`）也算——它照样是密码。
+     */
+    private fun EditorInfo?.isPrivate(): Boolean {
+        val info = this ?: return false
+        val kind = info.inputType and EditorInfo.TYPE_MASK_CLASS
+        val variation = info.inputType and EditorInfo.TYPE_MASK_VARIATION
+        return (kind == EditorInfo.TYPE_CLASS_TEXT && variation in TEXT_PASSWORDS) ||
+            (
+                kind == EditorInfo.TYPE_CLASS_NUMBER &&
+                    variation == EditorInfo.TYPE_NUMBER_VARIATION_PASSWORD
+                )
+    }
+
+    /**
+     * 把光标前后的文本报给 Rust（云联想拿它当上下文）。
+     *
+     * **跨进程搬一长段太亏**，先截到几百字符——引擎那边还会按 `[predict] lookback / lookahead` 再裁一次。
+     * 取不到（有些应用不给）就当空串，联想照样会发，只是上下文少一点。
+     */
+    private fun refreshSurrounding() {
+        val connection = currentInputConnection ?: return
+        val before = connection.getTextBeforeCursor(SURROUNDING_CHARS, 0)?.toString().orEmpty()
+        val after = connection.getTextAfterCursor(SURROUNDING_CHARS, 0)?.toString().orEmpty()
+        QingjianNative.setSurrounding(handle, before, after)
+    }
+
     /** 系统现在是深色吗。 */
     /** 横屏。键要矮一截——横屏竖向空间少，还用竖屏那个高度会占掉半个屏幕。 */
     private fun isLandscape(): Boolean =
@@ -560,6 +618,7 @@ class QingjianImeService : InputMethodService() {
     override fun onDestroy() {
         systemClipboard?.removePrimaryClipChangedListener(clipboardListener)
         handler.removeCallbacks(learningTicker)
+        handler.removeCallbacks(predictionTicker)
         if (handle != 0L) {
             // 落盘**必须在 `close` 之前**：`close` 一调会话对象就没了，之后再叫它只会拿到空句柄
             QingjianNative.flushLearning(handle)
@@ -578,6 +637,19 @@ class QingjianImeService : InputMethodService() {
 
         /** 学习数据兜底落盘的间隔，与电脑版一致（`LEARNING_FLUSH_INTERVAL`）。 */
         const val LEARNING_FLUSH_INTERVAL_MS = 60_000L
+
+        /** 云联想轮询的节拍（毫秒）。与电脑版一致（mac 的 `PredictMonitor` 是 50ms 一拍）。 */
+        const val PREDICTION_POLL_MS = 50L
+
+        /** 报给云联想的光标前后文最多各取多少字符。引擎那边还会按 `[predict]` 的配置再裁。 */
+        const val SURROUNDING_CHARS = 256
+
+        /** 算「这是不是密码框」用的那几种 variation（`EditorInfo.inputType` 的变体位）。 */
+        val TEXT_PASSWORDS = intArrayOf(
+            EditorInfo.TYPE_TEXT_VARIATION_PASSWORD,
+            EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            EditorInfo.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+        )
 
         /** 随包词库的文件名，放在应用私有目录。 */
         const val DICTIONARY = "dict.qj"

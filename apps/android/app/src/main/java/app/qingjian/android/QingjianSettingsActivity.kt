@@ -3,9 +3,13 @@ package app.qingjian.android
 import android.app.Activity
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -39,6 +43,12 @@ class QingjianSettingsActivity : Activity() {
 
     /** 从文件读到的配置。控件按它填，改完也回写到这里。 */
     private var config: JSONObject? = null
+
+    /** 「测试连接」问结果用的节拍器（与输入法那边等云联想是同一个路数）。 */
+    private val handler = Handler(Looper.getMainLooper())
+
+    /** 这次测试是什么时候起的——过了上限就别等了。 */
+    private var testStartedAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -149,6 +159,47 @@ class QingjianSettingsActivity : Activity() {
         switch(R.id.predict_sentence, predict.optBoolean("sentence", true)) {
             save("predict", "sentence", it)
         }
+        findViewById<Button>(R.id.predict_test).setOnClickListener { startCloudTest() }
+    }
+
+    /**
+     * 「测试连接」：起一次最小探活，然后按拍子问结果。
+     *
+     * 与输入法那边等云联想是**同一个路数**（发起 + 轮询）——网络那一层本身就是非阻塞的。
+     * 问的是**文件里当前那份**配置，所以刚填完密钥直接点就行（这一页改一项写一项）。
+     */
+    private fun startCloudTest() {
+        val status = findViewById<TextView>(R.id.predict_status)
+        val error = QingjianNative.cloudTestStart(dataDir)
+        if (!error.isNullOrEmpty()) {
+            status.text = error
+            return
+        }
+        status.setText(R.string.settings_cloud_testing)
+        testStartedAt = SystemClock.elapsedRealtime()
+        pollCloudTest()
+    }
+
+    /** 问一次结果；还没回来就接着排下一拍，**过了上限就收摊**（与电脑版一样 30 秒）。 */
+    private fun pollCloudTest() {
+        val status = findViewById<TextView>(R.id.predict_status)
+        val result = QingjianNative.cloudTestPoll()
+            ?.let { runCatching { JSONObject(it) }.getOrNull() }
+            ?: return
+        if (!result.optBoolean("done")) {
+            if (SystemClock.elapsedRealtime() - testStartedAt >= CLOUD_TEST_TIMEOUT_MS) {
+                status.setText(R.string.settings_cloud_test_timeout)
+                return
+            }
+            handler.postDelayed({ pollCloudTest() }, CLOUD_TEST_POLL_MS)
+            return
+        }
+        status.text = result.optString("text")
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 
     /**
@@ -336,6 +387,10 @@ class QingjianSettingsActivity : Activity() {
     }
 
     private companion object {
+        /** 「测试连接」问结果的节拍与上限（毫秒），与电脑版一致（mac 的 `CloudTestMonitor`）。 */
+        const val CLOUD_TEST_POLL_MS = 200L
+        const val CLOUD_TEST_TIMEOUT_MS = 30_000L
+
         /** 自定义震动的范围（毫秒），与 `qingjian_platform` 的 `MIN/MAX_VIBRATION_MS` 一致。 */
         const val MIN_VIBRATION_MS = 1
         const val MAX_VIBRATION_MS = 50

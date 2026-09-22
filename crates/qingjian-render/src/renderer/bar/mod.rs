@@ -4,12 +4,14 @@
 //! 候选条**宽度是屏幕宽**，高度由主题算死、不按内容量（没有 `preferred_size`）。
 //!
 //! 高度只在**两个开关**上变，都是**整场不变的**：①「在不在组句」（候选从 0 个变 6 个不会动），
-//! ②「这个会话画不画译文」。**没组句时收成细细一条**（[`IDLE_HEIGHT`]，里面就一个标），
-//! 省下的高度还给应用。代价是敲第一个字母时上面的应用内容会被顶一下——明知故犯，
-//! 见 [`Renderer::bar_height`] 的注释。
+//! ②「最下面那行画不画」（挂了释义表、或者云联想开着）。**没组句时收成细细一条**
+//! （[`IDLE_HEIGHT`]，里面就一个标），省下的高度还给应用。代价是敲第一个字母时上面的
+//! 应用内容会被顶一下——明知故犯，见 [`Renderer::bar_height`] 的注释。
 //!
-//! 译文那行**只画高亮那个候选的**（`docs/design/candidate-ui.md`：横排时只给高亮的那个
-//! 在下面单独一行显示），画在候选行底下、左边缘对齐高亮那格。
+//! 最下面那行**左边是译文、右边是云联想给的整句补全**（2026-09-22 用户定的排版）：
+//! 译文只画高亮那个候选的（`docs/design/candidate-ui.md`：横排时只给高亮的那个在下面
+//! 单独一行显示），从高亮那格的左边缘起；整句补全靠右对齐、带云朵、用云色，
+//! 最多占内容宽度的 [`SENTENCE_SHARE`]——两边都长时各自截断，谁也不会把谁挤没。
 //!
 //! 拼音行直接复用候选窗那一套 [`Renderer::draw_top_line`]——分段、纠错删除线、光标都在里面，
 //! 只有候选行是新写的。命中矩形与键盘一样随位图一并返回，壳只回传原始坐标。
@@ -24,7 +26,7 @@ pub use id::BarHitId;
 pub use rendered::RenderedBar;
 pub use strip::BarStrip;
 
-use super::{Metrics, Rendered, Renderer};
+use super::{Metrics, Rendered, Renderer, SENTENCE_GAP};
 use crate::canvas::Canvas;
 use crate::error::RenderError;
 use crate::frame::{Frame, Row, Tone};
@@ -88,21 +90,24 @@ impl Renderer {
     /// 「没组句就收起来」那条原则没变（空着一条白带更难受），只是这条细的换成了个有用的按钮：
     /// 剪贴板、以后的设置都挂在这个标上。代价是没打字时应用少那么一条，
     /// 而**打字时的竖向空间一分没多**。
-    pub fn bar_height(theme: &Theme, composing: bool, annotations: bool) -> f32 {
+    pub fn bar_height(theme: &Theme, composing: bool, bottom_line: bool) -> f32 {
         if composing {
-            Self::composing_height(theme, annotations)
+            Self::composing_height(theme, bottom_line)
         } else {
             IDLE_HEIGHT
         }
     }
 
-    /// 组字区的高度（点）：拼音行 + 候选行 + 上下留白（画译文时再加一行）。
+    /// 组字区的高度（点）：拼音行 + 候选行 + 上下留白（最下面那行要画时再加一行）。
     ///
-    /// `annotations` 是**会话级**的：挂了释义表就整场为真。**不能**按「这一屏有没有译文」
-    /// 临时决定——候选条一变高，上面的应用内容跟着被顶，滚一格跳一下是不能接受的
-    /// （`docs/design/keyboard.md` 的「敲一个键不会顶动应用内容」）。
-    fn composing_height(theme: &Theme, annotations: bool) -> f32 {
-        let line = if annotations {
+    /// `bottom_line` 是**会话级**的：挂了释义表、或者云联想开着，就整场为真
+    /// （那行左边画译文、右边画云联想给的整句补全）。
+    /// **不能**按「这一屏有没有东西可画」临时决定——候选条一变高，上面的应用内容跟着被顶，
+    /// 滚一格跳一下是不能接受的（`docs/design/keyboard.md` 的「敲一个键不会顶动应用内容」）。
+    ///
+    /// 名字不叫 `footer`：那个词在这份代码里已经是「第几页」（[`Frame::footer`]）。
+    fn composing_height(theme: &Theme, bottom_line: bool) -> f32 {
+        let line = if bottom_line {
             annotation_band_height(theme)
         } else {
             0.0
@@ -122,12 +127,12 @@ impl Renderer {
         theme: &Theme,
         scale: f32,
         scroll: f32,
-        annotations: bool,
+        bottom_line: bool,
     ) -> Result<RenderedBar, RenderError> {
         let m = Metrics { theme, scale };
         let content_width = (width * scale).round().max(1.0);
         let composing = frame.preedit.is_some();
-        let content_height = (Self::bar_height(theme, composing, annotations) * scale)
+        let content_height = (Self::bar_height(theme, composing, bottom_line) * scale)
             .round()
             .max(1.0);
         let mut canvas = Canvas::new(content_width as u32, content_height as u32)?;
@@ -146,8 +151,9 @@ impl Renderer {
                 top,
                 height: m.px(top_line_height(theme)),
             };
-            // 上排：拼音那一行整个复用候选窗的画法
-            self.draw_top_line(&mut canvas, frame, &m, 0.0, top);
+            // 上排：拼音那一行整个复用候选窗的画法，**但不画右侧那截**——
+            // 候选条把它挪到了最下面那行（见 `draw_bottom_line`）
+            self.draw_top_line(&mut canvas, frame, &m, 0.0, top, false);
             self.draw_bar_buttons(&mut canvas, frame, &m, content_width, top_band, &mut hits);
             // 下排：候选
             let rows_band = Band {
@@ -156,20 +162,20 @@ impl Renderer {
             };
             let highlighted_left =
                 self.draw_bar_rows(&mut canvas, frame, &m, rows_band, &mut hits, scroll);
-            // 候选底下那行译文：只画高亮那个的
-            if annotations && let Some(left) = highlighted_left {
+            // 最下面那行：**左译文、右云联想给的整句补全**
+            if bottom_line {
                 let line_band = Band {
                     top: rows_band.bottom(),
                     height: m.px(annotation_band_height(theme)),
                 };
-                self.draw_highlight_annotation(
+                self.draw_bottom_line(
                     &mut canvas,
                     frame,
                     &m,
-                    AnnotationSlot {
-                        left,
+                    BottomSlot {
                         band: line_band,
-                        max_x: content_width - m.padding(),
+                        highlighted_left,
+                        content_width,
                     },
                     &mut hits,
                 );
@@ -360,6 +366,84 @@ impl Renderer {
             left += width + gap;
         }
         highlighted_left
+    }
+
+    /// 候选条最下面那行小字：**左边译文、右边云联想给的整句补全**。
+    ///
+    /// 两边都是可有可无的——译文要有释义表，整句要云联想真给了结果。行高不归它管：
+    /// 由 [`Renderer::bar_height`] 的 `footer` 定死（会话级），所以这里只管画内容。
+    fn draw_bottom_line(
+        &mut self,
+        canvas: &mut Canvas,
+        frame: &Frame,
+        m: &Metrics,
+        slot: BottomSlot,
+        hits: &mut Vec<BarHit>,
+    ) {
+        let BottomSlot {
+            band,
+            highlighted_left,
+            content_width,
+        } = slot;
+        // 右边那块**先量**（它靠右摆），译文用剩下的宽度
+        let max_x = self.draw_bottom_sentence(canvas, frame, m, band, content_width, hits);
+        let Some(left) = highlighted_left else {
+            return;
+        };
+        self.draw_highlight_annotation(
+            canvas,
+            frame,
+            m,
+            AnnotationSlot { left, band, max_x },
+            hits,
+        );
+    }
+
+    /// 画最下面那行**右边**那块：云联想给的整句补全（云朵 + 句子，都用云色）。
+    ///
+    /// 从右边缘往左摆，最多占 [`SENTENCE_SHARE`]。返回**译文能画到的右界**
+    /// （没有整句时就是右边缘本身）——左边那块照这个收边。
+    fn draw_bottom_sentence(
+        &mut self,
+        canvas: &mut Canvas,
+        frame: &Frame,
+        m: &Metrics,
+        band: Band,
+        content_width: f32,
+        hits: &mut Vec<BarHit>,
+    ) -> f32 {
+        let right = content_width - m.padding();
+        // 只画云联想来的那一截（`cloud == true`）。临时状态（「已删除用户词 X」那类）不在这儿：
+        // 那是候选窗的排版，安卓还没有能触发它的动作。
+        let Some((text, true)) = frame.trailing() else {
+            return right;
+        };
+        let style = m.annotation_style(m.theme.colors.cloud);
+        let cloud = m.cloud_width();
+        let room = (content_width * SENTENCE_SHARE - cloud).max(0.0);
+        let text = if self.measure(text, &style).width > room {
+            self.fit(text, &style, room)
+        } else {
+            text.to_owned()
+        };
+        if text.is_empty() {
+            return right;
+        }
+        let width = cloud + self.measure(&text, &style).width;
+        let left = right - width;
+        let height = m.px(m.theme.annotation_font.line_height);
+        let top = band.centre(height);
+        self.draw_cloud(canvas, m, left, top, height);
+        self.draw_text(canvas, &text, &style, left + cloud, top);
+        hits.push(BarHit {
+            id: BarHitId::Sentence,
+            x: left,
+            y: band.top,
+            width,
+            height: band.height,
+        });
+        // 译文最多画到这儿，两块之间留一个间距
+        left - m.px(SENTENCE_GAP)
     }
 
     /// 在候选行下面画**高亮那个**的译文。
@@ -607,12 +691,32 @@ struct AnnotationSlot {
     max_x: f32,
 }
 
+/// 最下面那行画在哪儿、按什么算。与 [`AnnotationSlot`] 一个道理：几个数凑一起才说得清，
+/// 单独传会一路拖成八参数（clippy 会拦）。
+#[derive(Debug, Clone, Copy)]
+struct BottomSlot {
+    /// 那行字的上下范围。
+    band: Band,
+
+    /// 候选行里**高亮那格的左边缘**（译文从这儿起画）；没有高亮时为 `None`。
+    highlighted_left: Option<f32>,
+
+    /// 内容区宽度：整句那块靠它算右对齐。
+    content_width: f32,
+}
+
 /// 译文那行命中区左右各往外放多少（点）。
 ///
 /// 那行字才 15 点高，按真画出来的宽度给靶子的话细得像根线；左右各放一点好点着，
 /// 又不至于把旁边那片空白也变成靶子。**放太多相邻两条会叠上**（两条之间就隔着一个分隔符），
 /// 所以这个数比从前一条靶子时的小。
 const ANNOTATION_HIT_PAD: f32 = 4.0;
+
+/// 最下面那行里，云联想那截**最多占内容宽度的多大比例**。
+///
+/// 不给上限的话，一句长的整句补全能把左边的译文整个挤没——而译文是「这个词什么意思」，
+/// 正是用户此刻在看的东西。给了上限，两边都长时各自截断，谁也不会凭空消失。
+const SENTENCE_SHARE: f32 = 0.45;
 
 /// 义项之间的分隔符。三个壳拼 annotation 时都往中间插这么一段 `Tone::Faint`
 /// （见 `apps/windows/server/src/ui/candidates/row.rs` 的 `from_candidate`），
@@ -728,6 +832,78 @@ mod tests {
             (Renderer::bar_height(&theme, true, false) * SCALE).round() as u32
         );
         assert!(none.rendered.content_height < annotated.rendered.content_height);
+    }
+
+    /// **云联想给的整句补全画在最下面那行的右半边**（2026-09-22 用户定的排版：左译文、右 AI），
+    /// 并报一个命中区——点它整句上屏（电脑上那一步是 Tab 键，安卓没有 Tab）。
+    #[test]
+    fn the_sentence_prediction_sits_at_the_bottom_right() {
+        let Some(mut renderer) = renderer() else {
+            return;
+        };
+        let theme = Theme::light();
+        let mut frame = frame_with_annotation(6);
+        frame.sentence = Some("你好，很高兴认识你".to_owned());
+        let rendered = renderer
+            .render_bar(&frame, WIDTH, &theme, SCALE, 0.0, true)
+            .unwrap();
+
+        let sentence = button(&rendered, BarHitId::Sentence);
+        let content_right = rendered.rendered.content_width as f32 - theme.padding * SCALE;
+        assert!(
+            (sentence.x + sentence.width - content_right).abs() < 1.0,
+            "该右对齐到内容区右边缘：{} vs {content_right}",
+            sentence.x + sentence.width
+        );
+        // 左半边是译文：两块不许叠在一起（叠了就是谁把谁盖住了）
+        let translation = button(&rendered, BarHitId::Translation(0));
+        assert!(
+            translation.x + translation.width <= sentence.x,
+            "译文右边缘 {} 不该越过整句的左边缘 {}",
+            translation.x + translation.width,
+            sentence.x
+        );
+    }
+
+    /// 一整句长补全**不能把译文挤没**：那块有宽度上限，两边各自截断。
+    #[test]
+    fn a_long_prediction_does_not_squeeze_the_translation_away() {
+        let Some(mut renderer) = renderer() else {
+            return;
+        };
+        let theme = Theme::light();
+        let mut frame = frame_with_annotation(6);
+        frame.sentence = Some("今天天气很好我们一起去公园散步顺便吃点东西吧".to_owned());
+        let rendered = renderer
+            .render_bar(&frame, WIDTH, &theme, SCALE, 0.0, true)
+            .unwrap();
+
+        let sentence = button(&rendered, BarHitId::Sentence);
+        let content = rendered.rendered.content_width as f32;
+        assert!(
+            sentence.width < content * 0.5,
+            "长补全该被截到一半以内，实际占了 {}",
+            sentence.width / content
+        );
+        // 译文那边还有地方站着
+        let translation = button(&rendered, BarHitId::Translation(0));
+        assert!(translation.width > 0.0, "译文不该被挤没");
+    }
+
+    /// 云联想没给东西时，右下角**一个靶子都不该有**（不预留、不画占位）。
+    #[test]
+    fn there_is_no_sentence_hit_without_a_prediction() {
+        let Some(mut renderer) = renderer() else {
+            return;
+        };
+        let theme = Theme::light();
+        let rendered = renderer
+            .render_bar(&frame_with_annotation(6), WIDTH, &theme, SCALE, 0.0, true)
+            .unwrap();
+        assert!(
+            !rendered.hits.iter().any(|hit| hit.id == BarHitId::Sentence),
+            "没有整句补全时不该有那块靶子"
+        );
     }
 
     /// 译文那行**报一个命中区**（点它上屏译文），范围贴着真画出来的那截字。

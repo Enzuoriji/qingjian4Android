@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use qingjian_core::Language;
 use qingjian_platform::{Config, DictionariesConfig};
+use qingjian_predict::PredictConfig;
 
 use crate::settings::config_path;
 
@@ -33,6 +34,9 @@ pub(crate) struct ConfigState {
 
     /// 已经挂上的领域词库开关，同样只在真变了才重读那几本词库。
     dictionaries: DictionariesConfig,
+
+    /// 已经接上的云联想配置。改它要重建 predictor（会起一个线程），所以同样只在真变了才做。
+    predict: PredictConfig,
 }
 
 impl ConfigState {
@@ -47,6 +51,7 @@ impl ConfigState {
             error: None,
             language: None,
             dictionaries: DictionariesConfig::default(),
+            predict: PredictConfig::default(),
         };
         let Some(path) = state.path.clone() else {
             return state;
@@ -83,6 +88,16 @@ impl ConfigState {
     /// 已经挂上的领域词库开关。
     pub(crate) fn dictionaries(&self) -> &DictionariesConfig {
         &self.dictionaries
+    }
+
+    /// 已经接上的云联想配置。
+    pub(crate) fn predict(&self) -> &PredictConfig {
+        &self.predict
+    }
+
+    /// 记下这次接的是哪份云联想配置。
+    pub(crate) fn set_predict(&mut self, predict: PredictConfig) {
+        self.predict = predict;
     }
 
     /// 文件变了吗；变了就重读。返回 `true` 表示**配置真的换了**（只是注释变了不算）。

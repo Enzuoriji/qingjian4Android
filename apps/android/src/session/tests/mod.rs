@@ -6,6 +6,7 @@
 //! 配置那一摊单独一个文件（[`config`]）：它测的是「改了配置文件会怎样」，
 //! 与这里的触摸链路是两回事，而这一份已经够长了。
 
+mod cloud;
 mod config;
 
 use super::flags;

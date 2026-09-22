@@ -99,7 +99,12 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 
 自绘渲染器：候选窗一帧 + 主题 → 预乘 RGBA 位图，tiny-skia 栅格 + cosmic-text 文字（fontdb 按平台清单只加载几个字体文件、不扫系统），
 自己解析 `trak` 字距表、按主题 gamma 加深笔画；cosmic-text 打了 `opsz` 光学字号补丁（qingjian-team/cosmic-text 分支 `qingjian-opsz`，workspace `[patch.crates-io]` 钉 rev）。
-`examples/preview.rs` 出 PNG 与真机截图并排比、`--measure` 与 AppKit 对宽度。mac 壳 `candidates/bitmap/` 贴位图，`[general] renderer = "system"` 切回 AppKit 绘制
+`examples/preview.rs` 出 PNG 与真机截图并排比、`--measure` 与 AppKit 对宽度。
+候选条（安卓专用，`renderer/bar/`）：**最下面那行左边译文、右边云联想给的整句补全**
+（`draw_bottom_line` / `draw_bottom_sentence`，2026-09-22）。高度按
+`bar_height(theme, composing, bottom_line)` 算——第三个参数是**会话级**的「那行要不要留」
+（挂了释义表 **或** 云联想开着），不是「这一屏有没有东西可画」；
+拼音行仍复用候选窗那套 `draw_top_line`，只是候选条传 `with_trailing = false` 把右截让给下面那行。mac 壳 `candidates/bitmap/` 贴位图，`[general] renderer = "system"` 切回 AppKit 绘制
 （过渡期退路，偏好设置「候选窗口」页可选）；`[general] font` 是候选窗字族名（空为系统字体，`bitmap/font_files.rs` 用 CoreText 按字族名找文件只加载那几个，没装就回系统字体；
 设置页 `preferences/font_picker/` 是搜索框 + 列表）。设计与验收见 `docs/design/rendering.md`。
 
@@ -543,6 +548,21 @@ K8 的「长按候选 = 删词」当年删不动正是因为这个（那个功�
   键名在 `qingjian-platform` 的 `VibrationStyle` 与 Kotlin 的 `VibrationStyle` 各有一份
   （跨语言没法共享），**改一边必须同时改另一边**。
   壳在 `onStartInputView` 里读一次配置交给 `KeyFeedback`，不是每敲一下读文件。
+- **云联想（E8，2026-09-22 接上）**：`[predict] enabled` 且有密钥就 `engine.set_predictor`，
+  失败只 `warn` 退回不联想（照 Windows 的 `attach_cloud`）。**结果是非阻塞取的**
+  （提交立刻返回，答案得回来取），所以壳要轮询——但**只在真有请求在飞时**跑那个 50ms 的
+  心跳（掩码里的 `flags::PREDICTING`），拿到结果或等够 12 秒就停。**没在等结果时一个定时器都不跑**。
+  - **防抖不用壳操心**：它在 `qingjian-predict` 的 worker 里（`recv_timeout(debounce)`，
+    缺省 300ms，只把最后一个真发出去），壳每次敲键都提交。
+  - **两个只有真跑起来才现形的坑**（都 2026-09-22 在模拟器上抓的）：
+    ① `poll_prediction` 在「还没回来」时**也得返回 `flags::PREDICTING`**——返回 0 的话壳
+    以为不用再问了，结果永远收不到；② `relayout()` **不标脏**（标脏的是 `refresh()`），
+    改完候选不调 `refresh` 界面就纹丝不动。
+  - **隐私那道闸**：壳按 `EditorInfo.inputType` 判密码框 → `setPrivate` → 引擎的
+    `Engine::set_private` 挡住**一切**外发（学习、输入日志、云联想都是）。进密码框时
+    **已经发起的那一轮也作废**（`Session::set_private` 顺手清掉整句与云端词）。
+  - **上下文**：`onStartInputView` 里取光标前后各 256 字符报上来，引擎按
+    `lookback / lookahead` 再裁。Windows 那边传 `None`，安卓像 macOS 一样给。
 - **位图过 JNI**：`surface::encode` 出「8 字节头（宽高，各 u32 大端）+ 预乘 RGBA」，Kotlin 侧 `Bitmap.createBitmap(w, h, ARGB_8888)` + `copyPixelsFromBuffer` 原样吃下——
   `ARGB_8888` 的**内存布局**就是预乘 RGBA（`ARGB` 只是 `getPixel` 那套打包的说法），既不换通道也不重新预乘。这条当初用一次性探针在本机与设备上实测确认过（探针已删，结论留着），别靠记忆。
   **不要用 `setPixels(int[])`**，那条路径假定非预乘。

@@ -66,6 +66,7 @@ pub fn on_bar(id: BarHitId) -> Act {
         BarHitId::PageNext => Act::Page(1),
         BarHitId::Clear => Act::Clear,
         BarHitId::Tools => Act::ToggleTools,
+        BarHitId::Sentence => Act::AcceptPrediction,
     }
 }
 

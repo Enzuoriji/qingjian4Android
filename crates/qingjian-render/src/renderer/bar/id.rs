@@ -28,4 +28,10 @@ pub enum BarHitId {
     ///
     /// [`Renderer::bar_height`]: super::Renderer::bar_height
     Tools,
+
+    /// 最下面那行**右边**那段：云联想给的整句补全（`suoyiwoxiangq` → 所以我想去吃饭）。
+    ///
+    /// 点它整句上屏——电脑上这一步是 Tab 键，安卓没有 Tab，所以给个靶子。
+    /// 左半边那行仍是译文（[`Self::Translation`]），两边各是各的靶子。
+    Sentence,
 }

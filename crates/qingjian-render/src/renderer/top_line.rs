@@ -29,6 +29,10 @@ impl Renderer {
     }
 
     /// 返回占用高度。`left` 是内容区左边。
+    ///
+    /// `with_trailing` = 画不画右侧那截（整句补全 / 临时状态）。
+    /// **候选窗画、候选条不画**——候选条把那一截挪到了最下面那行（见 `bar` 渲染器）：
+    /// 拼音一长就会跟它挤在一起，而下面那行本来就有地方。
     pub(super) fn draw_top_line(
         &mut self,
         canvas: &mut Canvas,
@@ -36,21 +40,27 @@ impl Renderer {
         m: &Metrics,
         left: f32,
         y: f32,
+        with_trailing: bool,
     ) -> f32 {
         if !frame.has_top_line() {
             return 0.0;
         }
+        let trailing = if with_trailing {
+            frame.trailing()
+        } else {
+            None
+        };
         let line_height = m.px(m.theme.annotation_font.line_height);
         let top = y + m.row_padding();
         let mut x = left + m.padding();
         if let Some(preedit) = &frame.preedit {
             x += self.draw_preedit(canvas, m, preedit, x, top, line_height);
-            if frame.trailing().is_some() {
+            if trailing.is_some() {
                 x += m.px(SENTENCE_GAP);
             }
         }
         // 整句补全：云朵 + 句子，颜色与本地候选区分；临时状态灰字、不带云朵
-        if let Some((text, cloud)) = frame.trailing() {
+        if let Some((text, cloud)) = trailing {
             let color = if cloud {
                 x += self.draw_cloud(canvas, m, x, top, line_height);
                 m.theme.colors.cloud

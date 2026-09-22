@@ -169,7 +169,7 @@ impl Renderer {
             theme.colors.background,
         );
         let mut y = margin + metrics.padding();
-        y += self.draw_top_line(&mut canvas, frame, &metrics, margin, y);
+        y += self.draw_top_line(&mut canvas, frame, &metrics, margin, y, true);
         match layout {
             Layout::Vertical => {
                 self.draw_vertical(&mut canvas, frame, &metrics, margin, y, content_width);

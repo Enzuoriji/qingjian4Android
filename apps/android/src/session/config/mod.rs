@@ -9,11 +9,33 @@ mod state;
 
 pub(super) use state::ConfigState;
 
-use qingjian_core::{Engine, Language, NoTranslator};
+use qingjian_core::{Engine, Language, NoPredictor, NoTranslator};
 use qingjian_platform::{Config, DictionariesConfig, GeneralConfig, extra_dictionaries};
+use qingjian_predict::{CloudPredictor, PredictConfig};
 use qingjian_translate::Glossary;
 
 use super::{DICTS_DIR, Session};
+
+/// 按配置把云联想接上（关着就是摘掉）。
+///
+/// **任何一步失败都只记日志、退回不联想**：缺密钥、地址写错、模型名不对，
+/// 都不该把打字拦下来——与随包资源那几处同一个取舍（「输入优先于一切附加功能」）。
+/// 与桌面两壳的 `attach_cloud` 是同一套（`apps/windows/server/src/dispatch/reload/mod.rs`）。
+pub(super) fn attach_cloud(engine: &mut Engine, predict: &PredictConfig) {
+    if !predict.enabled {
+        engine.set_predictor(Box::new(NoPredictor));
+        return;
+    }
+    match CloudPredictor::new(predict) {
+        Ok(predictor) => {
+            engine.set_predictor(Box::new(predictor));
+        }
+        Err(error) => {
+            tracing::warn!(%error, "云联想没接上，只用本地候选");
+            engine.set_predictor(Box::new(NoPredictor));
+        }
+    }
+}
 
 /// 把配置里那几样**能当场推给引擎、代价 O(1)** 的推过去。
 ///
@@ -90,6 +112,12 @@ impl Session {
         // 领域词库：重读一次要 mmap 好几本 `.qj`，同样只在开关真变了才做
         if config.dictionaries != *self.config.dictionaries() {
             self.reload_dictionaries(&config.dictionaries);
+        }
+
+        // 云联想：接一次要起一个线程，同样只在配置真变了才重建
+        if config.predict != *self.config.predict() {
+            attach_cloud(&mut self.engine, &config.predict);
+            self.config.set_predict(config.predict.clone());
         }
 
         push_to_engine(&mut self.engine, &config);

@@ -467,6 +467,52 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_takeSettings(
     }
 }
 
+/// 报上光标前后的文本（云联想拿它当上下文）。壳在键盘弹出来时问一次应用的输入框。
+///
+/// 太长不要紧，引擎按 `[predict] lookback / lookahead` 自己裁。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_setSurrounding(
+    mut env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+    before: JString,
+    after: JString,
+) {
+    let (Some(before), Some(after)) = (string_arg(&mut env, &before), string_arg(&mut env, &after))
+    else {
+        return;
+    };
+    if let Some(session) = unsafe { from_handle(handle) } {
+        let _ = catch_unwind(AssertUnwindSafe(|| session.set_surrounding(before, after)));
+    }
+}
+
+/// 私密输入框（密码框）里：不学、不记、**不发云端**。壳按 `EditorInfo.inputType` 判。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_setPrivate(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+    private: jboolean,
+) {
+    if let Some(session) = unsafe { from_handle(handle) } {
+        let _ = catch_unwind(AssertUnwindSafe(|| session.set_private(private != 0)));
+    }
+}
+
+/// 云联想有结果回来了没有。壳在掩码带 `PREDICTING` 时按拍子问，返回同一种位掩码。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_pollPrediction(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jint {
+    match unsafe { from_handle(handle) } {
+        Some(session) => catch_unwind(AssertUnwindSafe(|| session.poll_prediction())).unwrap_or(0),
+        None => 0,
+    }
+}
+
 /// 配置文件变了没有；变了就重读并应用，返回位掩码（没变是 0）。
 ///
 /// 壳**只在键盘弹出来时调**（`onStartInputView`）：用户从设置页回来时键盘必然重弹一次，
@@ -623,6 +669,36 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_configSetArray(
     }))
     .unwrap_or_else(|_| "写入失败".to_owned());
     into_jstring(&env, &error)
+}
+
+/// 开始测试云服务连接：**空串表示开始了**，非空是没能开始的原因（比如没填密钥）。
+///
+/// 与上面那些配置读写一样**不吃会话句柄**——设置页跟会话是两回事。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_cloudTestStart(
+    mut env: JNIEnv,
+    _this: JObject,
+    data_dir: JString,
+) -> jstring {
+    let Some(dir) = string_arg(&mut env, &data_dir) else {
+        return std::ptr::null_mut();
+    };
+    let error = catch_unwind(AssertUnwindSafe(|| {
+        crate::settings::cloud_test_start(Path::new(&dir))
+    }))
+    .unwrap_or_else(|_| "测试没能开始".to_owned());
+    into_jstring(&env, &error)
+}
+
+/// 取测试连接的结果，JSON：`{"done":false}` 还没回来，`{"done":true,"ok":…,"text":…}` 是结果。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_cloudTestPoll(
+    env: JNIEnv,
+    _this: JObject,
+) -> jstring {
+    let text = catch_unwind(AssertUnwindSafe(crate::settings::cloud_test_poll))
+        .unwrap_or_else(|_| r#"{"done":false}"#.to_owned());
+    into_jstring(&env, &text)
 }
 
 /// 列出随包的领域词库，返回 JSON 数组（每项 `{"stem":…,"name":…}`，名字是词库文件里那个中文名）。

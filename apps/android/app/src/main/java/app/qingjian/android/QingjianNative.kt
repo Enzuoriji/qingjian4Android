@@ -159,6 +159,27 @@ object QingjianNative {
     external fun takeSettings(handle: Long): Boolean
 
     /**
+     * 报上光标前后的文本：**云联想拿它当上下文**（这段会发到用户自己填的那个接口）。
+     *
+     * 太长不要紧，Rust 那边按 `[predict] lookback / lookahead` 自己裁。
+     */
+    external fun setSurrounding(handle: Long, before: String, after: String)
+
+    /**
+     * 这是不是个私密输入框（密码框）：是的话**不学、不记、不发云端**。
+     *
+     * 判定在壳这边（`EditorInfo.inputType`），引擎那边另有一道闸。
+     * 每次 `onStartInputView` 都要报一次——换了个输入框就得重新判。
+     */
+    external fun setPrivate(handle: Long, private: Boolean)
+
+    /**
+     * 云联想有结果回来了没有；返回与 [touch] 同一种位掩码。
+     * 掩码里还有 [FLAG_PREDICTING] 就接着问下一拍。
+     */
+    external fun pollPrediction(handle: Long): Int
+
+    /**
      * 配置文件变了没有；变了就重读并应用。返回与 [touch] 同一种位掩码，**没变是 0**。
      *
      * **只在键盘弹出来时调一次**（[QingjianImeService.onStartInputView]）：用户从设置页回来时
@@ -193,6 +214,19 @@ object QingjianNative {
      * 返回空串表示成功。
      */
     external fun configSetArray(dataDir: String, section: String, key: String, values: String): String?
+
+    /**
+     * 开始测试云服务连接：**空串表示开始了**，非空是没能开始的原因（比如没填密钥）。
+     *
+     * 读的是配置文件里当前那份——设置页改一项写一项，所以那已经是最新的了。
+     */
+    external fun cloudTestStart(dataDir: String): String?
+
+    /**
+     * 取测试连接的结果，JSON：`{"done":false}` 还没回来，
+     * `{"done":true,"ok":…,"text":…}` 是结果（`text` 直接显示给用户）。
+     */
+    external fun cloudTestPoll(): String?
 
     /**
      * 列出随包的领域词库，JSON 数组：`[{"stem":"medicine","name":"医学"}, …]`。
@@ -233,6 +267,13 @@ object QingjianNative {
 
     /** 用户点了工具页的「设置」：壳把键盘收起来、打开设置页（用 [takeSettings] 取走这笔账）。 */
     const val FLAG_SETTINGS = 32
+
+    /**
+     * 云联想有请求在飞：壳按拍子问 [pollPrediction]（**只在真有请求时才有这一位**）。
+     *
+     * 结果是**非阻塞取的**，得有人一直问；没在飞时一个定时器都不跑。
+     */
+    const val FLAG_PREDICTING = 64
 
     init {
         System.loadLibrary("qingjian_android")

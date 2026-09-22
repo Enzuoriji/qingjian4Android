@@ -5,6 +5,10 @@
          部分 OEM 的系统也会据此决定给不给马达，声明上不亏。 -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- 云联想：把光标附近的文本发到**用户自己填的那个接口**（缺省关着）。
+         数据从本机直连用户指定的服务商，不经过青简；密码框里一个字节都不发。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application android:label="@string/app_name">
 
         <service

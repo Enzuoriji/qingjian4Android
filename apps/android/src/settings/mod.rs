@@ -8,15 +8,71 @@
 //! 不必引任何第三方库。
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use qingjian_dictionary::Dictionary;
 use qingjian_platform::{Config, ConfigError, extra_dictionaries};
+use qingjian_predict::ConnectionTest;
 use serde_json::json;
 
 use crate::session::DICTS_DIR;
 
 #[cfg(test)]
 mod tests;
+
+/// 正在进行的那次「测试连接」。同一时刻只留一次——再点一次就是重新开始。
+///
+/// 放静态量而不是会话里：设置页**不碰会话句柄**（那个指针随时可能失效），
+/// 探活这件事跟输入法会话本来也没关系。
+static CLOUD_TEST: Mutex<Option<ConnectionTest>> = Mutex::new(None);
+
+/// 开始测试云服务连接：**空串表示开始了**，非空是没能开始的原因（比如没填密钥）。
+///
+/// 读的是**文件里当前那份**配置——用户可能刚在同一个页面上填完密钥，
+/// 而这一页没有「保存」按钮，改一项就写一项，所以文件里那份就是最新的。
+pub fn cloud_test_start(data_dir: &Path) -> String {
+    let config = match Config::load(&config_path(data_dir)) {
+        Ok(config) => config,
+        Err(error) => return error.to_string(),
+    };
+    match ConnectionTest::start(&config.predict) {
+        Ok(test) => {
+            *lock() = Some(test);
+            String::new()
+        }
+        Err(error) => error.to_string(),
+    }
+}
+
+/// 取测试结果，以 JSON 给壳：`{"done":false}` 是还没回来，`{"done":true,"ok":…,"text":…}` 是结果。
+///
+/// 取过一次就把这次测试丢掉——壳那边问到了就不必再问。
+pub fn cloud_test_poll() -> String {
+    let mut guard = lock();
+    let Some(report) = guard.as_ref().and_then(ConnectionTest::poll) else {
+        return json!({ "done": false }).to_string();
+    };
+    *guard = None;
+    match report {
+        Ok(report) => json!({
+            "done": true,
+            "ok": true,
+            "text": format!(
+                "连接成功：{} 在 {} 毫秒内回话",
+                report.model,
+                report.elapsed.as_millis()
+            ),
+        })
+        .to_string(),
+        Err(error) => json!({ "done": true, "ok": false, "text": error.to_string() }).to_string(),
+    }
+}
+
+/// 拿那把锁。**中毒了也接着用**：里面就是个「有没有在测」的状态，
+/// 上一次测试 panic 了不该让设置页从此点不动。
+fn lock() -> std::sync::MutexGuard<'static, Option<ConnectionTest>> {
+    CLOUD_TEST.lock().unwrap_or_else(|error| error.into_inner())
+}
 
 /// 配置文件在数据目录里的名字。
 pub const CONFIG_FILE: &str = "config.toml";

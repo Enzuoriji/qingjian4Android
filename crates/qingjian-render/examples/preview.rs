@@ -227,7 +227,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 候选条（安卓）：空态与一页候选。宽度按手机竖屏，高度是主题定死的
     for (theme_name, theme) in [("light", Theme::light()), ("dark", Theme::dark())] {
-        for (state_name, bar_frame) in [("empty", Frame::default()), ("page", bar_page())] {
+        for (state_name, bar_frame) in [
+            ("empty", Frame::default()),
+            ("page", bar_page()),
+            ("sentence", bar_with_sentence()),
+        ] {
             let started = Instant::now();
             let rendered =
                 renderer.render_bar(&bar_frame, BAR_WIDTH, &theme, args.scale, 0.0, true)?;
@@ -327,6 +331,13 @@ fn bar_page() -> Frame {
     let mut frame = nihao();
     frame.rows.truncate(5);
     frame.footer = Some("1/2".to_owned());
+    frame
+}
+
+/// 候选条 + 云联想给的整句补全：最下面那行**左边译文、右边青色的整句**（安卓的排版）。
+fn bar_with_sentence() -> Frame {
+    let mut frame = bar_page();
+    frame.sentence = Some("你好，很高兴认识你！".to_owned());
     frame
 }
 

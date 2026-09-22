@@ -2635,6 +2635,7 @@ dependencies = [
  "qingjian-learning",
  "qingjian-lm",
  "qingjian-platform",
+ "qingjian-predict",
  "qingjian-render",
  "qingjian-translate",
  "serde_json",

@@ -11,8 +11,12 @@ mod tests;
 
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, Language, MarkedKind};
+use qingjian_core::{
+    Candidate, CandidateKind, CandidateLayout, Cell, CloudWord, EmojiTable, Engine, Language,
+    MarkedKind, SurroundingText,
+};
 use qingjian_dictionary::{Dictionary, WordList};
 use qingjian_learning::{CLIPBOARD_LIMIT, EMOJI_RECENT_LIMIT, FrequencyLearner, Recent};
 use qingjian_lm::BigramModel;
@@ -28,7 +32,7 @@ use crate::error::SessionError;
 use crate::keyboard::{EmojiView, Fired, Keyboard};
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
-use config::{ConfigState, configured_language, push_to_engine};
+use config::{ConfigState, attach_cloud, configured_language, push_to_engine};
 use fling::Fling;
 
 /// 算「滚到第几条起」时给除法的一点补偿（单位是「格」，也就是一格的万分之一）。
@@ -38,6 +42,12 @@ const GRID_EPSILON: f32 = 1e-4;
 
 /// 随包资源目录里的 emoji 字体名（`assets/emoji/README.md` 写了为什么要带它）。
 const EMOJI_FONT: &str = "NotoColorEmoji.ttf";
+
+/// 等云联想结果的上限。
+///
+/// 过了就别等了——**不预留、不画占位**（`docs/design/candidate-ui.md` 承诺过），
+/// 结果永远不来也只是这一轮没有变化。与 mac 的 `PredictMonitor::MAX_WAIT` 同一个量级。
+const PREDICTION_WAIT: Duration = Duration::from_secs(12);
 
 /// 候选条最多铺多少格。
 ///
@@ -119,6 +129,12 @@ pub mod flags {
     /// 与 [`Self::FLING`] 一样是「下一步该做什么」——开会话碰不到安卓的窗口系统，
     /// 只能这么告诉壳。
     pub const SETTINGS: i32 = 32;
+
+    /// 云联想有请求在飞：壳按拍子问 `poll_prediction` 取结果。
+    ///
+    /// 与 [`Self::FLING`] 一样是「下一步该做什么」——结果是**非阻塞取的**，得有人一直问。
+    /// **只在真有请求在飞时才有这一位**：平时一个定时器都不跑（E7 定的那条）。
+    pub const PREDICTING: i32 = 64;
 }
 
 /// 表情面板的数据：一张表就够两种（emoji 与颜文字）。
@@ -330,7 +346,24 @@ pub struct Session {
     /// 它不只是「画不画」：候选条的高度按它加一行（[`Self::bar_height`]），
     /// 而高度一变上面的应用内容就被顶——所以**必须是会话级的**，
     /// 不能看「这一屏有没有译文」临时决定（滚一格就跳一下）。
+    /// 与「那行画不画」的区别见 [`Self::footer`]。
     annotations: bool,
+
+    /// 云联想给的**整句补全**，画在候选条最下面那行右边。没结果时是 `None`。
+    sentence: Option<String>,
+
+    /// 云联想给的**词**，跟着本地候选一起排（见 [`CandidateLayout`]）。
+    cloud_words: Vec<Candidate>,
+
+    /// 壳报上来的光标前后文本。云联想拿它当上下文——联想准不准全看这个。
+    surrounding: Option<SurroundingText>,
+
+    /// 有请求在飞吗。壳照它决定要不要跑轮询心跳（见 [`Self::poll_prediction`]）。
+    predicting: bool,
+
+    /// 这一轮联想是什么时候发出去的。等太久了就别等了——`predict` 那边有超时，
+    /// 但壳这边的「还要不要接着问」也得有个头，不然心跳停不下来。
+    predicted_at: Option<Instant>,
 
     /// 键盘现在在哪一页。切页只换布局，键盘本身不高不矮。
     panel: Panel,
@@ -338,7 +371,13 @@ pub struct Session {
     /// 拼音行。没在组句时为 `None`。
     preedit: Option<Preedit>,
 
-    /// 引擎给的候选，**整份列表**。
+    /// 引擎给的本地候选，**整份列表**。云端词到了不算在它里面。
+    ///
+    /// 与 [`Self::candidates`] 分开是因为云端词会**反复重排**（每来一批结果就合一次），
+    /// 而每次都得从「纯本地」那份重新算——不然上一轮的云端词会被当成本地的，越合越多。
+    local_candidates: Vec<Candidate>,
+
+    /// 本地候选 + 云端词，按 [`CandidateLayout`] 排好的样子。**真正画出去的**是它。
     candidates: Vec<Candidate>,
 
     /// 整条候选铺开后的位置：每格在哪、多长、一共几屏。
@@ -488,6 +527,10 @@ impl Session {
         // 配置里那几样当场就能设的（模糊音、繁体、双拼、全角标点…）**建会话时就得推过去**：
         // 只留给 `poll_config` 的话，启动读到的那份永远补不上——文件没变它就返回 0，不会 apply。
         push_to_engine(&mut engine, config.config());
+        // 云联想：配置开着、密钥也拿得到才接得上；接不上只用本地候选（失败只记日志）
+        let predict = config.config().predict.clone();
+        attach_cloud(&mut engine, &predict);
+        config.set_predict(predict);
         if let Some(table) = bundle.and_then(load_emoji_tables) {
             tracing::info!(words = table.len(), "emoji 表已加载");
             engine = engine.with_emoji(table);
@@ -638,8 +681,14 @@ impl Session {
             english_candidates,
             english_words,
             annotations,
+            sentence: None,
+            cloud_words: Vec::new(),
+            surrounding: None,
+            predicting: false,
+            predicted_at: None,
             panel: Panel::Letters,
             preedit: None,
+            local_candidates: Vec::new(),
             candidates: Vec::new(),
             strip: BarStrip::default(),
             scroll: 0.0,
@@ -782,7 +831,18 @@ impl Session {
     ///
     /// 壳按两张位图的高度自己量视图，所以这个值只要跟着 [`Self::bar_surface`] 一致就行。
     pub fn bar_height(&self) -> f32 {
-        Renderer::bar_height(&self.theme(), self.composing(), self.annotations)
+        Renderer::bar_height(&self.theme(), self.composing(), self.bottom_line())
+    }
+
+    /// 候选条**最下面那行**要不要留：挂了释义表、或者云联想开着。
+    ///
+    /// 那一行左边画译文、右边画云联想给的整句补全，两样都「可能没有」——
+    /// 但高度**只看这两个会话级开关**，不看这一屏有没有东西可画
+    /// （理由见 [`Self::annotations`]）。
+    ///
+    /// 名字不叫 `footer`：那个词在这份代码里已经是「第几页」（[`Frame::footer`]）。
+    fn bottom_line(&self) -> bool {
+        self.annotations || self.engine.prediction_enabled()
     }
 
     /// 在组句吗——拼音缓冲区里有没有东西。
@@ -1168,6 +1228,9 @@ impl Session {
         if self.pending_settings {
             mask |= flags::SETTINGS;
         }
+        if self.predicting {
+            mask |= flags::PREDICTING;
+        }
         mask
     }
 
@@ -1271,6 +1334,7 @@ impl Session {
             // 会话开不了 Activity，只记一笔；掩码里带上 SETTINGS，壳那边去开
             Act::OpenSettings => self.pending_settings = true,
             Act::Nothing => {}
+            Act::AcceptPrediction => self.accept_prediction(),
             Act::PasteClipboard(index) => self.paste_clipboard(index),
             Act::DeleteClipboard(index) => self.delete_clipboard(index),
             Act::ClearClipboard => self.clear_clipboard(),
@@ -1349,6 +1413,135 @@ impl Session {
         self.recompose();
     }
 
+    /// 本地候选 + 已经拿到的云端词，按 [`CandidateLayout`] 排好。
+    ///
+    /// 云端词占**第一页末尾那几格**（配置 `[predict] slots`），前面的本地候选不动——
+    /// 与桌面两壳同一套排法。安卓候选条不分页，但「插在第 7、8 个位置」这个语义照样成立。
+    fn merge_cloud(&self) -> Vec<Candidate> {
+        if self.cloud_words.is_empty() {
+            return self.local_candidates.clone();
+        }
+        let config = self.config.config();
+        let mut layout = CandidateLayout::new(
+            self.local_candidates.clone(),
+            config.general.page_size(),
+            config.predict.slots,
+        );
+        layout.set_cloud(self.cloud_words.clone());
+        layout
+            .cells()
+            .into_iter()
+            .filter_map(|cell| match cell {
+                Cell::Local(candidate) | Cell::Cloud(candidate) => Some(candidate.clone()),
+                Cell::Empty => None,
+            })
+            .collect()
+    }
+
+    /// 缓冲变了就问问云端（接着了才问）。
+    ///
+    /// **每次都发**：防抖在 `qingjian-predict` 的 worker 里做（`debounce_ms`，缺省 300ms），
+    /// 它只把最后一个真发出去——壳不用自己算「停键多久了」。
+    fn request_prediction(&mut self) {
+        if !self.engine.prediction_enabled() {
+            return;
+        }
+        let surrounding = self.surrounding.clone();
+        match self
+            .engine
+            .request_prediction(surrounding, &self.local_candidates)
+        {
+            Some(_) => {
+                self.predicting = true;
+                self.predicted_at = Some(Instant::now());
+            }
+            // 引擎自己判定不发（私密输入、拼音不像话、字母太少）：这边就别留着心跳了
+            None => self.stop_predicting(),
+        }
+    }
+
+    /// 看云联想有没有结果回来。**壳在掩码带 [`flags::PREDICTING`] 时按拍子问**。
+    ///
+    /// 拿到结果就更新整句与云端词、重排候选；还没到、也没等太久就返回 0（壳那边什么都不做）。
+    /// 等超过 [`PREDICTION_WAIT`] 就收摊——**不预留、不画占位**，这一轮就是没有变化。
+    pub fn poll_prediction(&mut self) -> i32 {
+        if !self.predicting {
+            return 0;
+        }
+        let Some(prediction) = self.engine.poll_prediction() else {
+            if self
+                .predicted_at
+                .is_some_and(|at| at.elapsed() >= PREDICTION_WAIT)
+            {
+                tracing::debug!("云联想等太久了，这一轮不等了");
+                self.stop_predicting();
+                return 0;
+            }
+            // **还没回来也得留着这一位**：壳看它就是「接着问下一拍」。
+            // 返回 0 的话壳以为不用再问了，结果永远收不到（2026-09-22 在模拟器上抓到过：
+            // 日志是「轮询了，还没有 → 联想完成」，中间没有第二次轮询）。
+            return flags::PREDICTING;
+        };
+        self.stop_predicting();
+        self.sentence = prediction.sentence;
+        self.cloud_words = prediction
+            .words
+            .into_iter()
+            .map(CloudWord::into_candidate)
+            .collect();
+        // 云端词到了：重排一次候选。**不重新问云**——刚拿到的就是这一串的答案。
+        // `refresh` 不能省：它才是标脏的那个（`relayout` 只重铺带子），
+        // 少了它壳收到 0、候选条上什么都不会变（2026-09-22 在模拟器上抓到过）。
+        self.candidates = self.merge_cloud();
+        self.relayout();
+        self.refresh();
+        self.mask()
+    }
+
+    /// 收摊：不再等这一轮的结果。
+    fn stop_predicting(&mut self) {
+        self.predicting = false;
+        self.predicted_at = None;
+    }
+
+    /// 接受云联想给的整句补全：上屏它，并把这一轮的联想收掉。
+    ///
+    /// 上屏的文本由引擎算（它还要记个人 n-gram、按拼音消耗缓冲区），壳只管交出去。
+    /// 电脑上这一步是 Tab 键，安卓是点候选条最下面那行右边那段（[`BarHitId::Sentence`]）。
+    fn accept_prediction(&mut self) {
+        let Some(sentence) = self.sentence.take() else {
+            return;
+        };
+        self.stop_predicting();
+        let text = self.engine.accept_prediction(&sentence);
+        // `commit_text` 会顺手重查一遍（缓冲区变了），整句与云端词跟着清掉
+        self.commit_text(text);
+    }
+
+    /// 私密输入框（密码框）里：**不学、不记、不发云端**（引擎自己有一道闸）。
+    ///
+    /// 壳在 `onStartInputView` 里按 `EditorInfo.inputType` 判出来报给它。
+    /// 进密码框时这一轮的联想一并作废——**已经发出去的那次也当没发生**。
+    pub fn set_private(&mut self, private: bool) {
+        self.engine.set_private(private);
+        if !private {
+            return;
+        }
+        self.stop_predicting();
+        self.sentence = None;
+        self.cloud_words.clear();
+        // 重排一次：云端词从候选里撤掉（`request_prediction` 会因为私密而不再发）
+        self.recompose();
+    }
+
+    /// 壳报上来的光标前后文本。**云联想拿它当上下文**——联得准不准全看这个。
+    ///
+    /// 壳在 `onStartInputView` 时问一次应用的输入框（`getTextBeforeCursor` / `AfterCursor`）。
+    /// 太长不要紧，引擎会按 `[predict] lookback / lookahead` 自己裁。
+    pub fn set_surrounding(&mut self, before: String, after: String) {
+        self.surrounding = Some(SurroundingText { before, after });
+    }
+
     /// 缓冲变了：重查候选，带子从头铺开、也从头上看起。
     fn recompose(&mut self) {
         self.scroll = 0.0;
@@ -1356,7 +1549,12 @@ impl Session {
         self.fling = None;
         self.scrolled = None;
         self.candidates.clear();
+        self.local_candidates.clear();
         self.preedit = None;
+        // 没在组句了：整句补全与云端词都收掉——它们只对「正在打的这一串」有意义
+        self.sentence = None;
+        self.cloud_words.clear();
+        self.stop_predicting();
         if !self.engine.composition().is_empty() {
             match self.engine.query() {
                 Ok(mut query) => {
@@ -1371,7 +1569,11 @@ impl Session {
                     if self.annotations {
                         self.engine.annotate(&mut query.candidates);
                     }
-                    self.candidates = query.candidates.items;
+                    self.local_candidates = query.candidates.items;
+                    self.candidates = self.merge_cloud();
+                    // 缓冲变了就再问一次云。**每次都发**——防抖在 `qingjian-predict` 的
+                    // worker 里做（`debounce_ms`，缺省 300ms），它只把最后一个真发出去。
+                    self.request_prediction();
                 }
                 Err(_) => {
                     // 还拼不成拼音：拼音行照画，只是没有候选
@@ -1426,7 +1628,8 @@ impl Session {
             highlighted: self.highlighted_index().map(|index| index - visible.start),
             footer: self.footer(screens),
             rows,
-            sentence: None,
+            // 云联想给的整句补全（画在候选条最下面那行右边）；没结果时是 None
+            sentence: self.sentence.clone(),
             status: None,
         }
     }

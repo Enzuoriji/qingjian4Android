@@ -189,6 +189,20 @@
             android:paddingTop="8dp"
             android:text="@string/settings_cloud_sentence" />
 
+        <Button
+            android:id="@+id/predict_test"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/settings_cloud_test" />
+
+        <!-- 测试连接的结果（「连接成功：…」或者失败原因） -->
+        <TextView
+            android:id="@+id/predict_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="13sp" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
