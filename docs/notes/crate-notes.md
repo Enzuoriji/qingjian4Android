@@ -563,6 +563,19 @@ K8 的「长按候选 = 删词」当年删不动正是因为这个（那个功�
     **已经发起的那一轮也作废**（`Session::set_private` 顺手清掉整句与云端词）。
   - **上下文**：`onStartInputView` 里取光标前后各 256 字符报上来，引擎按
     `lookback / lookahead` 再裁。Windows 那边传 `None`，安卓像 macOS 一样给。
+  - **安卓上跑网络的几条硬规矩**（2026-09-22 在真机上一条条撞出来的，都是「电脑上好好的、
+    手机上不行」）：
+    ① **`http://` 缺省被系统拦**（Android 9 起），而电脑上那两个壳没有这条限制——同一个
+       地址在电脑上连通、到手机上就失败，报错还看不出是它拦的。放行写在
+       `app/src/main/res/xml/network_security_config.xml`。
+    ② **别用 reqwest 缺省的 rustls 后端**：它要 `rustls-platform-verifier`，而那个在安卓上
+       **必须先拿系统 `Context` 初始化**，不初始化就在握手前 panic
+       （`expect rustls-platform-verifier to be initialized`）。那套初始化要在 Gradle 里加
+       maven 仓库 + Kotlin 组件，对输入法太重——现在自己在 `chat_client::client_builder`
+       里铺 `webpki-roots` 的静态根证书（`#[cfg(target_os = "android")]`，桌面不动）。
+    ③ **Rust 的 panic 消息在安卓上会凭空消失**（stderr 没接到 logcat），所以跨线程的活儿
+       都要拦一道 `catch_unwind` 把话捞出来——见 `qingjian-predict/src/panic.rs`。
+       同类教训：`try_recv().ok()` 把「通道断了」和「还没到」混成一回事，界面就会一直转圈。
 - **位图过 JNI**：`surface::encode` 出「8 字节头（宽高，各 u32 大端）+ 预乘 RGBA」，Kotlin 侧 `Bitmap.createBitmap(w, h, ARGB_8888)` + `copyPixelsFromBuffer` 原样吃下——
   `ARGB_8888` 的**内存布局**就是预乘 RGBA（`ARGB` 只是 `getPixel` 那套打包的说法），既不换通道也不重新预乘。这条当初用一次性探针在本机与设备上实测确认过（探针已删，结论留着），别靠记忆。
   **不要用 `setPixels(int[])`**，那条路径假定非预乘。
