@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  云服务允许明文 HTTP。
+
+  地址是**用户自己填的**，而自建服务（局域网里的 one-api、Ollama、各种自托管的 OpenAI
+  兼容网关）常常只监听 http。Android 9 起缺省禁止明文，电脑上那两个壳却没有这条限制
+  ——不放开的话，同一个地址在电脑上连通、到手机上就「测试连接失败」，而且报错信息
+  看不出是这条规矩拦的（2026-09-22 用户就是这么撞上的）。
+
+  所以这里放行：**用户填 http:// 就是他自己的选择**，我们不替他拦，但设置页里写明了
+  「光标附近的一小段文字会直接发给你填的那个服务商」——他看得见自己在把什么发到哪儿。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
