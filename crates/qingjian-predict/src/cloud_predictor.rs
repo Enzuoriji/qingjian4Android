@@ -38,8 +38,14 @@ impl CloudPredictor {
         std::thread::Builder::new()
             .name("qingjian-predict".to_owned())
             .spawn(move || {
-                if let Err(error) = worker.run() {
-                    tracing::error!(%error, "联想线程退出");
+                // 与连通性测试那边一样：崩了也要留句话（安卓上 stderr 没接到 logcat）
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker.run())) {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => tracing::error!(%error, "联想线程退出"),
+                    Err(payload) => {
+                        let message = crate::panic::message(&*payload);
+                        tracing::error!(%message, "联想线程崩了");
+                    }
                 }
             })?;
         tracing::info!(

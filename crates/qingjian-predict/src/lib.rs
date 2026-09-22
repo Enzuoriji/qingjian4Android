@@ -12,6 +12,7 @@ mod config;
 mod connection;
 mod error;
 mod gloss;
+mod panic;
 mod prompt;
 mod worker;
 

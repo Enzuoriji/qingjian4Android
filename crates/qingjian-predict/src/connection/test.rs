@@ -36,7 +36,15 @@ impl ConnectionTest {
         std::thread::Builder::new()
             .name("qingjian-connection-test".to_owned())
             .spawn(move || {
-                let outcome = run(&client, model);
+                // 崩了也得把话带回来：线程 panic 之后通道会断开，调用方只知道「没结果」；
+                // 而安卓上 stderr 没接到 logcat，panic 消息本来会凭空消失（见 `crate::panic`）
+                let outcome =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&client, model)))
+                        .unwrap_or_else(|payload| {
+                            let message = crate::panic::message(&*payload);
+                            tracing::error!(%message, "云服务连通性测试线程崩了");
+                            Err(PredictError::WorkerPanicked(message))
+                        });
                 match &outcome {
                     Ok(report) => tracing::info!(
                         model = %report.model,

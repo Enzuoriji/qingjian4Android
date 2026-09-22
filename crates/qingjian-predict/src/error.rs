@@ -16,6 +16,13 @@ pub enum PredictError {
     #[error("the request worker exited before answering")]
     WorkerGone,
 
+    /// 后台线程崩了，`String` 是 panic 的那句话。
+    ///
+    /// 与 [`Self::WorkerGone`] 分开是因为**这条能说清原因**——线程里拦了一道
+    /// `catch_unwind` 把 panic 消息捞出来（安卓上 stderr 没接到 logcat，不捞就没了）。
+    #[error("the request worker panicked: {0}")]
+    WorkerPanicked(String),
+
     #[error("API request failed: {0}")]
     Api(#[from] async_openai::error::OpenAIError),
 

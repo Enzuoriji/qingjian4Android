@@ -81,6 +81,7 @@ fn describe(error: &PredictError) -> String {
         PredictError::EmptyReply => "接口通了，但没返回内容——检查模型名对不对".to_owned(),
         PredictError::Runtime(error) => format!("起不了后台线程：{error}"),
         PredictError::WorkerGone => "请求线程意外退出了，再点一次试试".to_owned(),
+        PredictError::WorkerPanicked(message) => format!("请求线程崩了：{message}"),
         PredictError::Api(error) => format!("请求失败：{error}"),
     }
 }
