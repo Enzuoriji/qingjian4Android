@@ -125,6 +125,17 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
   （挂了释义表就为真），两处共用同一个 `composing_height`，天然一致。
 - **只有安卓壳与预览脚本吃这个改动**：`render_bar` / `bar_height` 的调用方只有
   `apps/android/src/session/mod.rs` 与 `examples/preview.rs`——macOS / Windows 各有各的画法。
+- **那行小字可点**（2026-09-22）：点它上屏**译文本身**而不是候选词。
+  `BarHitId::Translation(sense)` 带着**第几条**，**一行两条译文时点哪条上屏哪条**——
+  义项边界认的是那条 ` · ` 分隔符（三个壳拼 annotation 时都这么隔），
+  分隔符与词性那些 Faint 片段不归任何一条、点它们不响应。
+  每条的范围**按它真画出来的那截文本**给（左右各放 `ANNOTATION_HIT_PAD` 4 点；
+  从前的 8 点会让相邻两条叠上），不是整条宽度——不然右半边那一大片空白也成了靶子。
+  动作链是照旧那三跳：渲染器回 `BarHitId` → `action::on_bar` 翻成 `Act::CommitTranslation(sense)` →
+  `Session` 调 `Engine::commit_translation(&candidate, sense)`（学习记账与拼音消耗引擎按
+  「选了那个候选」办，壳只管把返回的文本交出去）。
+  **`Candidate.reading` 对中文候选恒为 `None`**（核心里写着「中文候选暂不使用」），
+  所以那行的次序就是义项次序；哪天真给它填上读音了，切靶子这条规则要跟着看一眼。
 
 **键盘上那几个图标（2026-09-21 换成现成的）**：⇧ 大小写、⌫ 退格、工具页那格的剪贴板，
 路径来自 `assets/icon/material/` 里那几张 Google **Material Symbols**（Apache-2.0）的 svg，

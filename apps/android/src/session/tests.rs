@@ -154,8 +154,9 @@ fn ready() -> Option<Session> {
 ///
 /// 手写而不是拷 `data/generated/english.tsv`：拷的话这条测试就得看产品数据在不在，
 /// 时有时无；而它要测的是「词表挂上了会怎样」，内容越少越稳。
-fn bundle_with_english(words: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("qingjian-bundle-{}", std::process::id()));
+fn bundle_with_english(tag: &str, words: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("qingjian-bundle-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("english.tsv"), words).unwrap();
     dir
@@ -165,8 +166,11 @@ fn bundle_with_english(words: &str) -> std::path::PathBuf {
 ///
 /// 名字带 `.qj` 但内容是 TSV——`Glossary::from_path` 按**魔术字节**认容器，不是按扩展名，
 /// 所以这么写照样能读（这样测试不用先跑一遍打包工具）。
-fn bundle_with_glossary(entries: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("qingjian-glossary-{}", std::process::id()));
+///
+/// `tag` 不能省：测试是**并行**跑的，两条用例共用一个目录时，一条的收尾 `remove_dir_all`
+/// 会把另一条正读着的表删掉（2026-09-22 为此红过一次，找了好一会儿）。
+fn bundle_with_glossary(tag: &str, entries: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("qingjian-glossary-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("glossary-en.qj"), entries).unwrap();
@@ -997,6 +1001,7 @@ fn english_mode_gives_completions_when_the_word_list_is_there() {
         return;
     };
     let bundle = bundle_with_english(
+        "completions",
         "Company\tcompany\t900\nCompare\tcompare\t500\nCompass\tcompass\t300\n",
     );
     let mut session =
@@ -1069,7 +1074,7 @@ fn a_candidate_carries_its_translation_when_the_glossary_is_there() {
         return;
     };
     // TSV 格式：`词\t义项`，义项是 `词性. 译词`
-    let bundle = bundle_with_glossary("你好\tint. hello\n");
+    let bundle = bundle_with_glossary("carries", "你好\tint. hello\n");
     let mut session =
         Session::open(&dictionary, "zh-CN", Some(&bundle), None).expect("会话该能打开");
     session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
@@ -1092,6 +1097,107 @@ fn a_candidate_carries_its_translation_when_the_glossary_is_there() {
     );
 
     std::fs::remove_dir_all(&bundle).unwrap();
+}
+
+/// **点候选底下那行小字，上屏的是译文**（而不是候选词）。
+///
+/// 「学习记账与拼音消耗同选了那个候选」由引擎办（`Engine::commit_translation`），
+/// 这条只验壳这一侧：点对了地方、交出来的是译文、拼音被吃掉。
+#[test]
+fn tapping_the_translation_line_commits_the_translation() {
+    let Some(dictionary) = dictionary() else {
+        return;
+    };
+    let bundle = bundle_with_glossary("tapping", "你好\tint. hello\n");
+    let mut session =
+        Session::open(&dictionary, "zh-CN", Some(&bundle), None).expect("会话该能打开");
+    session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
+    session.keyboard_surface();
+    session.bar_surface();
+
+    type_text(&mut session, "nihao");
+    let index = session.frame.highlighted.expect("该有高亮候选");
+    assert_eq!(session.frame.rows[index].text, "你好");
+
+    tap_bar(&mut session, BarHitId::Translation(0));
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("hello"),
+        "该上屏译文而不是「你好」"
+    );
+    assert!(session.candidates.is_empty(), "拼音被吃掉了，候选该清干净");
+
+    std::fs::remove_dir_all(&bundle).unwrap();
+}
+
+/// **一行摆着两条译文时，点哪条上屏哪条**（用户 2026-09-22 提的：原先只认第一条）。
+///
+/// 靶子是渲染器按 ` · ` 分隔符切开报的，这条验的是「切开之后各归各的」。
+#[test]
+fn tapping_the_second_translation_commits_the_second_one() {
+    let Some(dictionary) = dictionary() else {
+        return;
+    };
+    let bundle = bundle_with_glossary("second", "你好\tint. hello\tint. hi\n");
+    let mut session =
+        Session::open(&dictionary, "zh-CN", Some(&bundle), None).expect("会话该能打开");
+    session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
+    session.keyboard_surface();
+    session.bar_surface();
+
+    type_text(&mut session, "nihao");
+    let index = session.frame.highlighted.expect("该有高亮候选");
+    let annotation: Vec<&str> = session.frame.rows[index]
+        .annotation
+        .iter()
+        .map(|(text, _)| text.as_str())
+        .collect();
+    assert!(
+        annotation.contains(&"hi"),
+        "这条词该有两条译文，实际是 {annotation:?}"
+    );
+
+    // 两个靶子都该在，而且是分开的两块、第二个在右边
+    let spans: Vec<(usize, f32)> = session
+        .bar
+        .as_ref()
+        .expect("候选条该画过")
+        .hits
+        .iter()
+        .filter_map(|hit| match hit.id {
+            BarHitId::Translation(sense) => Some((sense, hit.x)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(spans.len(), 2, "两条译文该各有一个靶子：{spans:?}");
+    assert!(spans[1].1 > spans[0].1, "第二个靶子该在第一个右边");
+
+    tap_bar(&mut session, BarHitId::Translation(1));
+
+    assert_eq!(
+        session.take_commit().as_deref(),
+        Some("hi"),
+        "点第二条该上屏第二条译文"
+    );
+
+    std::fs::remove_dir_all(&bundle).unwrap();
+}
+
+/// 没挂释义表时**底下那行根本不画，也就没有那个命中区**——点不着不该存在的东西。
+#[test]
+fn there_is_no_translation_hit_without_the_glossary() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let hits = &session.bar.as_ref().expect("候选条该画过").hits;
+    assert!(
+        !hits
+            .iter()
+            .any(|hit| matches!(hit.id, BarHitId::Translation(_))),
+        "没释义表时不该有译文那行的命中区"
+    );
 }
 
 /// **没带释义表时注解是空的**，候选条也就不该为它留地方（高度那笔账归渲染器测）。

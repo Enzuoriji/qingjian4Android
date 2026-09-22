@@ -166,9 +166,12 @@ impl Renderer {
                     &mut canvas,
                     frame,
                     &m,
-                    left,
-                    line_band,
-                    content_width - m.padding(),
+                    AnnotationSlot {
+                        left,
+                        band: line_band,
+                        max_x: content_width - m.padding(),
+                    },
+                    &mut hits,
                 );
             }
         } else {
@@ -365,15 +368,23 @@ impl Renderer {
     /// 一行小字）。一段一段顺着画，颜色按 [`Tone`]：译词用译文色、词性与分隔符用更浅那档、
     /// 生词用强调色。**画到右边缘就收**，最后那段装不下截断补省略号——
     /// 条子宽度是屏幕宽，注解爱多长有多长，不能让它顶出去。
+    ///
+    /// 画完顺手**按义项各报一个命中区**（[`BarHitId::Translation`]）：点哪个词上屏哪条译文。
+    ///
+    /// 义项边界认的是那条 ` · ` 分隔符——三个壳拼 annotation 时都这么隔（见
+    /// `apps/windows/server/src/ui/candidates/row.rs` 的 `from_candidate`）。
+    /// 分隔符与词性那些 Faint 片段**不归任何一条**，点它们不响应；
+    /// 每条的范围**按它真画出来的那截文本**给，不是整条宽度——
+    /// 不然条子右半边那一大片空白也成了靶子。
     fn draw_highlight_annotation(
         &mut self,
         canvas: &mut Canvas,
         frame: &Frame,
         m: &Metrics,
-        left: f32,
-        band: Band,
-        max_x: f32,
+        slot: AnnotationSlot,
+        hits: &mut Vec<BarHit>,
     ) {
+        let AnnotationSlot { left, band, max_x } = slot;
         let Some(row) = frame.highlighted.and_then(|index| frame.rows.get(index)) else {
             return;
         };
@@ -383,23 +394,58 @@ impl Renderer {
         let height = m.px(m.theme.annotation_font.line_height);
         let top = band.centre(height);
         let mut x = left;
+        let mut end = left;
+        // 第几条译文的横向范围（从哪到哪），画到哪儿记到哪儿
+        let mut spans: Vec<(usize, f32, f32)> = Vec::new();
+        let mut sense = 0usize;
+        let mut opened: Option<f32> = None;
         for (text, tone) in &row.annotation {
+            if is_sense_separator(text, *tone) {
+                // 收掉上一条：范围到分隔符之前为止
+                if let Some(from) = opened.take() {
+                    spans.push((sense, from, x));
+                    sense += 1;
+                }
+            } else if opened.is_none() {
+                // 词性那截也算进这一条里——靶子大一点好点
+                opened = Some(x);
+            }
             let color = match tone {
                 Tone::Gloss => m.theme.colors.gloss,
                 Tone::Fresh => m.theme.colors.fresh,
                 Tone::Faint => m.theme.colors.pos,
             };
             let style = m.style(m.theme.annotation_font, color);
-            if x + self.measure(text, &style).width <= max_x {
+            let width = self.measure(text, &style).width;
+            if x + width <= max_x {
                 self.draw_text(canvas, text, &style, x, top);
-                x += self.measure(text, &style).width;
+                x += width;
+                end = x;
                 continue;
             }
             let clipped = self.fit(text, &style, max_x - x);
             if !clipped.is_empty() {
+                let clipped_width = self.measure(&clipped, &style).width;
                 self.draw_text(canvas, &clipped, &style, x, top);
+                end = x + clipped_width;
             }
             break;
+        }
+        if let Some(from) = opened {
+            spans.push((sense, from, end));
+        }
+        let pad = m.px(ANNOTATION_HIT_PAD);
+        for (sense, from, to) in spans {
+            if to <= from {
+                continue;
+            }
+            hits.push(BarHit {
+                id: BarHitId::Translation(sense),
+                x: from - pad,
+                y: band.top,
+                width: (to - from) + pad * 2.0,
+                height: band.height,
+            });
         }
     }
 
@@ -548,6 +594,33 @@ fn annotation_band_height(theme: &Theme) -> f32 {
     theme.annotation_font.line_height
 }
 
+/// 译文那行画在哪儿。三个数凑一起才说得清位置，单独传会一路拖成八参数（clippy 会拦）。
+#[derive(Debug, Clone, Copy)]
+struct AnnotationSlot {
+    /// 起点：高亮那格的左边缘。
+    left: f32,
+
+    /// 那行字的上下范围。
+    band: Band,
+
+    /// 右边界：画到这里就截断（条子通栏，注解爱多长有多长）。
+    max_x: f32,
+}
+
+/// 译文那行命中区左右各往外放多少（点）。
+///
+/// 那行字才 15 点高，按真画出来的宽度给靶子的话细得像根线；左右各放一点好点着，
+/// 又不至于把旁边那片空白也变成靶子。**放太多相邻两条会叠上**（两条之间就隔着一个分隔符），
+/// 所以这个数比从前一条靶子时的小。
+const ANNOTATION_HIT_PAD: f32 = 4.0;
+
+/// 义项之间的分隔符。三个壳拼 annotation 时都往中间插这么一段 `Tone::Faint`
+/// （见 `apps/windows/server/src/ui/candidates/row.rs` 的 `from_candidate`），
+/// 渲染器据此把「第几条译文」认出来——所以它既是画的东西，也是**义项的边界**。
+fn is_sense_separator(text: &str, tone: Tone) -> bool {
+    tone == Tone::Faint && text.trim() == "·"
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BarHitId, BarStrip, ELLIPSIS, MIN_CELL_WIDTH, Metrics, Renderer};
@@ -655,6 +728,47 @@ mod tests {
             (Renderer::bar_height(&theme, true, false) * SCALE).round() as u32
         );
         assert!(none.rendered.content_height < annotated.rendered.content_height);
+    }
+
+    /// 译文那行**报一个命中区**（点它上屏译文），范围贴着真画出来的那截字。
+    ///
+    /// 没注解那一帧不该有——底下那行本来就没画，靶子不能凭空存在。
+    #[test]
+    fn the_annotation_line_is_tappable() {
+        let Some(mut renderer) = renderer() else {
+            return;
+        };
+        let theme = Theme::light();
+        let annotated = renderer
+            .render_bar(&frame_with_annotation(6), WIDTH, &theme, SCALE, 0.0, true)
+            .unwrap();
+        let hit = annotated
+            .hits
+            .iter()
+            .find(|hit| matches!(hit.id, BarHitId::Translation(_)))
+            .expect("有注解时该有译文那行的命中区");
+        assert!(
+            hit.width > 0.0 && hit.height > 0.0,
+            "命中区得是个真面积：{} × {}",
+            hit.width,
+            hit.height
+        );
+        assert!(
+            hit.width < WIDTH * SCALE / 2.0,
+            "靶子该贴着那截字，不是整条宽度：宽 {}",
+            hit.width
+        );
+
+        let bare = renderer
+            .render_bar(&frame(6), WIDTH, &theme, SCALE, 0.0, true)
+            .unwrap();
+        assert!(
+            !bare
+                .hits
+                .iter()
+                .any(|hit| matches!(hit.id, BarHitId::Translation(_))),
+            "没画那行就别报靶子"
+        );
     }
 
     #[test]

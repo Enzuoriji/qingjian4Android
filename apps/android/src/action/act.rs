@@ -17,6 +17,12 @@ pub enum Act {
     /// 上屏高亮那个候选；一个候选都没有时把空格本身交出去。
     CommitHighlighted,
 
+    /// 上屏**高亮那个候选的第几条译文**（点候选条底下那行小字，从 0 起）。
+    ///
+    /// 与 [`Self::CommitHighlighted`] 的区别只在「交出去的是哪串文本」：学习记账与拼音消耗
+    /// 都由引擎按「选了那个候选」办（`Engine::commit_translation`），壳不自己拼。
+    CommitTranslation(usize),
+
     /// 把拼音原文上屏；拼音已经空了就把回车交给应用。
     CommitRaw,
 

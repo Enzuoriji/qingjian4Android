@@ -57,6 +57,7 @@ pub fn repeats(key: KeyId) -> bool {
 pub fn on_bar(id: BarHitId) -> Act {
     match id {
         BarHitId::Candidate(index) => Act::CommitCandidate(index),
+        BarHitId::Translation(sense) => Act::CommitTranslation(sense),
         BarHitId::PagePrev => Act::Page(-1),
         BarHitId::PageNext => Act::Page(1),
         BarHitId::Clear => Act::Clear,
@@ -120,5 +121,7 @@ mod tests {
         assert_eq!(on_bar(BarHitId::PagePrev), Act::Page(-1));
         assert_eq!(on_bar(BarHitId::PageNext), Act::Page(1));
         assert_eq!(on_bar(BarHitId::Clear), Act::Clear);
+        assert_eq!(on_bar(BarHitId::Translation(0)), Act::CommitTranslation(0));
+        assert_eq!(on_bar(BarHitId::Translation(1)), Act::CommitTranslation(1));
     }
 }

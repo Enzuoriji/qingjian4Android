@@ -1147,6 +1147,18 @@ impl Session {
                     }
                 }
             }
+            Act::CommitTranslation(sense) => {
+                // 点候选底下那行小字：上屏**译文**而不是候选词；那行摆着两条时点哪条上屏哪条。
+                // 学习记账、拼音消耗、个人词表都由引擎按「选了那个候选」办（`commit_translation`），
+                // 这里只管把返回的那串文本交出去。那一条不存在就什么都不做——
+                // 不过命中区只在那条真画出来时才有，正常点不到这种。
+                let translated = self
+                    .highlighted_candidate()
+                    .and_then(|candidate| self.engine.commit_translation(&candidate, sense));
+                if let Some(text) = translated {
+                    self.commit_text(text);
+                }
+            }
             Act::CommitRaw => {
                 if self.engine.composition().is_empty() {
                     self.pending_commands.push(Command::Enter);
