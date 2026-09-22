@@ -52,9 +52,16 @@ impl ConnectionTest {
         Ok(Self { result })
     }
 
-    /// 结果到了就取走；没到返回 `None`。取走之后再调永远是 `None`。
+    /// 结果到了就取走；**还没到**返回 `None`。取走之后再调永远是 `None`。
+    ///
+    /// 「线程没了」与「还没回来」**分开报**：前者要当场说清楚，不能让它长得像后者
+    /// ——不然界面上只会一直显示「正在测试…」，等到调用方自己的超时，真正的原因一个字都不露。
     pub fn poll(&self) -> Option<Result<ConnectionReport, PredictError>> {
-        self.result.try_recv().ok()
+        match self.result.try_recv() {
+            Ok(outcome) => Some(outcome),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(Err(PredictError::WorkerGone)),
+        }
     }
 }
 

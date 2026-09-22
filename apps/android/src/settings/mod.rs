@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 use qingjian_dictionary::Dictionary;
 use qingjian_platform::{Config, ConfigError, extra_dictionaries};
-use qingjian_predict::ConnectionTest;
+use qingjian_predict::{ConnectionTest, PredictError};
 use serde_json::json;
 
 use crate::session::DICTS_DIR;
@@ -64,7 +64,24 @@ pub fn cloud_test_poll() -> String {
             ),
         })
         .to_string(),
-        Err(error) => json!({ "done": true, "ok": false, "text": error.to_string() }).to_string(),
+        Err(error) => json!({ "done": true, "ok": false, "text": describe(&error) }).to_string(),
+    }
+}
+
+/// 把错误翻成**用户看得懂的话**。
+///
+/// `PredictError` 的 `Display` 是英文的（`docs/contributing.md`：`thiserror` 的文案用英文，
+/// 那是给日志看的）；这一份是给设置页上那个人看的。与 macOS 的 `describe_predict_error` 同一套。
+fn describe(error: &PredictError) -> String {
+    match error {
+        PredictError::MissingApiKey(_) => "没有填密钥。在上面填一个再试".to_owned(),
+        PredictError::Timeout(ms) => {
+            format!("{ms} 毫秒内没有回复。检查网络和地址，或者换个服务商")
+        }
+        PredictError::EmptyReply => "接口通了，但没返回内容——检查模型名对不对".to_owned(),
+        PredictError::Runtime(error) => format!("起不了后台线程：{error}"),
+        PredictError::WorkerGone => "请求线程意外退出了，再点一次试试".to_owned(),
+        PredictError::Api(error) => format!("请求失败：{error}"),
     }
 }
 
