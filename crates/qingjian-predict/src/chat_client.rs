@@ -105,18 +105,48 @@ impl ChatClient {
 /// 按接口地址决定 HTTP 客户端：OpenCode 带上它要求的会话头，其他服务用默认客户端。
 /// 头装不上（理论上不会）就退回默认客户端，请求照发，让服务端的报错说明问题。
 fn http_client(base_url: &str) -> reqwest::Client {
+    let builder = client_builder();
     if !is_opencode(base_url) {
-        return reqwest::Client::new();
+        return builder.build().unwrap_or_default();
     }
     let Ok(value) = HeaderValue::from_str(&SESSION_ID) else {
-        return reqwest::Client::new();
+        return builder.build().unwrap_or_default();
     };
     let mut headers = HeaderMap::new();
     headers.insert(OPENCODE_SESSION_HEADER, value);
+    builder.default_headers(headers).build().unwrap_or_default()
+}
+
+/// 造一个 reqwest 客户端。桌面上就用缺省的；**安卓要自己铺 TLS**，见下。
+#[cfg(not(target_os = "android"))]
+fn client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
-        .default_headers(headers)
-        .build()
-        .unwrap_or_default()
+}
+
+/// 安卓：自己铺一套静态根证书。
+///
+/// **为什么非铺不可**：reqwest 0.13 缺省的 `rustls` 后端用 `rustls-platform-verifier`
+/// （要拿系统的证书库），而它**必须先初始化**——不初始化就在握手时 panic：
+/// `expect rustls-platform-verifier to be initialized`。初始化要在 Gradle 里加一个
+/// maven 仓库（跑 `cargo metadata` 找 native 组件）再加一个 Kotlin 组件，
+/// 对一个输入法来说太重（2026-09-22 真机上「测试连接」就是这么崩的）。
+///
+/// 换成 **Mozilla 那份静态根证书**（编译进包）：连公共 API 够用，行为可预测，
+/// 不依赖系统证书状态。代价是**不跟随系统的信任变更**、也用不了企业自签 CA——
+/// 要连自签服务的人得走 http 或者自己配代理。
+#[cfg(target_os = "android")]
+fn client_builder() -> reqwest::ClientBuilder {
+    let roots = rustls::RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    let tls = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+        rustls::crypto::aws_lc_rs::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .expect("rustls 的缺省协议版本该是合法的")
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    reqwest::Client::builder().use_preconfigured_tls(tls)
 }
 
 /// 接口地址是否指向 OpenCode（`opencode.ai` 及其子域）。

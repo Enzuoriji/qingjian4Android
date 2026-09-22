@@ -65,6 +65,11 @@ candle-nn = "0.11.0"
 # 云联想：OpenAI 兼容接口客户端与它需要的异步运行时
 async-openai = { version = "0.42.0", default-features = false, features = ["chat-completion", "rustls"] }
 reqwest = { version = "0.13", default-features = false }
+# 自己铺 TLS 根证书用（只有安卓真的用上，见 `qingjian-predict` 的 `chat_client`）：
+# reqwest 0.13 缺省的 rustls 后端要 rustls-platform-verifier，而它在安卓上必须先拿系统
+# Context 初始化，那套要在 Gradle 里塞 maven 组件——对输入法太重了。
+rustls = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs"] }
+webpki-roots = "1.0"
 uuid = { version = "1.26", features = ["v4"] }
 tokio = { version = "1.53.1", features = ["rt", "time"] }
 

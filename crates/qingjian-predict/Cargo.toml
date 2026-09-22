@@ -19,3 +19,9 @@ tokio.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
 uuid.workspace = true
+
+# 只有安卓真的用上：那边要自己铺一套静态根证书，绕开 reqwest 缺省的
+# rustls-platform-verifier（它在安卓上必须先拿系统 Context 初始化）。见 `chat_client.rs`。
+[target.'cfg(target_os = "android")'.dependencies]
+rustls.workspace = true
+webpki-roots.workspace = true
