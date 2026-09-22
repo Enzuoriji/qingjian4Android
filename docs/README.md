@@ -19,6 +19,7 @@ README.md 只介绍项目，所有技术内容放在这里，分四类：前三�
 | [design/rendering.md](design/rendering.md) | 跨平台 UI 与自绘渲染器（2026-09-13）：显示面与控件面的区分、Flutter / Avalonia / WebView 的调研结论、主题的两条路、tiny-skia + cosmic-text 的 spike 结果与两平台接入 |
 | [plan/android-engine.md](plan/android-engine.md) | 安卓壳接引擎的排期（2026-09-18）：学习落盘 / 语言模型 / 英文词表 / 释义表 / 领域词库 / 配置，含实测的现状对照与包体账 |
 | [plan/android-keyboard.md](plan/android-keyboard.md) | 安卓键盘的完善排期（2026-09-18）：数字符号面板 / 震动反馈 / 长按连发 / 键上滑动 / 面板 / 无障碍，含与 fcitx5-android 的逐项对照 |
+| [plan/android-release.md](plan/android-release.md) | 安卓正式发布前要过的清单（2026-09-22）：签名 / 图标 / 隐私政策三条硬门槛，多厂商 ROM、引导页、商店资料，以及发版流程 |
 | [plan/roadmap.md](plan/roadmap.md) | 分阶段路线图、各阶段的依赖关系与已完成项 |
 | [plan/zh_tw_support_plan.md](plan/zh_tw_support_plan.md) | 繁体输出与台湾注音支持的分析与方案（贡献者 pinchiu，#22）：读音标准差异、台湾用语、简转繁一对多；两条路线 |
 | [plan/todo.md](plan/todo.md) | 待办清单，按「从自用到能给别人用」排 |
