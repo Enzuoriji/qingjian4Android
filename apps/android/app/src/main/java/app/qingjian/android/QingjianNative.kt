@@ -29,6 +29,18 @@ object QingjianNative {
     external fun close(handle: Long)
 
     /**
+     * 把学习数据（选过的词、词频、个人 n-gram）落盘。
+     *
+     * 三个时机各调一次：**键盘窗口藏起来时**（[QingjianImeService.onWindowHidden]，
+     * 主路径）、焦点离开输入框时（[QingjianImeService.onFinishInput]）、
+     * 以及键盘开着时每 60 秒兜一次。**进程退出那次必须在 [close] 之前**——
+     * `close` 一调会话就没了，之后再叫它只会拿到空句柄。
+     *
+     * 没有脏数据时是空操作，所以多叫几次不要紧。
+     */
+    external fun flushLearning(handle: Long): Int
+
+    /**
      * 清空缓冲区。换应用时调，免得在 A 应用敲的拼音跑到 B 应用里。
      *
      * 返回与 [touch] 同一种位掩码：它顺带把键盘复位回字母页，**那时键盘位图得重画**，

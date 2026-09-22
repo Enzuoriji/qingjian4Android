@@ -419,11 +419,31 @@ Server 每次轮询比对用户 `dicts\` 的路径 / mtime / 长度快照，配�
 JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `QingjianNative.kt` 一一对应（类名与包名参与符号名），**改一边必须同时改另一边**。
 设计与取舍见 `docs/design/keyboard.md`。
 
-**已知缺口：安卓壳没接 `Learner`**（2026-09-20 查 K8 真机无效时发现的）。`Engine::new` 缺省挂的是 `NoLearner`，
-macOS / Windows / CLI 都显式 `with_learner(FrequencyLearner)`，只有 `Session::open` 光调了 `with_emoji`。
-后果是**安卓上完全不学习**——用户词、词频、个人 n-gram 一条都不记，打过很多遍的词不会往前排。
-要接得先给 `open` 一个可写的用户目录（`filesDir`），再把 `flush_learning` 挂到 `onFinishInput` / `onDestroy`。
-（K8 的「长按候选 = 删词」正是因此删不动——那个功能已整个摘掉了，见 `docs/plan/android-keyboard.md` 的 K8。）
+**用户学习（2026-09-22 接上）**：`Session::open` 的 `data_dir`（安卓传的是 `filesDir`）有值时，
+在 `filesDir/learning/` 下开一个 `FrequencyLearner`（主文件 `user.tsv`，几张兄弟表由它推导同目录）
+并 `with_learner` 挂上；**任何一步失败都只记日志、退回不挂**——学不了顶多是排得不够顺，输入法起不来是另一回事。
+那个目录得自己 `create_dir_all`：`write_atomic` 只写文件、**不建父目录**，省了会一路静默失败
+（落盘只在 `FrequencyLearner` 里打一条 warn，从外面看不出没存上）。接上之前安卓**一个字都不学**，
+K8 的「长按候选 = 删词」当年删不动正是因为这个（那个功能已整个摘掉，不复活）。
+
+**落盘时机**（`flushLearning` → `Session::flush_learning` → `Engine::flush_learning`，壳侧见 `QingjianImeService`）：
+
+| 时机 | 为什么 |
+|---|---|
+| `onWindowHidden` | **主路径**。窗口真藏起来时必到 |
+| `onFinishInput` | 焦点离开输入框但窗口还在（切换应用、点到别处） |
+| `onDestroy` | 进程退出前，**必须在 `close` 之前**（`close` 就是 `drop`，会话没有 `Drop`、不会自己落盘） |
+| 60 秒心跳 | 键盘一直开着时的兜底。与电脑版同一个规矩（`LEARNING_FLUSH_INTERVAL`） |
+
+没有脏数据时是空操作（各表按 dirty 位判断），所以多叫几次不要紧。
+
+**⚠️ `onFinishInput` 管不了「收起键盘」（2026-09-22 模拟器实测）**：按 BACK 收起键盘时它**压根不触发**，
+`ImeTracker` 只报 `HIDE_SOFT_INPUT_BY_BACK_KEY`，数据最后是等 60 秒心跳兜下来的——最坏要多等一分钟，
+而输入法进程随时可能被杀。补了 `onWindowHidden` 之后才是「收起来就写」（实测同秒落盘）。
+**别再只挂 `onFinishInput`。**
+
+**为什么不每次选词就落盘**：一次要写三四个文件（每张脏表各一次「临时文件 + fsync + 改名」），
+而 `docs/contributing.md` 立了「输入优先于学习，为学习增加的延迟算设计错误」。代价是最坏丢不到一分钟。
 
 - **位图过 JNI**：`surface::encode` 出「8 字节头（宽高，各 u32 大端）+ 预乘 RGBA」，Kotlin 侧 `Bitmap.createBitmap(w, h, ARGB_8888)` + `copyPixelsFromBuffer` 原样吃下——
   `ARGB_8888` 的**内存布局**就是预乘 RGBA（`ARGB` 只是 `getPixel` 那套打包的说法），既不换通道也不重新预乘。这条当初用一次性探针在本机与设备上实测确认过（探针已删，结论留着），别靠记忆。

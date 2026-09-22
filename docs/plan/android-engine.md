@@ -10,8 +10,8 @@
 
 - **词库不是问题**：安卓装的 `.qj` 与产品数据里的 `data/generated/dict.qj` **候选逐行相同**，
   只是 `.qj` 元数据（名称 / 许可 / 署名）不一样。对照方法与结论见下面「已查证」。
-- **问题是配套没接**：`Session::open`（`apps/android/src/session/mod.rs`）只调了三样——
-  词库、emoji 表（`with_emoji`）、emoji 字体。
+- **问题是配套没接**：`Session::open`（`apps/android/src/session/mod.rs`）调了四样——
+  词库、emoji 表（`with_emoji`）、emoji 字体，以及**用户学习（`with_learner`，2026-09-22 接上）**。
 - 桌面（`apps/macos/src/host/init.rs`）调了：`with_learner`、`with_translator`、`with_english_translator`、
   `with_english`、`with_emoji`、`with_language_model`，另有本地小模型 `set_async_sentence_scorer` 与整份配置。
 
@@ -21,7 +21,7 @@
 |---|---|---|---|---|
 | 词库 | ✅ | ✅ | — | 3.5 MB |
 | emoji 表 + 字体 | ✅ | ✅ | — | 0.2 + 10.7 MB |
-| **用户学习（落盘）** | ✅ | ❌ | 越用不会越顺；输入法进程一被杀就忘光 | 小 |
+| 用户学习（落盘） | ✅ | ✅ **2026-09-22** | — | 小 |
 | **语言模型 `lm.qj`** | ✅ | ❌ | 整句 / 联想只按词频排 | 43 MB |
 | **英文词表** | ✅ | ❌ | 英文模式给不了候选，只能直输 | 3 MB |
 | **释义表 `glossary-*.qj`** | ✅ | ❌ | 候选旁没有译文与词性（README 的招牌） | 3–22 MB |
@@ -70,6 +70,29 @@ diff a.txt b.txt                   # 只差耗时行，候选完全相同
 
 **注意**：写完要 flush；进程被杀时不能丢已经学到的（看 `FrequencyLearner` 有没有落盘时机，
 必要的话选中就写）。
+
+**2026-09-22 已做。** 做法与上面几处出入，都以实测为准：
+
+- 数据落 `filesDir/learning/`（主文件 `user.tsv`）。**`open` 里得先 `create_dir_all`**——
+  `write_atomic` 只写文件、不建父目录，省了会一路静默失败（只有一条 warn，外面看不出没存上）。
+- **不是「选中就写」**，是**「键盘窗口藏起来就写」**：一次落盘要写三四个文件，
+  而 `docs/contributing.md` 立了「输入优先于学习」。详情与四个时机见
+  `docs/notes/crate-notes.md` 的 `apps/android` 那节。
+- **验收目标词不是「你好」**：它在 `nihao` 下本来就是第一名，学不学都看不出来。
+  换成「你好好」也不行——那个靠简拼拆出来，而排序键里「音节省略」「完整匹配」排在
+  「这个输入串下选过没有」**前面**，选多少次都换不了位。最后用 `kaif` 的「开发 / 开放」
+  （都是 `kai` + 简拼 `f`，结构上并列），一次就换位。
+- 验收两条都走了：宿主机 `the_learner_survives_a_restart`（临时目录建会话 → 选词 → 落盘 →
+  重开 → 断言名次提前）；模拟器上 `kaif` 选「开放」→ 收起键盘（**同秒落盘**）→
+  `force-stop` 杀进程 → 切回青简重打 `kaif`，**「开放」已升到第一位**。
+  截图见 `screenshots/2026-09-22_学习落盘_*.png`。
+
+**实测多踩的一个坑**：`onFinishInput` **在按 BACK 收起键盘时不触发**（`ImeTracker` 只报
+`HIDE_SOFT_INPUT_BY_BACK_KEY`），数据当时是等 60 秒心跳兜下来的。补 `onWindowHidden`
+才做到「收起来就写」。这条已写进 `crate-notes.md`。
+
+**顺带一条给真机验收的提醒**：`adb shell am force-stop` 杀输入法会把系统默认输入法
+**弹回 Gboard**，重测前要 `ime set` 切回青简。
 
 ### E2 英文词表 —— 半天
 

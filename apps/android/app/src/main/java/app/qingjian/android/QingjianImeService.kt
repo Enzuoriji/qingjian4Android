@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
@@ -40,6 +42,25 @@ class QingjianImeService : InputMethodService() {
      * 没有才用 `finishComposingText()`。上屏时 `commitText` 会把组字区一起换掉，也跟着清掉。
      */
     private var mirrored = false
+
+    /** 学习数据心跳用的。与键盘上那两个节拍器（连发 50ms、候选条惯性 16ms）各走各的。 */
+    private val handler = Handler(Looper.getMainLooper())
+
+    /**
+     * 学习数据的**兜底**落盘：键盘开着时每 [LEARNING_FLUSH_INTERVAL_MS] 刷一次。
+     *
+     * 主路径是收起键盘那一刻（见 [onFinishInput]），但 **BACK 收起键盘时那个回调不一定到**，
+     * 只有 [onStartInputView] 是每次必到的——所以得有这个心跳兜着。
+     * 与电脑版同一个规矩（`apps/macos/src/host/mod.rs` 的 `LEARNING_FLUSH_INTERVAL`）。
+     *
+     * 为什么不每次上屏就写：见 `QingjianNative.flushLearning`。
+     */
+    private val learningTicker = object : Runnable {
+        override fun run() {
+            if (handle != 0L) QingjianNative.flushLearning(handle)
+            handler.postDelayed(this, LEARNING_FLUSH_INTERVAL_MS)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -349,6 +370,10 @@ class QingjianImeService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         if (handle == 0L) return
+        // 键盘弹出来了，学习数据的兜底心跳开起来（收起时在 `onFinishInput` 里停）。
+        // 先撤再排：`onStartInputView` 有可能连着来两次而中间没有 `onFinishInput`，不撤会排两条。
+        handler.removeCallbacks(learningTicker)
+        handler.postDelayed(learningTicker, LEARNING_FLUSH_INTERVAL_MS)
         // 补一次当前剪贴板：上面那个监听器只管**变化**，输入法起来之前复制的东西收不到。
         // 放在这儿而不是 `onCreate`——那会儿输入法窗口还没显示，
         // 非前台读剪贴板会让系统弹一条「某某读取了剪贴板」的提示（Android 12 起）。
@@ -360,9 +385,31 @@ class QingjianImeService : InputMethodService() {
         }
     }
 
+    /**
+     * 键盘窗口藏起来了：**这才是学习数据落盘的主路径**。
+     *
+     * 原以为 `onFinishInput` 管这事，2026-09-22 在模拟器上实测**不是**：按 BACK 收起键盘时
+     * 那条回调压根没来（`ImeTracker` 只报了 `HIDE_SOFT_INPUT_BY_BACK_KEY`），
+     * 数据最后是等 60 秒心跳兜下来的——最坏要多等一分钟，而输入法进程随时可能被杀。
+     * `onWindowHidden` 是窗口真藏起来时必到的，落在这儿才跟得上。
+     *
+     * 与 [`onFinishInput`] 都留着：那个管「焦点走了但窗口还在」，这个管「窗口收了」。
+     * 重复调不要紧——没有脏数据时落盘是空操作。
+     */
+    override fun onWindowHidden() {
+        super.onWindowHidden()
+        if (handle == 0L) return
+        handler.removeCallbacks(learningTicker)
+        QingjianNative.flushLearning(handle)
+    }
+
     override fun onFinishInput() {
         super.onFinishInput()
         if (handle == 0L) return
+        // 焦点离开输入框也会走到这儿（切换应用、点到别处）。与 `onWindowHidden` 一样落一次盘，
+        // 没有脏数据时是空操作，所以不必判断谁先谁后。
+        handler.removeCallbacks(learningTicker)
+        QingjianNative.flushLearning(handle)
         // 清空顺带把键盘复位回字母页，掩码里会带 FLAG_KEYBOARD——照同一套收尾重画一遍，
         // 不然键盘收起来再弹出来还停着上一页的键
         val flags = QingjianNative.clear(handle)
@@ -456,7 +503,10 @@ class QingjianImeService : InputMethodService() {
 
     override fun onDestroy() {
         systemClipboard?.removePrimaryClipChangedListener(clipboardListener)
+        handler.removeCallbacks(learningTicker)
         if (handle != 0L) {
+            // 落盘**必须在 `close` 之前**：`close` 一调会话对象就没了，之后再叫它只会拿到空句柄
+            QingjianNative.flushLearning(handle)
             QingjianNative.close(handle)
             handle = 0L
         }
@@ -465,6 +515,9 @@ class QingjianImeService : InputMethodService() {
 
     private companion object {
         const val TAG = "Qingjian"
+
+        /** 学习数据兜底落盘的间隔，与电脑版一致（`LEARNING_FLUSH_INTERVAL`）。 */
+        const val LEARNING_FLUSH_INTERVAL_MS = 60_000L
 
         /** 随包词库的文件名，放在应用私有目录。 */
         const val DICTIONARY = "dict.qj"

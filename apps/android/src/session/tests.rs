@@ -2469,6 +2469,95 @@ fn the_clipboard_survives_a_restart() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// **学习数据落盘**：选过的词，进程重启之后还排在前面。
+///
+/// 与 [`the_clipboard_survives_a_restart`] 一个路子——换一个会话就是「输入法进程被杀掉再起来」。
+/// 别的用例走的是内存态（`ready()` 的数据目录传 `None`），只有这一条碰真文件。
+///
+/// 输入串与目标词都不是随手挑的：**选词只在结构上并列的候选之间改先后**——排序键里
+/// 「音节完整匹配」「没靠简拼省略」这几项排在「这个输入串下选过没有」**前面**
+/// （见 `crates/qingjian-core/src/ranking/scored.rs` 的 `key`），所以结构上差一截的词，
+/// 再怎么选也顶不掉前一名。
+///
+/// `kaif` 下的「开发」与「开放」正是并列的一对（都是 `kai` + 简拼 `f`，覆盖同样的字母），
+/// 引擎侧 `commit_feeds_learner_and_reorders` 用的也是这一对。
+/// **别改成 `kaifa`**：那样「开发」是完整两音节、「开放」（kai fang）只是简拼命中，
+/// 结构上先天差一档，选多少次都不会换位——本测试会一直红。
+#[test]
+fn the_learner_survives_a_restart() {
+    /// 这次要选的那个词。它得**原本不排第一**，不然学不学都看不出来。
+    const CHOSEN: &str = "开放";
+
+    let Some(dictionary) = dictionary() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("qingjian-learner-{}", std::process::id()));
+    // 上一轮跑失败可能留下学习数据，那会把「原来的名次」整个带偏，先清干净
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let open = |dir: &std::path::Path| {
+        let mut session =
+            Session::open(&dictionary, "zh-CN", None, Some(dir)).expect("会话该能打开");
+        session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
+        session.keyboard_surface();
+        session.bar_surface();
+        session
+    };
+
+    let baseline = {
+        let mut session = open(&dir);
+        type_text(&mut session, "kaif");
+        let baseline = drawn(&session)
+            .iter()
+            .position(|text| *text == CHOSEN)
+            .unwrap_or_else(|| {
+                panic!(
+                    "`kaifa` 的候选里该有「{CHOSEN}」，实际画的是 {:?}",
+                    drawn(&session)
+                )
+            });
+        assert!(
+            baseline > 0,
+            "「{CHOSEN}」本来就排第一的话，这条测不出学习有没有生效"
+        );
+
+        tap_bar(&mut session, BarHitId::Candidate(baseline));
+        assert_eq!(
+            session.take_commit().as_deref(),
+            Some(CHOSEN),
+            "点候选该把「{CHOSEN}」上屏"
+        );
+        session.flush_learning();
+        baseline
+    };
+
+    assert!(
+        dir.join("learning").join("user.tsv").exists(),
+        "选过词又落过盘，该有学习数据文件"
+    );
+
+    // 换一个会话——输入法进程被杀掉再起来就是这回事
+    let mut session = open(&dir);
+    type_text(&mut session, "kaif");
+    let now = drawn(&session)
+        .iter()
+        .position(|text| *text == CHOSEN)
+        .unwrap_or_else(|| {
+            panic!(
+                "重启之后「{CHOSEN}」该还在候选里，实际画的是 {:?}",
+                drawn(&session)
+            )
+        });
+    assert!(
+        now < baseline,
+        "「{CHOSEN}」选过一次又落了盘，重启之后该往前排：选之前第 {} 位，现在第 {} 位",
+        baseline + 1,
+        now + 1
+    );
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// **手指落在格子之间的缝里也能滚**——判的是哪一页，不是按住了哪个格子。
 ///
 /// 用户 2026-09-21 指出的：原来只有按住剪贴板格 / 表情格才算滚，

@@ -90,6 +90,29 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_close(
     }));
 }
 
+/// 把学习数据落盘。
+///
+/// 壳在几个时机调它：键盘窗口藏起来（`onWindowHidden`，主路径）、焦点离开输入框（`onFinishInput`）、
+/// 进程退出前、以及键盘开着时每 60 秒兜一次。
+/// **进程退出那次必须在 [`Java_app_qingjian_android_QingjianNative_close`] 之前**——
+/// 句柄是 `Box<Session>` 的裸指针，`close` 就是 `drop`，会话没有 `Drop`、不会自己落盘。
+///
+/// 返回 0 = 正常，1 = 内部 panic 被拦下（壳目前不看这个值，留着是为了别把 panic 咽得无声无息）。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_flushLearning(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jint {
+    match unsafe { from_handle(handle) } {
+        Some(session) => match catch_unwind(AssertUnwindSafe(|| session.flush_learning())) {
+            Ok(()) => 0,
+            Err(_) => 1,
+        },
+        None => 0,
+    }
+}
+
 /// 清空缓冲区。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_clear(

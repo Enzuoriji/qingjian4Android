@@ -13,7 +13,7 @@ use std::path::Path;
 
 use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, MarkedKind};
 use qingjian_dictionary::Dictionary;
-use qingjian_learning::{CLIPBOARD_LIMIT, EMOJI_RECENT_LIMIT, Recent};
+use qingjian_learning::{CLIPBOARD_LIMIT, EMOJI_RECENT_LIMIT, FrequencyLearner, Recent};
 use qingjian_render::{
     BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
     Preedit, PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme,
@@ -56,6 +56,17 @@ const EMOJI_RECENT_FILE: &str = "emoji-recent.tsv";
 
 /// 剪贴板历史落在数据目录里的文件名（同目录下还有解出来的词库与 emoji 表）。
 const CLIPBOARD_FILE: &str = "clipboard.tsv";
+
+/// 学习数据放在数据目录下的哪个子目录。
+///
+/// 词频、用户词、个人 n-gram、敲错表、个人英文词都是 [`FrequencyLearner`] 的兄弟表，
+/// 一次就好几张 TSV，单独一个目录免得把 `filesDir` 根上摊满。
+const LEARNING_DIR: &str = "learning";
+
+/// 学习数据的主文件名；同目录下那几张兄弟表由 [`FrequencyLearner`] 从这个名字推导出来。
+///
+/// 与 macOS 那边同名（`apps/macos/src/host/init.rs` 的 `load_learner`），两个壳的用户数据好对照。
+const LEARNING_FILE: &str = "user.tsv";
 
 /// 随包资源目录里的 emoji 表（中文、英文各一张，加载时合成一张）。
 const EMOJI_TABLES: [&str; 2] = ["emoji-zh.tsv", "emoji-en.tsv"];
@@ -413,6 +424,32 @@ impl Session {
             tracing::info!(words = table.len(), "emoji 表已加载");
             engine = engine.with_emoji(table);
         }
+        // 用户学习：不挂这个，选过的词、词频、个人 n-gram 一条都不记（引擎缺省是 `NoLearner`）。
+        // 引擎那边上屏时自动记账，这里只负责把它接上、以及给它一个能落盘的地方。
+        //
+        // **任何一步失败都只记日志、退回不挂**：学不了顶多是排得不够顺，输入法起不来是另一回事。
+        if let Some(dir) = data_dir {
+            let learning = dir.join(LEARNING_DIR);
+            // `write_atomic` 只写文件、**不建父目录**，所以这一步不能省——省了会一路静默失败
+            // （落盘只在 `FrequencyLearner` 里打一条 warn，从外面看不出没存上）。
+            match std::fs::create_dir_all(&learning) {
+                Ok(()) => {
+                    let path = learning.join(LEARNING_FILE);
+                    match FrequencyLearner::from_path(&path) {
+                        Ok(learner) => {
+                            tracing::info!(path = %path.display(), entries = learner.len(), "学习数据已加载");
+                            engine = engine.with_learner(Box::new(learner));
+                        }
+                        Err(error) => {
+                            tracing::error!(path = %path.display(), %error, "学习数据读不了，这次不学习");
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(path = %learning.display(), %error, "学习数据目录建不出来，这次不学习");
+                }
+            }
+        }
 
         // 面板数据按**渲染器画不画得出来**过一遍：渲染器只加载清单里那几个字体、不扫系统，
         // 颜文字里那些 `⑅`、`╹`、`∀` 没有字形，摆到面板上就是一排豆腐块；
@@ -476,6 +513,23 @@ impl Session {
             pending_commands: Vec::new(),
             pressed: Vec::new(),
         })
+    }
+
+    /// 把学习数据落盘。**壳在几个时机各调一次**：键盘窗口藏起来时（`onWindowHidden`，主路径）、
+    /// 焦点离开输入框时（`onFinishInput`）、进程退出前（`onDestroy`，且必须在 `close` 之前
+    /// ——`close` 一调对象就没了）、以及键盘开着时每 60 秒兜一次。
+    ///
+    /// **`onFinishInput` 管不了「收起键盘」**：2026-09-22 在模拟器上实测，按 BACK 收起键盘时
+    /// 它压根不触发（`ImeTracker` 只报 `HIDE_SOFT_INPUT_BY_BACK_KEY`），数据最后是靠 60 秒心跳
+    /// 兜下来的。`onWindowHidden` 才跟得上。
+    ///
+    /// **为什么不每次上屏就写**：`FrequencyLearner` 落盘是「每张脏表各写一个临时文件 + fsync + 改名」，
+    /// 一次选词要写三四个文件。为学习给每一次选词压上几毫秒是设计错误
+    /// （`docs/contributing.md` 的「输入优先于学习」），所以宁可丢掉最多一分钟。
+    ///
+    /// 没有脏数据时是空操作（各表按 dirty 位判断），所以壳不必自己记「上次存到哪儿了」。
+    pub fn flush_learning(&mut self) {
+        self.engine.flush_learning();
     }
 
     /// 清空缓冲区。换应用时壳调它，免得在 A 应用敲的拼音跑到 B 应用里。
