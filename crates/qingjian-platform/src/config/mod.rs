@@ -3,6 +3,7 @@ mod candidate_renderer;
 mod dictionaries;
 mod general;
 mod key_combo;
+mod keyboard;
 mod layout_mode;
 mod log_level;
 mod model;
@@ -26,11 +27,14 @@ pub use apps::{
     DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS,
 };
 pub use candidate_renderer::CandidateRenderer;
-pub use dictionaries::{DEFAULT_DOMAINS, DictionariesConfig};
+pub use dictionaries::{ALL_DOMAINS, DEFAULT_DOMAINS, DictionariesConfig};
 pub use general::{
     DEFAULT_PAGE_KEYS, GeneralConfig, LEARNING_LANGUAGE_OFF, MAX_PAGE_SIZE, PAGE_KEY_OPTIONS,
 };
 pub use key_combo::KeyCombo;
+pub use keyboard::{
+    DEFAULT_VIBRATION_MS, KeyboardConfig, MAX_VIBRATION_MS, MIN_VIBRATION_MS, VibrationStyle,
+};
 pub use layout_mode::LayoutMode;
 pub use log_level::LogLevel;
 pub use model::LocalModelConfig;
@@ -48,6 +52,9 @@ pub use theme_mode::ThemeMode;
 pub struct Config {
     /// 常规：学习语言、每页候选数、翻页键、外观。
     pub general: GeneralConfig,
+
+    /// 键盘手感（按键震动）。**只有安卓用**。
+    pub keyboard: KeyboardConfig,
 
     /// 自定义短语；保存和读取均检查位置冲突。
     #[serde(deserialize_with = "deserialize_phrases")]
@@ -151,8 +158,27 @@ delete_candidate = "shift"
     };
 }
 
-/// 首次运行写出的模板：默认值全部列出并注释，用户改一处即可。`[shortcut]` 的修饰键与 `[apps]` 分平台，
-/// 见 [`template_shortcut_keys!`] / [`template_apps!`]。
+/// 模板 `[dictionaries] domains` 那一行（安卓）：**11 本全开**，与 [`ALL_DOMAINS`] 一致，
+/// 理由见 [`DictionariesConfig::default`]。
+#[cfg(target_os = "android")]
+macro_rules! template_domains {
+    () => {
+        r#"domains = ["animals", "automotive", "finance", "food", "historical_figures", "idioms", "it_computing", "law", "medicine", "places", "poetry_lines"]
+"#
+    };
+}
+
+/// 模板 `[dictionaries] domains` 那一行（桌面）：只开 `idioms`，与 [`DEFAULT_DOMAINS`] 一致。
+#[cfg(not(target_os = "android"))]
+macro_rules! template_domains {
+    () => {
+        r#"domains = ["idioms"]
+"#
+    };
+}
+
+/// 首次运行写出的模板：默认值全部列出并注释，用户改一处即可。`[shortcut]` 的修饰键、`[apps]` 与
+/// `[dictionaries] domains` 分平台，见 [`template_shortcut_keys!`] / [`template_apps!`] / [`template_domains!`]。
 pub const TEMPLATE: &str = concat!(
     r#"# 青简输入法配置。保存后自动生效；也可以在菜单栏的输入法菜单里改。
 
@@ -234,8 +260,9 @@ in_ing = false
 # 随包的领域词库（法律 / 医学 / 地名 / 成语 / 诗词 / IT / 财经 / 饮食 / 动物 / 汽车 / 历史人物），列在这里的才加载；
 # 名字是文件名：animals automotive finance food historical_figures idioms it_computing law medicine places poetry_lines。
 # 偏好设置「词库」页可以勾选
-domains = ["idioms"]
-# 自己导入的词库：放在配置同目录 dicts/ 下的 .qj 文件都会加载，这里列出要关掉的（文件名，不含扩展名）
+"#,
+    template_domains!(),
+    r#"# 自己导入的词库：放在配置同目录 dicts/ 下的 .qj 文件都会加载，这里列出要关掉的（文件名，不含扩展名）
 disabled = []
 
 [model]
@@ -273,6 +300,14 @@ enabled = false
 # 记住的屏幕位置（物理像素，拖动后自动写入）；留空则首次出现在屏幕右下角
 # x = 0
 # y = 0
+
+[keyboard]
+# 按键震动的感觉。**只有安卓用**（电脑上没马达）
+# off 不震 / tick 轻微 / click 清脆 / heavy 低沉 / double 双击 / custom 按下面的毫秒数
+# 除 custom 外的几档走系统的预制触感，时长由厂商按马达调好，这里写多少毫秒都不作数
+vibration = "click"
+# 自定义震动时长（毫秒，1–50），只在 vibration = "custom" 时用
+vibration_ms = 20
 "#
 );
 

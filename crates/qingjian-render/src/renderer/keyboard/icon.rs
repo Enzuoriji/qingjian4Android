@@ -1,4 +1,4 @@
-//! 键盘上那几个图标：⇧ 大小写、⌫ 退格，还有工具页那一格上的剪贴板。
+//! 键盘上那几个图标：⇧ 大小写、⌫ 退格，以及工具页那几格上的剪贴板 / 表情 / 颜文字 / 设置。
 //!
 //! **路径是生成的**，来自 `assets/icon/material/` 里那几张 Google **Material Symbols** 的 svg
 //! （Apache-2.0）：
@@ -84,6 +84,19 @@ pub(crate) fn draw_mood(canvas: &mut Canvas, cx: f32, cy: f32, size: f32, color:
 /// 画颜文字（工具页那一格），居中在 `(cx, cy)`，边长 `size` 像素。
 pub(crate) fn draw_kaomoji(canvas: &mut Canvas, cx: f32, cy: f32, size: f32, color: Color) {
     draw(canvas, path::kaomoji(), path::BOXES[4], cx, cy, size, color);
+}
+
+/// 画设置（工具页那一格），居中在 `(cx, cy)`，边长 `size` 像素。
+pub(crate) fn draw_settings(canvas: &mut Canvas, cx: f32, cy: f32, size: f32, color: Color) {
+    draw(
+        canvas,
+        path::settings(),
+        path::BOXES[5],
+        cx,
+        cy,
+        size,
+        color,
+    );
 }
 
 /// 把一段路径缩到**最长边 = `size`** 并居中在 `(cx, cy)`，然后填色。

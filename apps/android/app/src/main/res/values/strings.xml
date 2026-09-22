@@ -2,4 +2,43 @@
 <resources>
     <string name="app_name">青简</string>
     <string name="subtype_zh">中文（青简）</string>
+
+    <!-- 设置页。文案面向用户，不出现实现词（`docs/user/README.md` 的规矩同样适用于界面）。 -->
+    <string name="settings_title">青简设置</string>
+
+    <string name="settings_group_learning">学习</string>
+    <string name="settings_learning_language">候选旁显示哪门语言的译文</string>
+    <string name="settings_language_en">英语</string>
+    <string name="settings_language_ja">日语</string>
+    <string name="settings_language_es">西班牙语</string>
+    <string name="settings_language_off">不显示译文</string>
+
+    <string name="settings_group_keyboard">键盘</string>
+    <string name="settings_vibration">按键震动</string>
+    <string name="settings_vibration_off">关</string>
+    <string name="settings_vibration_tick">轻微</string>
+    <string name="settings_vibration_click">清脆</string>
+    <string name="settings_vibration_heavy">低沉</string>
+    <string name="settings_vibration_double">双击</string>
+    <string name="settings_vibration_custom">自定义</string>
+    <string name="settings_vibration_ms">震一下多久</string>
+    <string name="settings_vibration_ms_value">震一下多久：%1$d 毫秒</string>
+
+    <string name="settings_group_input">输入</string>
+    <string name="settings_fuzzy">模糊音（分不清的读音也能打出来）</string>
+
+    <string name="settings_group_dictionaries">词库</string>
+    <string name="settings_dictionaries">专业词库（打勾的才会加载）</string>
+
+    <string name="settings_group_cloud">云服务</string>
+    <string name="settings_cloud_enabled">启用云联想</string>
+    <string name="settings_cloud_base_url">接口地址</string>
+    <string name="settings_cloud_model">模型</string>
+    <string name="settings_cloud_api_key">密钥</string>
+    <string name="settings_cloud_slots">云端补几个候选</string>
+    <string name="settings_cloud_slots_value">云端补几个候选：%1$d 个</string>
+    <string name="settings_cloud_sentence">整句补全</string>
+    <string name="settings_cloud_note">密钥只写在这台手机的应用私有目录里，不会上传到青简。云联想本身要等接入之后才生效，现在填了也只是先存着。</string>
+
+    <string name="settings_broken">配置文件读不了，先改回来再进这一页：\n\n%1$s</string>
 </resources>

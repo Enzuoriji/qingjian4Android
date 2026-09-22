@@ -2,6 +2,7 @@ package app.qingjian.android
 
 import android.content.ClipDescription
 import android.content.ClipboardManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
@@ -256,6 +257,11 @@ class QingjianImeService : InputMethodService() {
             refreshKeyboard(view)
         }
         refreshPopup(view)
+        // 用户点了工具页的「设置」：把键盘收起来、开设置页。
+        // **显式收，不指望系统按焦点自己收**——部分 ROM 会把新 Activity 挤在键盘下面、或者它拿不到焦点。
+        if (flags and QingjianNative.FLAG_SETTINGS != 0 && QingjianNative.takeSettings(handle)) {
+            openSettings()
+        }
         // 还在滑就按帧接着敲，滑完了就停。**只有这里知道 Rust 那边还在不在跑**，
         // 所以帧的开关也在这儿翻（惯性那几帧跟打字一样走这条收尾，慢了同样会报出来）。
         view.setFlinging(flags and QingjianNative.FLAG_FLING != 0)
@@ -286,6 +292,24 @@ class QingjianImeService : InputMethodService() {
         QingjianNative.toBitmap(bytes)?.let { bitmap ->
             popup?.show(view, bitmap, origin[0], origin[1])
         }
+    }
+
+    /**
+     * 打开设置页（键盘工具页那一格）。
+     *
+     * Service 不是 Activity，拉起一个 Activity 必须带 `NEW_TASK`。
+     * Android 12 起对「后台启动 Activity」有限制，但输入法窗口此刻是可见的前台窗口，属于豁免情形。
+     *
+     * 设置页**只跟配置文件打交道、不碰会话句柄**——这边随时可能在 `onDestroy` 里把会话关掉，
+     * 那边拿着 handle 就是野指针。改完也不用通知谁：用户返回时键盘重弹，
+     * [onStartInputView] 里读一遍文件就生效了。
+     */
+    private fun openSettings() {
+        requestHideSelf(0)
+        startActivity(
+            Intent(this, QingjianSettingsActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        )
     }
 
     /**
@@ -401,7 +425,16 @@ class QingjianImeService : InputMethodService() {
         // 放在这儿而不是 `onCreate`——那会儿输入法窗口还没显示，
         // 非前台读剪贴板会让系统弹一条「某某读取了剪贴板」的提示（Android 12 起）。
         readClipboard()?.let { QingjianNative.clipboardChanged(handle, it) }
-        val flags = QingjianNative.resetPanel(handle)
+        // 配置文件变了就重读并应用（用户从设置页回来时必走这一条）。
+        // **就挂在这儿，不另排心跳**：键盘每次弹出来这个回调必到，而它是唯一一定到的
+        // （BACK 收起键盘时 onFinishInput 不触发，2026-09-22 实测过）。桌面要每秒轮询
+        // 是因为它没有「键盘弹出」这个事件，安卓有就不该白养一个定时器。
+        // 没变时它返回 0，底下的重画一次都不会发生。
+        var flags = QingjianNative.configPoll(handle)
+        flags = flags or QingjianNative.resetPanel(handle)
+        // 震动那两档是壳的事（Rust 不管手感），从同一份配置里读一遍再交给 KeyFeedback。
+        // 键盘弹一次读一次文件，跟「每敲一下读一次」是两回事。
+        applyVibrationConfig(QingjianNative.configRead(filesDir.absolutePath))
         inputView?.let { view ->
             if (flags and QingjianNative.FLAG_BAR != 0) refreshBar(view)
             if (flags and QingjianNative.FLAG_KEYBOARD != 0) refreshKeyboard(view)
@@ -536,7 +569,11 @@ class QingjianImeService : InputMethodService() {
         super.onDestroy()
     }
 
-    private companion object {
+    /**
+     * `internal` 而不是 `private`：设置页要问 [`BUNDLE_DIR`]（词库在它下面），
+     * 那个字符串只该有这一份。
+     */
+    internal companion object {
         const val TAG = "Qingjian"
 
         /** 学习数据兜底落盘的间隔，与电脑版一致（`LEARNING_FLUSH_INTERVAL`）。 */

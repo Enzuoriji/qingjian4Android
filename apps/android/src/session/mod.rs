@@ -3,19 +3,20 @@
 //! 这里只管**引擎与候选条**。键盘的画法、命中与按下状态在 [`Keyboard`] 里，
 //! 触摸进来按 y 分给两边（见 [`Session::touch`]）——换掉键盘那半边不影响这一层。
 
+mod config;
 mod fling;
 
 #[cfg(test)]
 mod tests;
 
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use qingjian_core::{Candidate, CandidateKind, EmojiTable, Engine, Language, MarkedKind};
 use qingjian_dictionary::{Dictionary, WordList};
 use qingjian_learning::{CLIPBOARD_LIMIT, EMOJI_RECENT_LIMIT, FrequencyLearner, Recent};
 use qingjian_lm::BigramModel;
-use qingjian_platform::{DictionariesConfig, extra_dictionaries};
+use qingjian_platform::extra_dictionaries;
 use qingjian_render::{
     BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
     Preedit, PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme, Tone,
@@ -27,6 +28,7 @@ use crate::error::SessionError;
 use crate::keyboard::{EmojiView, Fired, Keyboard};
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
+use config::{ConfigState, configured_language, push_to_engine};
 use fling::Fling;
 
 /// 算「滚到第几条起」时给除法的一点补偿（单位是「格」，也就是一格的万分之一）。
@@ -88,12 +90,9 @@ const LANGUAGE_MODEL_FILE: &str = "lm.qj";
 const GLOSSARY_ENGLISH_FILE: &str = "glossary-zh.qj";
 
 /// 随包资源目录里领域词库的子目录（成语 / 医学 / 法律 / 地名 …，一个目录好几本 `.qj`）。
-const DICTS_DIR: &str = "dicts";
-
-/// 学习语言缺省用哪本。桌面那边是配置项 `[general] learning_language`，安卓还没有配置文件
-/// （E5 / E7），先写死——**三本（en / ja / es）都随包带着**，换表那步只是改这一个常量，
-/// 文件名由 `Language::code()` 拼出来。
-const LEARNING_LANGUAGE: Language = Language::English;
+///
+/// 设置页也要用它（列词库清单的桥在 `crate::settings`），所以是 `pub(crate)`。
+pub(crate) const DICTS_DIR: &str = "dicts";
 
 /// 返回给 Kotlin 的位掩码：哪些面变了、有没有话要交给应用。跨语言只传数字。
 pub mod flags {
@@ -114,6 +113,12 @@ pub mod flags {
     /// 这是唯一一个「下一步该做什么」的位，别的位都是「哪个面变了」——滑行得有人一直敲帧，
     /// 而帧的节拍只在壳那边（安卓有现成的 `Handler`），所以只能这么告诉它别停。
     pub const FLING: i32 = 16;
+
+    /// 用户点了工具页的「设置」：壳把键盘收起来、打开设置页（`take_settings` 取走这笔账）。
+    ///
+    /// 与 [`Self::FLING`] 一样是「下一步该做什么」——开会话碰不到安卓的窗口系统，
+    /// 只能这么告诉壳。
+    pub const SETTINGS: i32 = 32;
 }
 
 /// 表情面板的数据：一张表就够两种（emoji 与颜文字）。
@@ -273,6 +278,14 @@ pub struct Session {
     /// 输入引擎。
     engine: Engine,
 
+    /// 这份会话看的配置（`filesDir/config.toml`）：路径、上次读到的原文、当前生效的那一份。
+    /// 换了新的一份由 [`Session::poll_config`] 推给引擎。
+    config: ConfigState,
+
+    /// 随包资源目录（壳从 APK 里解出来的：emoji、词表、模型、释义表、领域词库）。
+    /// 换学习语言、重读词库都要回这儿找文件，所以留一份。
+    bundle: Option<PathBuf>,
+
     /// 自绘渲染器。字体库加载不起来时为 `None`——引擎照常能用，只是画不出键盘与候选条。
     renderer: Option<Renderer>,
 
@@ -301,13 +314,16 @@ pub struct Session {
     /// 中还是英。同样两边都要：键盘按键帽画字，引擎按它决定往哪条路走。
     mode: InputMode,
 
-    /// 英文模式给不给候选（补全与拼错纠正）。**随包的英文词表挂上了才是 `true`**——
-    /// 没词表时引擎给不出候选，硬走组句只会把敲的字母攒在缓冲区里出不去，
-    /// 那时英文模式退回直输（字母直接打给应用）。
+    /// 英文模式给不给候选（补全与拼错纠正）。
     ///
-    /// 桌面那边这是配置项 `[general] english_candidates`（缺省开）；安卓还没有配置文件
-    /// （见 `docs/plan/android-engine.md` 的 E7），所以先按「词表在不在」定。
+    /// **两个条件都成立才行**：随包的英文词表挂上了（[`Self::english_words`]），
+    /// 且配置里 `[general] english_candidates` 开着（缺省开）。没词表时引擎给不出候选，
+    /// 硬走组句只会把敲的字母攒在缓冲区里出不去，那时英文模式退回直输（字母直接打给应用）。
     english_candidates: bool,
+
+    /// 随包的英文词表在不在。配置里那个开关是「允不允许」，这个才是「给不给得出来」——
+    /// 词表没随包时，配置开着也没用。
+    english_words: bool,
 
     /// 候选条画不画译文。**随包的释义表挂上了才是 `true`**，整场不变。
     ///
@@ -401,6 +417,12 @@ pub struct Session {
     /// 攒着要原样交给应用的按键。壳用 `take_commands` 取走。
     pending_commands: Vec<Command>,
 
+    /// 攒着「用户点了设置页」。壳用 [`Self::take_settings`] 取走。
+    ///
+    /// 跟 `pending_commands` 一个路数：会话碰不到安卓的窗口系统，
+    /// 只把这件事记一笔，由壳去 `startActivity`。
+    pending_settings: bool,
+
     /// 此刻按着的、**起手落在候选条上**的手指们，按根记。
     ///
     /// 键盘那半边的手指记在 [`Keyboard`] 自己手里，两边各记各的：一根手指属于谁，
@@ -443,6 +465,10 @@ impl Session {
         bundle: Option<&Path>,
         data_dir: Option<&Path>,
     ) -> Result<Self, SessionError> {
+        // 配置先读：后面好几样（学习语言、英文候选、领域词库）都按它定。
+        // 读的同时会把带注释的模板写出来（文件在就不动它），用户从此有份能手改的配置。
+        let mut config = ConfigState::load(data_dir);
+        let language = configured_language(&config.config().general);
         let dictionary = Dictionary::from_path(dictionary_path)?;
         let emoji_font = bundle
             .map(|dir| dir.join(EMOJI_FONT))
@@ -459,13 +485,16 @@ impl Session {
             }
         };
         let mut engine = Engine::new(dictionary);
+        // 配置里那几样当场就能设的（模糊音、繁体、双拼、全角标点…）**建会话时就得推过去**：
+        // 只留给 `poll_config` 的话，启动读到的那份永远补不上——文件没变它就返回 0，不会 apply。
+        push_to_engine(&mut engine, config.config());
         if let Some(table) = bundle.and_then(load_emoji_tables) {
             tracing::info!(words = table.len(), "emoji 表已加载");
             engine = engine.with_emoji(table);
         }
         // 随包资源里那几样**可选**的数据：在一处读完，**每一样读不出来都只记日志**——
         // 与学习数据同一个取舍：少一样数据顶多是功能缺一块，输入法起不来是另一回事。
-        let mut english_candidates = false;
+        let mut english_words = false;
         let mut annotations = false;
         if let Some(dir) = bundle {
             // 英文词表：挂上它，英文模式才有补全与拼错纠正
@@ -474,7 +503,7 @@ impl Session {
                 Ok(words) => {
                     tracing::info!(path = %path.display(), words = words.len(), "英文词表已加载");
                     engine = engine.with_english(words);
-                    english_candidates = true;
+                    english_words = true;
                 }
                 Err(error) => {
                     tracing::warn!(path = %path.display(), %error, "英文词表读不了，英文模式退回直输");
@@ -498,50 +527,45 @@ impl Session {
             }
             // 释义表：挂了它候选条才有译文可画。两本各管一头——
             // `translator` 是「中文候选 → 学习语言」，`english_translator` 是「英文候选 → 中文」。
-            let learning = dir.join(format!("glossary-{}.qj", LEARNING_LANGUAGE.code()));
-            match Glossary::from_path(LEARNING_LANGUAGE, &learning) {
-                Ok(glossary) => {
-                    tracing::info!(
-                        path = %learning.display(),
-                        language = LEARNING_LANGUAGE.code(),
-                        "释义表已加载"
-                    );
-                    engine = engine.with_translator(Box::new(glossary));
-                    annotations = true;
+            // **学习语言是 `off` 就两本都不挂**：那时候整个译文那行都不该出现
+            // （`annotations` 是假的，候选条也不留那行的高度）。
+            if let Some(language) = language {
+                let learning = dir.join(format!("glossary-{}.qj", language.code()));
+                match Glossary::from_path(language, &learning) {
+                    Ok(glossary) => {
+                        tracing::info!(
+                            path = %learning.display(),
+                            language = language.code(),
+                            "释义表已加载"
+                        );
+                        engine = engine.with_translator(Box::new(glossary));
+                        annotations = true;
+                        config.set_language(Some(language));
+                    }
+                    Err(error) => {
+                        tracing::warn!(path = %learning.display(), %error, "学习语言的释义表读不了，候选条不画译文");
+                    }
                 }
-                Err(error) => {
-                    tracing::warn!(path = %learning.display(), %error, "学习语言的释义表读不了，候选条不画译文");
-                }
-            }
-            let english = dir.join(GLOSSARY_ENGLISH_FILE);
-            match Glossary::from_path(Language::Chinese, &english) {
-                Ok(glossary) => {
-                    tracing::info!(path = %english.display(), "英→中释义表已加载");
-                    engine = engine.with_english_translator(Box::new(glossary));
-                    annotations = true;
-                }
-                Err(error) => {
-                    tracing::warn!(path = %english.display(), %error, "英→中释义表读不了，英文候选没有中文释义");
+                let english = dir.join(GLOSSARY_ENGLISH_FILE);
+                match Glossary::from_path(Language::Chinese, &english) {
+                    Ok(glossary) => {
+                        tracing::info!(path = %english.display(), "英→中释义表已加载");
+                        engine = engine.with_english_translator(Box::new(glossary));
+                    }
+                    Err(error) => {
+                        tracing::warn!(path = %english.display(), %error, "英→中释义表读不了，英文候选没有中文释义");
+                    }
                 }
             }
             // 领域词库（成语 / 医学 / 法律 / 地名 …）：一个子目录，**有几本挂几本**。
-            // **先全开**（2026-09-22 用户定的）：还没有配置文件（见 E7），就把目录里那几本的
-            // 名字都算进 `domains`。桌面缺省只开 `idioms`（成语四字全拼几乎不歧义、收益稳，
-            // 其余「按需打开」），等设置页做出来再回到那套。
+            // 开哪几本由 `[dictionaries] domains` 定——安卓缺省 **11 本全开**
+            // （`DictionariesConfig::default` 按平台分支，2026-09-22 定的），设置页可以逐本关。
             let dicts = dir.join(DICTS_DIR);
-            let domains: Vec<String> = extra_dictionaries::list(&dicts)
-                .into_iter()
-                .map(|(stem, _)| stem)
-                .collect();
-            if !domains.is_empty() {
-                let config = DictionariesConfig {
-                    domains,
-                    disabled: Vec::new(),
-                };
-                let loaded = extra_dictionaries::load(Some(&dicts), None, &config);
-                tracing::info!(books = loaded.len(), "领域词库已加载");
-                engine.set_extra_dictionaries(loaded);
-            }
+            let dictionaries = config.config().dictionaries.clone();
+            let loaded = extra_dictionaries::load(Some(&dicts), None, &dictionaries);
+            tracing::info!(books = loaded.len(), "领域词库已加载");
+            engine.set_extra_dictionaries(loaded);
+            config.set_dictionaries(dictionaries);
         }
         // 用户学习：不挂这个，选过的词、词频、个人 n-gram 一条都不记（引擎缺省是 `NoLearner`）。
         // 引擎那边上屏时自动记账，这里只负责把它接上、以及给它一个能落盘的地方。
@@ -595,8 +619,13 @@ impl Session {
         emoji_panel.set_recent(emoji_recent.entries());
         kaomoji_panel.set_recent(emoji_recent.entries());
 
+        // 英文候选：随包词表在不在是前提（没表就没候选可给），配置那个开关是「允不允许」
+        let english_candidates = english_words && config.config().general.english_candidates;
+
         Ok(Self {
             engine,
+            config,
+            bundle: bundle.map(Path::to_path_buf),
             renderer,
             width: 0.0,
             density: 1.0,
@@ -607,6 +636,7 @@ impl Session {
             shift: ShiftState::default(),
             mode: InputMode::default(),
             english_candidates,
+            english_words,
             annotations,
             panel: Panel::Letters,
             preedit: None,
@@ -632,6 +662,7 @@ impl Session {
             preedit_dirty: true,
             pending_commit: None,
             pending_commands: Vec::new(),
+            pending_settings: false,
             pressed: Vec::new(),
         })
     }
@@ -919,6 +950,14 @@ impl Session {
         self.pending_commands.drain(..).map(Command::code).collect()
     }
 
+    /// 取走「用户点了设置页」（并清掉）。壳据此把键盘收起来、`startActivity`。
+    ///
+    /// 开 Activity 是壳的事——会话碰不到安卓的窗口系统，跟 [`Self::take_commit`]
+    /// 是同一个路数：这边只记一笔，那边照着做。
+    pub fn take_settings(&mut self) -> bool {
+        std::mem::take(&mut self.pending_settings)
+    }
+
     /// 一次触摸（坐标是整块输入视图的）。`pointer` 是安卓给的 pointer id。返回 [`flags`] 的位掩码。
     ///
     /// 按 y 分给两边：候选条在上、键盘在下。**一根手指归谁，由按下时落在哪半边定**，
@@ -1126,6 +1165,9 @@ impl Session {
         if self.fling.is_some() || self.clipboard_fling.is_some() {
             mask |= flags::FLING;
         }
+        if self.pending_settings {
+            mask |= flags::SETTINGS;
+        }
         mask
     }
 
@@ -1226,6 +1268,9 @@ impl Session {
             }
             Act::Punctuate(c) => self.punctuate(c),
             Act::ToggleTools => self.toggle_tools(),
+            // 会话开不了 Activity，只记一笔；掩码里带上 SETTINGS，壳那边去开
+            Act::OpenSettings => self.pending_settings = true,
+            Act::Nothing => {}
             Act::PasteClipboard(index) => self.paste_clipboard(index),
             Act::DeleteClipboard(index) => self.delete_clipboard(index),
             Act::ClearClipboard => self.clear_clipboard(),

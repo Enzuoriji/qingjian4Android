@@ -5,7 +5,7 @@
 //! Kotlin 不需要看到 `Candidate` 之类的对象。
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use jni::JNIEnv;
 use jni::objects::{JObject, JString};
@@ -450,4 +450,196 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_takeCommands(
         return std::ptr::null_mut();
     }
     array.into_raw()
+}
+
+/// 取走「用户点了设置页」（位掩码里带 `SETTINGS` 时调用）。壳据此开设置页。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_takeSettings(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jboolean {
+    match unsafe { from_handle(handle) } {
+        Some(session) => {
+            catch_unwind(AssertUnwindSafe(|| session.take_settings())).unwrap_or(false) as jboolean
+        }
+        None => 0,
+    }
+}
+
+/// 配置文件变了没有；变了就重读并应用，返回位掩码（没变是 0）。
+///
+/// 壳**只在键盘弹出来时调**（`onStartInputView`）：用户从设置页回来时键盘必然重弹一次，
+/// 这一条就够；桌面那种每秒轮询在安卓是白养一个定时器。见 [`Session::poll_config`]。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_configPoll(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jint {
+    match unsafe { from_handle(handle) } {
+        Some(session) => catch_unwind(AssertUnwindSafe(|| session.poll_config())).unwrap_or(0),
+        None => 0,
+    }
+}
+
+/// 从 Kotlin 的字符串取一个 Rust `String`。
+fn string_arg(env: &mut JNIEnv, value: &JString) -> Option<String> {
+    env.get_string(value).ok().map(String::from)
+}
+
+/// 把一个字符串交给 Kotlin。空串是有意义的值（配置那条路上表示「写成功了」）。
+fn into_jstring(env: &JNIEnv, text: &str) -> jstring {
+    match env.new_string(text) {
+        Ok(value) => value.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+// 下面这几个是**给设置页用的**，都只吃数据目录、**不吃会话句柄**：
+// 设置页与输入法服务是两个组件，会话可能在设置页开着的时候就被销毁了，
+// 手里那个 handle 就是野指针。设置页只跟 `config.toml` 打交道最安全。
+// 读写都走 [`crate::settings`]，与会话读的是同一份文件。
+
+/// 读整份配置，返回 JSON 信封（`{"ok":true,"config":{…}}` 或 `{"ok":false,"error":"…"}`）。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_configRead(
+    mut env: JNIEnv,
+    _this: JObject,
+    data_dir: JString,
+) -> jstring {
+    let Some(dir) = string_arg(&mut env, &data_dir) else {
+        return std::ptr::null_mut();
+    };
+    let text = catch_unwind(AssertUnwindSafe(|| {
+        crate::settings::read_json(Path::new(&dir))
+    }))
+    .unwrap_or_else(|_| r#"{"ok":false,"error":"读取失败"}"#.to_owned());
+    into_jstring(&env, &text)
+}
+
+/// 写一个开关。返回**空串表示成功**，非空是错误文案。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_configSetBool(
+    mut env: JNIEnv,
+    _this: JObject,
+    data_dir: JString,
+    section: JString,
+    key: JString,
+    value: jboolean,
+) -> jstring {
+    let (Some(dir), Some(section), Some(key)) = (
+        string_arg(&mut env, &data_dir),
+        string_arg(&mut env, &section),
+        string_arg(&mut env, &key),
+    ) else {
+        return std::ptr::null_mut();
+    };
+    let error = catch_unwind(AssertUnwindSafe(|| {
+        crate::settings::set_bool(Path::new(&dir), &section, &key, value != 0)
+    }))
+    .unwrap_or_else(|_| "写入失败".to_owned());
+    into_jstring(&env, &error)
+}
+
+/// 写一个整数（震动时长这类）。返回空串表示成功。
+///
+/// 收 `jint` 而不是 `jlong`：Kotlin 侧写 `Int` 更顺，而且跨语言**类型必须对上**
+/// （`Int` 的 JNI 签名是 `I`，与 `jlong` 对不上会直接崩）。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_configSetInt(
+    mut env: JNIEnv,
+    _this: JObject,
+    data_dir: JString,
+    section: JString,
+    key: JString,
+    value: jint,
+) -> jstring {
+    let (Some(dir), Some(section), Some(key)) = (
+        string_arg(&mut env, &data_dir),
+        string_arg(&mut env, &section),
+        string_arg(&mut env, &key),
+    ) else {
+        return std::ptr::null_mut();
+    };
+    let error = catch_unwind(AssertUnwindSafe(|| {
+        crate::settings::set_int(Path::new(&dir), &section, &key, i64::from(value))
+    }))
+    .unwrap_or_else(|_| "写入失败".to_owned());
+    into_jstring(&env, &error)
+}
+
+/// 写一个字符串（学习语言、震动风格这类枚举也走它）。返回空串表示成功。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_configSetString(
+    mut env: JNIEnv,
+    _this: JObject,
+    data_dir: JString,
+    section: JString,
+    key: JString,
+    value: JString,
+) -> jstring {
+    let (Some(dir), Some(section), Some(key), Some(value)) = (
+        string_arg(&mut env, &data_dir),
+        string_arg(&mut env, &section),
+        string_arg(&mut env, &key),
+        string_arg(&mut env, &value),
+    ) else {
+        return std::ptr::null_mut();
+    };
+    let error = catch_unwind(AssertUnwindSafe(|| {
+        crate::settings::set_string(Path::new(&dir), &section, &key, &value)
+    }))
+    .unwrap_or_else(|_| "写入失败".to_owned());
+    into_jstring(&env, &error)
+}
+
+/// 写一串字符串（领域词库那种清单）。`values` 是**一段 JSON 数组文本**，
+/// 传数组要在这边逐个取元素、还得处理元素取不出来的情况，为一个键不值得。
+/// 返回空串表示成功。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_configSetArray(
+    mut env: JNIEnv,
+    _this: JObject,
+    data_dir: JString,
+    section: JString,
+    key: JString,
+    values: JString,
+) -> jstring {
+    let (Some(dir), Some(section), Some(key), Some(raw)) = (
+        string_arg(&mut env, &data_dir),
+        string_arg(&mut env, &section),
+        string_arg(&mut env, &key),
+        string_arg(&mut env, &values),
+    ) else {
+        return std::ptr::null_mut();
+    };
+    // 解析不了就**别写**：当作空数组写进去会把用户的词库全关掉，那不是他要的
+    let Ok(values) = serde_json::from_str::<Vec<String>>(&raw) else {
+        return into_jstring(&env, "清单格式不对，没有写入");
+    };
+    let error = catch_unwind(AssertUnwindSafe(|| {
+        crate::settings::set_array(Path::new(&dir), &section, &key, &values)
+    }))
+    .unwrap_or_else(|_| "写入失败".to_owned());
+    into_jstring(&env, &error)
+}
+
+/// 列出随包的领域词库，返回 JSON 数组（每项 `{"stem":…,"name":…}`，名字是词库文件里那个中文名）。
+///
+/// 设置页照它列勾选框——**壳那边不硬编码那 11 本**，以后加一本词库这边跟着就有了。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_domainList(
+    mut env: JNIEnv,
+    _this: JObject,
+    bundle_dir: JString,
+) -> jstring {
+    let Some(dir) = string_arg(&mut env, &bundle_dir) else {
+        return std::ptr::null_mut();
+    };
+    let text = catch_unwind(AssertUnwindSafe(|| {
+        crate::settings::domain_list(Path::new(&dir))
+    }))
+    .unwrap_or_else(|_| "[]".to_owned());
+    into_jstring(&env, &text)
 }

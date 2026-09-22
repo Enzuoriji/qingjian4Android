@@ -29,10 +29,14 @@ pub fn on_key(key: KeyId) -> Act {
         // 数字与符号一样：键帽上是原字符，全角与否交给引擎
         KeyId::Literal(c) => Act::Punctuate(c),
         KeyId::Panel(panel) => Act::SwitchPanel(panel),
-        // 工具页那几格：0 剪贴板、1 表情、2 颜文字（表情与颜文字共用一份布局）
+        // 工具页那几格：0 剪贴板、1 表情、2 颜文字、3 设置（顺序见 `qingjian_render` 的 `TOOLS`）。
+        // **每一格都要写出来**：剩下的那些是空格子（页里留着给以后的工具），
+        // 用一个 `Tool(_)` 通配的话，点空处会莫名跳到颜文字页。
         KeyId::Tool(0) => Act::SwitchPanel(Panel::Clipboard),
         KeyId::Tool(1) => Act::SwitchPanel(Panel::Emoji),
-        KeyId::Tool(_) => Act::SwitchPanel(Panel::Kaomoji),
+        KeyId::Tool(2) => Act::SwitchPanel(Panel::Kaomoji),
+        KeyId::Tool(3) => Act::OpenSettings,
+        KeyId::Tool(_) => Act::Nothing,
         // 记录格报的是**屏幕上**第几格；它对着整份里的哪一条，是会话的事
         // （它才知道列表滚到哪儿了）
         KeyId::Clipboard(index) => Act::PasteClipboard(index),
@@ -112,6 +116,17 @@ mod tests {
             on_key(KeyId::Panel(Panel::Letters)),
             Act::SwitchPanel(Panel::Letters)
         );
+    }
+
+    #[test]
+    fn tool_slots_map_to_their_own_tools_and_the_empty_ones_do_nothing() {
+        assert_eq!(on_key(KeyId::Tool(0)), Act::SwitchPanel(Panel::Clipboard));
+        assert_eq!(on_key(KeyId::Tool(1)), Act::SwitchPanel(Panel::Emoji));
+        assert_eq!(on_key(KeyId::Tool(2)), Act::SwitchPanel(Panel::Kaomoji));
+        assert_eq!(on_key(KeyId::Tool(3)), Act::OpenSettings);
+        // 剩下的是**空格子**（工具页留着给以后的工具）：点了什么也不该发生
+        assert_eq!(on_key(KeyId::Tool(4)), Act::Nothing);
+        assert_eq!(on_key(KeyId::Tool(14)), Act::Nothing);
     }
 
     #[test]

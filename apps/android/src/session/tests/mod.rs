@@ -2,6 +2,11 @@
 //!
 //! 喂的是真实坐标，走的是完整触摸链路——点位从渲染器真正画出来的命中矩形里取，
 //! 所以布局一改、命中算错，这里先炸。「能打字能选词」这条验收因此是可断言的。
+//!
+//! 配置那一摊单独一个文件（[`config`]）：它测的是「改了配置文件会怎样」，
+//! 与这里的触摸链路是两回事，而这一份已经够长了。
+
+mod config;
 
 use super::flags;
 use super::{CANDIDATE_LIMIT, Session};
@@ -175,6 +180,18 @@ fn bundle_with_glossary(tag: &str, entries: &str) -> std::path::PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("glossary-en.qj"), entries).unwrap();
     dir
+}
+
+/// 高亮那个候选的注解文本，几段拼成一条——断言里用 `contains` 看有没有某段。
+fn annotation(session: &Session) -> String {
+    let Some(index) = session.frame.highlighted else {
+        return String::new();
+    };
+    session.frame.rows[index]
+        .annotation
+        .iter()
+        .map(|(text, _)| text.as_str())
+        .collect()
 }
 
 /// 候选条此刻画出来的词。
@@ -1077,44 +1094,66 @@ fn bundle_with_dicts(tag: &str, stem: &str, entries: &str) -> std::path::PathBuf
     dir
 }
 
-/// **随包的领域词库挂上了**：那本词库里的词能查出来。
+/// 造一个数据目录，里面只放一份指定的 `config.toml`。
+///
+/// `Session::open` 见到文件在就不写模板，所以这里写什么就生效什么。
+fn config_dir(tag: &str, toml: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("qingjian-config-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("config.toml"), toml).unwrap();
+    dir
+}
+
+/// **随包的领域词库挂不挂由配置定**：`[dictionaries] domains` 里列了的才加载。
 ///
 /// 靶子用「简青」：它**不在主词库里**（敲 `jianqing` 出来的是 减轻 / 奸情 / 捡起 那些），
 /// 只出现在测试自己写的那本里——它冒出来就等于「这本挂上了」。
 #[test]
-fn a_bundled_domain_dictionary_is_loaded() {
+fn a_bundled_domain_dictionary_follows_the_config() {
     let Some(dictionary) = dictionary() else {
         return;
     };
     let bundle = bundle_with_dicts("loaded", "medicine", "简青\tjian qing\t100000\n");
-    let open = |bundle: Option<&std::path::Path>| {
-        let mut session = Session::open(&dictionary, "zh-CN", bundle, None).expect("会话该能打开");
+    let data = config_dir("domains", "[dictionaries]\ndomains = [\"medicine\"]\n");
+    let open = |bundle: Option<&std::path::Path>, data: Option<&std::path::Path>| {
+        let mut session = Session::open(&dictionary, "zh-CN", bundle, data).expect("会话该能打开");
         session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
         session.keyboard_surface();
         session.bar_surface();
         session
     };
 
-    // 没挂这本词库时：主词库里没有这个词
-    let mut plain = open(None);
+    // 包里没有这一本：配置里开着也查不到
+    let mut plain = open(None, Some(&data));
     type_text(&mut plain, "jianqing");
     assert!(
         !drawn(&plain).contains(&"简青"),
-        "主词库里本来不该有它，实际画的是 {:?}",
+        "包里没这本词库，不该有它，实际画的是 {:?}",
         drawn(&plain)
     );
 
-    // 挂上之后：出来了。词频给得高，该排第一
-    let mut session = open(Some(&bundle));
+    // 包里有 + 配置里列了：出来了。词频给得高，该排第一
+    let mut session = open(Some(&bundle), Some(&data));
     type_text(&mut session, "jianqing");
     assert_eq!(
         drawn(&session).first().copied(),
         Some("简青"),
-        "该是那本词库里的词排第一，实际画的是 {:?}",
+        "配置里开了，该是那本词库里的词排第一，实际画的是 {:?}",
         drawn(&session)
     );
 
+    // 包里有、配置里没列（缺省只开 idioms）：照样不加载——**这条是设置页那 11 个勾选框的依据**
+    let mut closed = open(Some(&bundle), None);
+    type_text(&mut closed, "jianqing");
+    assert!(
+        !drawn(&closed).contains(&"简青"),
+        "配置里没开这本，不该有它，实际画的是 {:?}",
+        drawn(&closed)
+    );
+
     std::fs::remove_dir_all(&bundle).unwrap();
+    std::fs::remove_dir_all(&data).unwrap();
 }
 
 /// **挂了释义表，候选就带上译文**（候选条因此多画一行小字，那行本身归渲染器测）。

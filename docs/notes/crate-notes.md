@@ -85,8 +85,13 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 
 ## crates/qingjian-platform
 
-`Config`（TOML 配置文件，`[general]` / `[shortcut]` / `[fuzzy]` / `[dictionaries]` / `[apps]` / `[predict]` 分节，首次运行写模板，
-`set_value` 用 toml_edit 原地改键保留注释；`[model] enabled` 本地整句模型开关，`LocalModelConfig`）；`extra_dictionaries` 列出 / 加载随包领域词库与用户 `dicts/`
+`Config`（TOML 配置文件，`[general]` / `[shortcut]` / `[fuzzy]` / `[dictionaries]` / `[apps]` / `[predict]` / `[keyboard]` 分节，首次运行写模板，
+`set_value` 用 toml_edit 原地改键保留注释；`[model] enabled` 本地整句模型开关，`LocalModelConfig`；
+`[keyboard]` 是按键震动（`KeyboardConfig` + `VibrationStyle`，**只有安卓用**，2026-09-22）；
+**模板与缺省分平台的有三处**：`[shortcut]` 的修饰键、`[apps]`、`[dictionaries] domains`
+——安卓的领域词库**缺省 11 本全开**（候选条是横滑的，候选多不挤），桌面仍只开 `idioms`，
+两条分支在 `DictionariesConfig::default` 与 `template_domains!` 里，测试盯着它们与各自平台一致）；
+`extra_dictionaries` 列出 / 加载随包领域词库与用户 `dicts/`
 （mac 壳与 Windows Server 共用，同名 `.qj` 优先于 `.tsv`）；`protocol` 模块是 Windows Server ↔ TSF DLL 的 IPC 协议类型
 （`ClientMessage` / `ServerMessage` / `Frame` / `PreeditSegment`，全 serde，两端共用，见 `docs/design/architecture.md`「Windows：TSF」）。
 
@@ -509,7 +514,35 @@ K8 的「长按候选 = 删词」当年删不动正是因为这个（那个功�
   同时在 `Session` 里记一个 `english_candidates`，英文模式下字母进组句缓冲区（大小写按 Shift 定好
   再交给引擎，英文里大小写有意义），候选条出补全与拼错纠正；**没词表就退回直输**——
   字母不进缓冲区、直接打给应用，也就是桌面关掉 `[general] english_candidates` 时那条路。
-  桌面那个开关是配置项，安卓还没有配置文件（E7），先按「词表在不在」定。
+  那个开关**要两个条件**：随包词表在（没表就压根没候选可给），且配置里 `[general] english_candidates` 开着。
+- **配置（E7，2026-09-22 接上）**：落 `filesDir/config.toml`，与桌面**同一份格式、同一套缺省**
+  （`qingjian-platform` 的 `Config`；第一次开会话时把带注释的模板写出来，用户从此有份能手改的配置）。
+  路径只在 `settings::config_path` 一处拼，会话与设置页都走它。
+  - **读**取整份 JSON（`{"ok":…}` 信封，壳用安卓自带的 `org.json` 解、零依赖），**写**逐键
+    （`configSetBool/Int/String/Array`，返回空串 = 成功）。**值必须按类型分开写**——
+    `set_value` 收的是 `impl Into<toml_edit::Value>`，把 `false` 当字符串写进去会变成 `"false"`，
+    下次 `load` 直接解析失败。落盘仍走 `Config::set_value`，**注释与顺序都留着**。
+  - **设置页只跟文件打交道，不碰会话句柄**：`handle` 是 `Box<Session>` 的裸指针，
+    输入法服务随时可能在 `onDestroy` 里把它拆掉，设置页拿着就是野指针。改完也不用通知谁。
+  - **生效时机只有一处：`onStartInputView`**（`Session::poll_config`）。用户从设置页回来键盘必然
+    重弹一次，而这是**唯一一定到**的回调（BACK 收键盘时 `onFinishInput` 不来，E1 实测过）。
+    桌面要每秒轮询是因为它没有「键盘弹出」这个事件；安卓有，就不该白养一个定时器——
+    **打字那条路上一个字节都不加**。代价：手改配置文件要重弹一次键盘才生效。
+  - 判「变了没有」**比文件原文，不看 mtime**：`write_atomic` 是「写临时文件 + 改名」，
+    同一秒里改两次 mtime 可能相等，那一次就被吞了。顺带一个好处：坏文件只在原文真变了才重试。
+  - **改坏了**：`load` 报错就记一条日志、**沿用上一份能用的**，绝不替用户「修好」
+    （那会把他写的注释和顺序一起抹掉）；设置页那边把错误显示出来、控件按文件重读一遍。
+  - **推给引擎的收在 `push_to_engine` 一处**（模糊音 / 繁体 / 全角标点 / 中文优先 / 双拼 / 学习开关）。
+    `Session::open` 与 `apply_config` **两边都得调**——只在后者里设的话，启动读到的那份永远补不上
+    （`poll_config` 见文件没变直接返回 0，2026-09-22 被测试抓到）。换释义表与重读词库**不在**里面：
+    那两样要 mmap 文件，各自单独判「真变了没有」。
+- **震动（`[keyboard]` 分节）**：`vibration`（`off` / `tick` / `click` / `heavy` / `double` / `custom`）
+  加 `vibration_ms`。除 `custom` 外都走**系统的预置触感**（`VibrationEffect.createPredefined`）——
+  厂商针对自家马达调过，而一个手填的毫秒数（K2 那个 20ms 是「试出来的起点」）在每台机器上
+  表现都不一样；设备不支持时系统自己退回平台波形，所以不必查 `areEffectsSupported`。
+  键名在 `qingjian-platform` 的 `VibrationStyle` 与 Kotlin 的 `VibrationStyle` 各有一份
+  （跨语言没法共享），**改一边必须同时改另一边**。
+  壳在 `onStartInputView` 里读一次配置交给 `KeyFeedback`，不是每敲一下读文件。
 - **位图过 JNI**：`surface::encode` 出「8 字节头（宽高，各 u32 大端）+ 预乘 RGBA」，Kotlin 侧 `Bitmap.createBitmap(w, h, ARGB_8888)` + `copyPixelsFromBuffer` 原样吃下——
   `ARGB_8888` 的**内存布局**就是预乘 RGBA（`ARGB` 只是 `getPixel` 那套打包的说法），既不换通道也不重新预乘。这条当初用一次性探针在本机与设备上实测确认过（探针已删，结论留着），别靠记忆。
   **不要用 `setPixels(int[])`**，那条路径假定非预乘。

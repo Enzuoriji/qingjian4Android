@@ -151,6 +151,56 @@ object QingjianNative {
     /** 取走要原样交给应用的按键编号（并清掉）；这次没有返回空数组。编号见 [COMMAND_BACKSPACE]。 */
     external fun takeCommands(handle: Long): IntArray?
 
+    /**
+     * 取走「用户点了设置页」（并清掉）。掩码里带 [FLAG_SETTINGS] 时调一次。
+     *
+     * 会话开不了 Activity（它碰不到安卓的窗口系统），只记这一笔账，由壳去开。
+     */
+    external fun takeSettings(handle: Long): Boolean
+
+    /**
+     * 配置文件变了没有；变了就重读并应用。返回与 [touch] 同一种位掩码，**没变是 0**。
+     *
+     * **只在键盘弹出来时调一次**（[QingjianImeService.onStartInputView]）：用户从设置页回来时
+     * 键盘必然重弹一次，这一条就够；桌面那种每秒轮询在安卓是白养一个定时器。
+     * 返回 0 时壳**什么都不该做**——重画一张位图是几百微秒，白花。
+     */
+    external fun configPoll(handle: Long): Int
+
+    // 下面这几个**不吃会话句柄**，只吃目录：设置页与输入法服务是两个组件，
+    // 会话完全可能在设置页开着的时候就被销毁了，那时手里那个 handle 是野指针。
+    // 设置页只跟 config.toml 打交道最安全，改完由上面那个 configPoll 生效。
+
+    /**
+     * 读整份配置，返回 JSON 信封：`{"ok":true,"config":{…}}` 或 `{"ok":false,"error":"…"}`。
+     *
+     * 缺省值由 Rust 那边填好，所以拿到的就是**当前生效值**。用安卓自带的 `org.json` 解即可，
+     * 不必引任何第三方库。
+     */
+    external fun configRead(dataDir: String): String?
+
+    /** 写一个开关。**返回空串表示成功**，非空是错误文案。 */
+    external fun configSetBool(dataDir: String, section: String, key: String, value: Boolean): String?
+
+    /** 写一个整数。返回空串表示成功。 */
+    external fun configSetInt(dataDir: String, section: String, key: String, value: Int): String?
+
+    /** 写一个字符串（学习语言、震动风格这类枚举也走它）。返回空串表示成功。 */
+    external fun configSetString(dataDir: String, section: String, key: String, value: String): String?
+
+    /**
+     * 写一串字符串（领域词库那种清单）。`values` 是 **JSON 数组文本**（`JSONArray(list).toString()`）。
+     * 返回空串表示成功。
+     */
+    external fun configSetArray(dataDir: String, section: String, key: String, values: String): String?
+
+    /**
+     * 列出随包的领域词库，JSON 数组：`[{"stem":"medicine","name":"医学"}, …]`。
+     *
+     * 名字是从词库文件里读出来的，**壳这边不硬编码那 11 本**——以后加一本词库这边跟着就有了。
+     */
+    external fun domainList(bundleDir: String): String?
+
     /** [takeCommands] 里的编号：删应用里的一个字符。 */
     const val COMMAND_BACKSPACE = 1
 
@@ -180,6 +230,9 @@ object QingjianNative {
 
     /** 候选条还在惯性滑行：壳接着排下一帧（问 [flingStep]）。 */
     const val FLAG_FLING = 16
+
+    /** 用户点了工具页的「设置」：壳把键盘收起来、打开设置页（用 [takeSettings] 取走这笔账）。 */
+    const val FLAG_SETTINGS = 32
 
     init {
         System.loadLibrary("qingjian_android")

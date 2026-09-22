@@ -253,14 +253,103 @@ pub(super) fn kaomoji() -> Option<Path> {
     builder.finish()
 }
 
+/// 设置（工具页那一格）——Material 的 `settings`。
+pub(super) fn settings() -> Option<Path> {
+    let mut builder = PathBuilder::new();
+    builder.move_to(370.0, -80.0);
+    builder.line_to(354.0, -208.0);
+    builder.quad_to(341.0, -213.0, 329.5, -220.0);
+    builder.quad_to(318.0, -227.0, 307.0, -235.0);
+    builder.line_to(188.0, -185.0);
+    builder.line_to(78.0, -375.0);
+    builder.line_to(181.0, -453.0);
+    builder.quad_to(180.0, -460.0, 180.0, -466.5);
+    builder.line_to(180.0, -493.5);
+    builder.quad_to(180.0, -500.0, 181.0, -507.0);
+    builder.line_to(78.0, -585.0);
+    builder.line_to(188.0, -775.0);
+    builder.line_to(307.0, -725.0);
+    builder.quad_to(318.0, -733.0, 330.0, -740.0);
+    builder.quad_to(342.0, -747.0, 354.0, -752.0);
+    builder.line_to(370.0, -880.0);
+    builder.line_to(590.0, -880.0);
+    builder.line_to(606.0, -752.0);
+    builder.quad_to(619.0, -747.0, 630.5, -740.0);
+    builder.quad_to(642.0, -733.0, 653.0, -725.0);
+    builder.line_to(772.0, -775.0);
+    builder.line_to(882.0, -585.0);
+    builder.line_to(779.0, -507.0);
+    builder.quad_to(780.0, -500.0, 780.0, -493.5);
+    builder.line_to(780.0, -466.5);
+    builder.quad_to(780.0, -460.0, 778.0, -453.0);
+    builder.line_to(881.0, -375.0);
+    builder.line_to(771.0, -185.0);
+    builder.line_to(653.0, -235.0);
+    builder.quad_to(642.0, -227.0, 630.0, -220.0);
+    builder.quad_to(618.0, -213.0, 606.0, -208.0);
+    builder.line_to(590.0, -80.0);
+    builder.line_to(370.0, -80.0);
+    builder.close();
+    builder.move_to(440.0, -160.0);
+    builder.line_to(519.0, -160.0);
+    builder.line_to(533.0, -266.0);
+    builder.quad_to(564.0, -274.0, 590.5, -289.5);
+    builder.quad_to(617.0, -305.0, 639.0, -327.0);
+    builder.line_to(738.0, -286.0);
+    builder.line_to(777.0, -354.0);
+    builder.line_to(691.0, -419.0);
+    builder.quad_to(696.0, -433.0, 698.0, -448.5);
+    builder.quad_to(700.0, -464.0, 700.0, -480.0);
+    builder.quad_to(700.0, -496.0, 698.0, -511.5);
+    builder.quad_to(696.0, -527.0, 691.0, -541.0);
+    builder.line_to(777.0, -606.0);
+    builder.line_to(738.0, -674.0);
+    builder.line_to(639.0, -632.0);
+    builder.quad_to(617.0, -655.0, 590.5, -670.5);
+    builder.quad_to(564.0, -686.0, 533.0, -694.0);
+    builder.line_to(520.0, -800.0);
+    builder.line_to(441.0, -800.0);
+    builder.line_to(427.0, -694.0);
+    builder.quad_to(396.0, -686.0, 369.5, -670.5);
+    builder.quad_to(343.0, -655.0, 321.0, -633.0);
+    builder.line_to(222.0, -674.0);
+    builder.line_to(183.0, -606.0);
+    builder.line_to(269.0, -542.0);
+    builder.quad_to(264.0, -527.0, 262.0, -512.0);
+    builder.quad_to(260.0, -497.0, 260.0, -480.0);
+    builder.quad_to(260.0, -464.0, 262.0, -449.0);
+    builder.quad_to(264.0, -434.0, 269.0, -419.0);
+    builder.line_to(183.0, -354.0);
+    builder.line_to(222.0, -286.0);
+    builder.line_to(321.0, -328.0);
+    builder.quad_to(343.0, -305.0, 369.5, -289.5);
+    builder.quad_to(396.0, -274.0, 427.0, -266.0);
+    builder.line_to(440.0, -160.0);
+    builder.close();
+    builder.move_to(482.0, -340.0);
+    builder.quad_to(540.0, -340.0, 581.0, -381.0);
+    builder.quad_to(622.0, -422.0, 622.0, -480.0);
+    builder.quad_to(622.0, -538.0, 581.0, -579.0);
+    builder.quad_to(540.0, -620.0, 482.0, -620.0);
+    builder.quad_to(423.0, -620.0, 382.5, -579.0);
+    builder.quad_to(342.0, -538.0, 342.0, -480.0);
+    builder.quad_to(342.0, -422.0, 382.5, -381.0);
+    builder.quad_to(423.0, -340.0, 482.0, -340.0);
+    builder.close();
+    builder.move_to(480.0, -480.0);
+    builder.close();
+    builder.finish()
+}
+
 /// 每个图标自己的包围盒（Material 那套坐标）：`(左, 上, 右, 下)`。
 ///
 /// 画的时候按**这个框**等比缩到目标边长——960 的网格里四周是 Google 留的呼吸位，
 /// 照网格缩的话画出来比要的尺寸小一圈。
-pub(super) const BOXES: [(f32, f32, f32, f32); 5] = [
+pub(super) const BOXES: [(f32, f32, f32, f32); 6] = [
     (240.0, -736.0, 720.0, -240.0), // shift
     (80.0, -800.0, 880.0, -160.0),  // backspace
     (120.0, -920.0, 840.0, -120.0), // clipboard
     (80.0, -880.0, 880.0, -80.0),   // mood
     (80.0, -880.0, 880.0, -80.0),   // kaomoji
+    (78.0, -880.0, 882.0, -80.0),   // settings
 ];

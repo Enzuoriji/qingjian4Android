@@ -34,6 +34,7 @@ ICONS = [
         "sentiment_satisfied.svg",
         "颜文字（工具页那一格）——Material 的 `sentiment_satisfied`",
     ),
+    ("settings", "settings.svg", "设置（工具页那一格）——Material 的 `settings`"),
 ]
 
 

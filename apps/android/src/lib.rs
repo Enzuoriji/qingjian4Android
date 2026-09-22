@@ -9,6 +9,7 @@ mod error;
 mod keyboard;
 mod logging;
 mod session;
+mod settings;
 mod surface;
 mod touch;
 

@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  设置页：**原生控件**（`docs/contributing.md` 的「显示面自绘、控件面原生」——
+  候选窗、键盘那些显示面由渲染器出位图，偏好设置用各平台自己的控件）。
+
+  分组里那几组多选项（学习语言、震动、模糊音、词库）有的用代码填：词库那 11 本的名字
+  是从词库文件里读出来的（`QingjianNative.domainList`），壳这边不硬编码；另外几组跟着它
+  用同一套排法，省得一半 XML 一半代码。
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settings_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- 配置文件坏了时显示错误，别的控件全禁用（不替用户「修好」文件，桌面也是这条规矩） -->
+        <TextView
+            android:id="@+id/settings_error"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="16dp"
+            android:textColor="?android:attr/colorError"
+            android:visibility="gone" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/settings_group_learning"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="@string/settings_learning_language"
+            android:textSize="13sp" />
+
+        <RadioGroup
+            android:id="@+id/learning_language"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="24dp"
+            android:text="@string/settings_group_keyboard"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="@string/settings_vibration"
+            android:textSize="13sp" />
+
+        <RadioGroup
+            android:id="@+id/vibration"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <TextView
+            android:id="@+id/vibration_ms_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/settings_vibration_ms"
+            android:textSize="13sp" />
+
+        <SeekBar
+            android:id="@+id/vibration_ms"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="24dp"
+            android:text="@string/settings_group_input"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="@string/settings_fuzzy"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:id="@+id/fuzzy_grid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="24dp"
+            android:text="@string/settings_group_dictionaries"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:text="@string/settings_dictionaries"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:id="@+id/domain_grid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="24dp"
+            android:text="@string/settings_group_cloud"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <!-- 密钥存本机应用私有目录，不引任何第三方库、也不上云；页脚有一句说明 -->
+        <Switch
+            android:id="@+id/predict_enabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/settings_cloud_enabled" />
+
+        <EditText
+            android:id="@+id/predict_base_url"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/settings_cloud_base_url"
+            android:importantForAutofill="no"
+            android:inputType="textUri"
+            android:singleLine="true" />
+
+        <EditText
+            android:id="@+id/predict_model"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/settings_cloud_model"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:singleLine="true" />
+
+        <EditText
+            android:id="@+id/predict_api_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/settings_cloud_api_key"
+            android:importantForAutofill="no"
+            android:inputType="textPassword"
+            android:singleLine="true" />
+
+        <TextView
+            android:id="@+id/predict_slots_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/settings_cloud_slots"
+            android:textSize="13sp" />
+
+        <SeekBar
+            android:id="@+id/predict_slots"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="9" />
+
+        <Switch
+            android:id="@+id/predict_sentence"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/settings_cloud_sentence" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="12dp"
+            android:paddingBottom="8dp"
+            android:text="@string/settings_cloud_note"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+</ScrollView>

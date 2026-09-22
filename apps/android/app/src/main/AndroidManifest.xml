@@ -20,6 +20,18 @@
                 android:resource="@xml/method" />
         </service>
 
+        <!-- 设置页：从键盘的工具页那个「设置」格子进来。
+             `exported="false"` 是它只该由本应用拉起；**不指定 `android:process`**——
+             同进程才只有一份 .so，另起进程是白烧一份内存。
+             `excludeFromRecents` 免得它单独出现在最近任务里（它是输入法的一部分，不是一个应用）。 -->
+        <activity
+            android:name=".QingjianSettingsActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:label="@string/settings_title"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.DeviceDefault.DayNight" />
+
     </application>
 
 </manifest>

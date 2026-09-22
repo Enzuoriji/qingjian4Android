@@ -434,6 +434,7 @@ fn tool_icon(index: usize) -> Option<IconPainter> {
         0 => Some(icon::draw_clipboard),
         1 => Some(icon::draw_mood),
         2 => Some(icon::draw_kaomoji),
+        3 => Some(icon::draw_settings),
         _ => None,
     }
 }
