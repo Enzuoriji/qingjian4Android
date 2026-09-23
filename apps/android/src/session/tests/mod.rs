@@ -1578,6 +1578,110 @@ fn an_unknown_event_does_not_drop_the_pressed_key() {
     );
 }
 
+/// 连着快打同一个键十下：**十下都该出**（用户 2026-09-23：有些字母依旧会漏掉）。
+#[test]
+fn ten_quick_taps_all_type() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    for _ in 0..10 {
+        tap_key(&mut session, KeyId::Letter('n'));
+    }
+    // 数 n 的个数而不是比整串：引擎会在连续几个 n 之间插隔音符号（`n'n'`），那是正常的
+    let typed = preedit(&session).unwrap_or_default();
+    assert_eq!(
+        typed.chars().filter(|c| *c == 'n').count(),
+        10,
+        "连着打十下 n，一个都不该漏（实际 {typed:?}）"
+    );
+}
+
+/// 手指抖到隔壁键、**抬手时坐标已经回到原来的键上**——这一下不该漏。
+///
+/// 中间那一下「抖出去」会把 `sliding` 置上，而那时它是**粘性**的：抬手时明明已经回到
+/// 键上，却因为 `sliding` 还挂着而整下作废。用户 2026-09-23 报的「有些字母依旧会漏掉」
+/// 就是这种——只有抬手坐标与最后一拍 Move 的坐标不一致时才露出来，真机上手指抖得快，
+/// 系统的 MOVE 又不是每一像素都给，很容易撞上。
+#[test]
+fn a_wobble_out_that_comes_back_by_lift_still_types() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (nx, ny) = key_centre(&session, KeyId::Letter('n'));
+    let (mx, _) = key_centre(&session, KeyId::Letter('m'));
+
+    session.touch(MotionAction::Down, POINTER, nx, ny);
+    // 抖到隔壁 m 上：这一拍 `sliding` 被置上
+    session.touch(MotionAction::Move, POINTER, mx, ny);
+    // 抬手时坐标已经回到 n 上——**中间没有第二拍 Move**
+    session.touch(MotionAction::Up, POINTER, nx, ny);
+    session.bar_surface();
+    session.keyboard_surface();
+
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("n"),
+        "抬手在 n 上，这一下就该出 n"
+    );
+}
+
+/// 两根拇指**交叠**着打：前一根还没抬、后一根已经落下（真人快打就是这样）。
+///
+/// 用户报的「en 不出 n」很可能就出在这种时序上——测试里一根一根按是测不出来的。
+#[test]
+fn two_thumbs_overlapping_both_type() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (ex, ey) = key_centre(&session, KeyId::Letter('e'));
+    let (nx, ny) = key_centre(&session, KeyId::Letter('n'));
+
+    // 左手按 e，还没抬；右手已经按到 n 上
+    session.touch(MotionAction::Down, 0, ex, ey);
+    session.touch(MotionAction::Down, 1, nx, ny);
+    // 左手先抬 → e 上屏
+    session.touch(MotionAction::Up, 0, ex, ey);
+    // 右手再抬 → n 上屏
+    session.touch(MotionAction::Up, 1, nx, ny);
+    session.bar_surface();
+    session.keyboard_surface();
+
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("en"),
+        "两根拇指交叠着打，e 与 n 都该出"
+    );
+}
+
+/// 快打时**每一下都带点抖动**（手指落点不会那么准，中途还会挪几像素）。
+#[test]
+fn fast_taps_with_jitter_all_type() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (nx, ny) = key_centre(&session, KeyId::Letter('n'));
+    for step in 0..8 {
+        // 按下点、中途点、抬起点各偏一点——方向换个花样，别总是同一个偏移
+        let drift = if step % 2 == 0 { 1.0 } else { -1.0 };
+        session.touch(
+            MotionAction::Down,
+            POINTER,
+            nx + drift * 2.0,
+            ny + drift * 2.0,
+        );
+        session.touch(MotionAction::Move, POINTER, nx - drift * 3.0, ny + drift);
+        session.touch(MotionAction::Up, POINTER, nx - drift * 3.0, ny + drift);
+        session.bar_surface();
+        session.keyboard_surface();
+    }
+    let typed = preedit(&session).unwrap_or_default();
+    assert_eq!(
+        typed.chars().filter(|c| *c == 'n').count(),
+        8,
+        "带点抖动的快打，一个都不该漏（实际 {typed:?}）"
+    );
+}
+
 /// 在 `id` 这个键上按下，往 `(dx, dy)` 方向滑，再抬起。
 fn drag(session: &mut Session, id: KeyId, dx: f32, dy: f32) {
     let (x, y) = key_centre(session, id);

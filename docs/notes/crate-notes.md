@@ -520,6 +520,12 @@ K13 ②**（那版滑的是上面那条标签条）。六个要点：
 按它判的话 `⌫` 永远清不了。另外矩形要**趁 `presses` 还没动**取，
 那之后 `pressed_key()` 就查不到了。
 
+**抬手那一刻说了算（2026-09-23）**：`Keyboard::touch` 的 Up 分支不再看 `Press::sliding`——
+那条判据换成「`hit(x, y) == 键` 或者 `within_slop(按下点)`」。`sliding` 只留着管**画不画
+按下态**（`refresh_pressed`）。漏字的机制：快打时手指抖出键一拍就把 `sliding` 置上，
+而它是粘性的（每拍重算只保证「当前」对，抬手那一下的坐标与最后一拍 MOVE 未必一样），
+抬手回到键上也不认账。测试 `a_wobble_out_that_comes_back_by_lift_still_types` 盯着这条。
+
 **剪贴板的锁（2026-09-23）**：控制行从两个键变三个（返回 / 清空 / 锁），
 `Session::clipboard_locked` 记着，`paste_clipboard` 按它决定回不回字母页，
 `set_panel` 切到别的页时解开。顺带把 `Keyboard::surface` 的参数从 8 个收成 6 个——
