@@ -10,6 +10,8 @@ mod cloud;
 mod config;
 
 use super::flags;
+use std::time::{Duration, Instant};
+
 use super::{CANDIDATE_LIMIT, EMOJI_SLOTS, KAOMOJI_SLOTS, Session};
 use crate::action::{Act, Command};
 use crate::touch::MotionAction;
@@ -2837,6 +2839,8 @@ fn the_clear_key_empties_the_clipboard() {
     open_clipboard(&mut session);
 
     tap_key(&mut session, KeyId::ClipboardClear);
+    // 「清空」要按两下（2026-09-23 起的二次确认）
+    tap_key(&mut session, KeyId::ClipboardClear);
 
     assert!(session.clipboard.is_empty(), "该一条不剩");
     assert_eq!(session.take_commit(), None, "清空不上屏任何东西");
@@ -3266,6 +3270,95 @@ fn shrinking_the_pages_pulls_the_scroll_back() {
     assert!(session.emoji_page() <= 1, "当前页也该落到存在的页上");
 }
 
+/// 「清空」要**按两下**才真清（用户 2026-09-22 要的）：手滑一下就清光所有历史太狠。
+#[test]
+fn clearing_the_clipboard_takes_two_taps() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("一条");
+    open_clipboard(&mut session);
+
+    tap_key(&mut session, KeyId::ClipboardClear);
+    assert_eq!(
+        session.clipboard.entries(),
+        ["一条"],
+        "第一下只该改成「确认清空」，不该真清"
+    );
+
+    tap_key(&mut session, KeyId::ClipboardClear);
+    assert!(session.clipboard.entries().is_empty(), "第二下才真清");
+}
+
+/// 隔太久（超过那 5 秒）再点，算**新一轮的第一下**——不能因为「点过一次」就一路放行。
+#[test]
+fn a_stale_confirmation_starts_over() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("一条");
+    open_clipboard(&mut session);
+
+    tap_key(&mut session, KeyId::ClipboardClear);
+    // 装作已经过去一阵子了（真等 5 秒测试太慢）
+    session.clear_armed = Some(Instant::now() - Duration::from_secs(6));
+
+    tap_key(&mut session, KeyId::ClipboardClear);
+    assert_eq!(
+        session.clipboard.entries(),
+        ["一条"],
+        "过期之后那一下只是新一轮的第一下，不该清掉"
+    );
+}
+
+/// 清空之后，系统剪贴板里那条被**再报一遍不该又记回来**（用户 2026-09-22 报的：
+/// 键盘每次弹出来壳都会把系统剪贴板当前内容报一遍，清空根本挡不住它）。
+#[test]
+fn a_cleared_entry_does_not_come_back() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("会被清掉的");
+    open_clipboard(&mut session);
+    tap_key(&mut session, KeyId::ClipboardClear);
+    tap_key(&mut session, KeyId::ClipboardClear);
+    assert!(session.clipboard.entries().is_empty(), "该清光了");
+
+    // 键盘又弹出来一次，壳把系统剪贴板里那条原样再报一遍
+    session.note_clipboard("会被清掉的");
+    assert!(
+        session.clipboard.entries().is_empty(),
+        "刚清掉的那条不该又冒出来"
+    );
+
+    // 真复制了别的东西，就该正常记下来
+    session.note_clipboard("新复制的");
+    assert_eq!(session.clipboard.entries(), ["新复制的"]);
+}
+
+/// 在一条记录上**往左滑着**要删时，气泡要弹出来说「松手删除」（2026-09-23 补的例外）。
+///
+/// 剪贴板那几格平时不弹气泡（2026-09-21 用户要的），可那条例外把「删除态」也一起挡了——
+/// 手指划过去只看得见卡片变个色，说不出松手会干什么。
+#[test]
+fn dragging_an_entry_left_shows_the_delete_hint() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("一条");
+    open_clipboard(&mut session);
+
+    let (x, y) = key_centre(&session, KeyId::Clipboard(0));
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - 30.0 * DENSITY, y);
+
+    assert!(
+        !session.popup_surface().is_empty(),
+        "往左滑着要删的时候该弹「松手删除」"
+    );
+    session.touch(MotionAction::Up, POINTER, x - 30.0 * DENSITY, y);
+}
+
 /// 剪贴板历史**落盘**：换一个会话（＝进程重启）它还在。
 ///
 /// 别的剪贴板测试都用内存态（`ready()` 的数据目录传 `None`），这条特意走一遍真文件。
@@ -3301,6 +3394,8 @@ fn the_clipboard_survives_a_restart() {
 
     // 清空也要落盘，别下次起来又冒出来
     open_clipboard(&mut session);
+    tap_key(&mut session, KeyId::ClipboardClear);
+    // 「清空」要按两下（2026-09-23 起的二次确认）
     tap_key(&mut session, KeyId::ClipboardClear);
     drop(session);
 

@@ -190,6 +190,11 @@ const EMOJI_SLOTS: usize = 15;
 /// 所以能摆的颜文字是 19 个（2026-09-23：用户要求「最近固定第一个、颜文字往它右面排」）。
 const KAOMOJI_SLOTS: usize = 20 - 1;
 
+/// 「清空」的第一下之后，多久之内点第二下才算确认（超过就退回原样）。
+///
+/// 5 秒：够看清键帽上那句「确认清空」再点，又不至于放着很久还挂着待确认。
+const CLEAR_CONFIRM_WINDOW: Duration = Duration::from_secs(5);
+
 /// 手速超过这么多（**点/毫秒**）就算「甩」，朝手甩的方向翻一页，跟拖了多远无关。
 ///
 /// 0.05 点/毫秒 = 50 点/秒，正是安卓 `ViewConfiguration` 的 `scaledMinimumFlingVelocity`
@@ -571,6 +576,19 @@ pub struct Session {
     /// 剪贴板列表甩出去之后的那一段滑行（与候选条那条带子各走各的）。
     clipboard_fling: Option<Fling>,
 
+    /// 「清空」的第一下已经点过了、正等第二下确认（**5 秒内**有效）。
+    ///
+    /// 手滑一下就清光所有历史太狠，所以做成点两下：第一下把键帽改成「确认清空」、
+    /// 第二下才真清（见 [`Self::request_clear`]）。过期**不靠定时器**——
+    /// 那只有在要重画的时候才有意义，趁每次触摸顺手看一眼（[`Self::expire_clear`]）。
+    clear_armed: Option<Instant>,
+
+    /// **刚被「清空」清掉的那一条**（系统剪贴板里那条）。
+    ///
+    /// 键盘每次弹出来壳都会把系统剪贴板当前内容报一遍，不挡住的话刚清完又冒出来一条。
+    /// 等报上来的内容跟它不一样了（用户复制了别的东西）就清掉这个标记。
+    cleared_clipboard: Option<String>,
+
     /// 刚才**真的滚过剪贴板列表**的那根手指（与 [`Self::scrolled`] 同一个用途）。
     clipboard_scrolled: Option<i32>,
 
@@ -897,6 +915,8 @@ impl Session {
                 Recent::open(dir.join(CLIPBOARD_FILE), CLIPBOARD_LIMIT)
             }),
             clipboard_fling: None,
+            clear_armed: None,
+            cleared_clipboard: None,
             clipboard_scrolled: None,
             clipboard_scroll: 0.0,
             frame: Frame::default(),
@@ -1146,6 +1166,7 @@ impl Session {
                 mode,
                 clipboard,
                 offset,
+                self.clear_armed.is_some(),
                 emoji,
             ),
             None => Vec::new(),
@@ -1188,6 +1209,7 @@ impl Session {
                 mode,
                 clipboard,
                 offset,
+                self.clear_armed.is_some(),
                 emoji,
             ),
             None => Vec::new(),
@@ -1233,6 +1255,10 @@ impl Session {
     /// 键盘那边的按钮语义（**要松**：手指抖几像素不该掉字）在 [`Keyboard::touch`] 里，
     /// 候选条这边见 [`Self::touch_bar`]。
     pub fn touch(&mut self, action: MotionAction, pointer: i32, x: f32, y: f32) -> i32 {
+        // 「确认清空」过期了就复位（不用定时器，见 [`Self::expire_clear`]）
+        if self.expire_clear() {
+            self.mark_keyboard_dirty();
+        }
         if matches!(action, MotionAction::Down | MotionAction::PointerDown) {
             // 手指一落下就把滑行停住：滑到一半想抓回来是「摸住就停」那个手感，
             // 不这么做的话按下去的那一下会和正在跑的惯性互相抢
@@ -1761,7 +1787,7 @@ impl Session {
             Act::AcceptPrediction => self.accept_prediction(),
             Act::PasteClipboard(index) => self.paste_clipboard(index),
             Act::DeleteClipboard(index) => self.delete_clipboard(index),
-            Act::ClearClipboard => self.clear_clipboard(),
+            Act::ClearClipboard => self.request_clear(),
         }
     }
 
@@ -2205,6 +2231,13 @@ impl Session {
     /// 同一条文本再复制一次不重复记，只把它挪到最前——「刚复制的永远第一条」。
     /// 超过 [`CLIPBOARD_LIMIT`] 条丢最旧的。空白的壳那边就滤掉了，这里再挡一道。
     pub fn note_clipboard(&mut self, text: &str) -> i32 {
+        // **刚清掉的那条别再记回来**：键盘每次弹出来，壳都会把系统剪贴板里当前那条
+        // 报一遍（`onStartInputView` 那条路），不挡的话「清空」刚点完就又冒出来一条
+        // （用户 2026-09-22 报的）。等系统剪贴板真变了（下面那行）自然就过去了。
+        if self.cleared_clipboard.as_deref() == Some(text) {
+            return self.mask();
+        }
+        self.cleared_clipboard = None;
         if self.clipboard.remember(text) {
             self.after_clipboard_change();
         }
@@ -2528,7 +2561,43 @@ impl Session {
     }
 
     /// 清空整份剪贴板历史。
+    /// 点「清空」：**第一下只是预备，第二下才真清**（用户 2026-09-22 要的）。
+    ///
+    /// 手滑一下就清光所有历史太狠。第一下之后键帽改口说「确认清空」，再过 `CLEAR_CONFIRM_WINDOW`
+    /// 之内点第二下才清；超时或者在这之间点了别处，就退回原样（下次还得点两下）。
+    fn request_clear(&mut self) {
+        // 顺手看一眼过没过期：过期了就当这一下是新一轮的第一下
+        self.expire_clear();
+        if self.clear_armed.is_some() {
+            self.clear_armed = None;
+            self.clear_clipboard();
+            return;
+        }
+        self.clear_armed = Some(Instant::now());
+        self.mark_keyboard_dirty();
+    }
+
+    /// 「确认清空」这类状态过期了没有；过期的顺手复位。返回要不要重画。
+    ///
+    /// **不用定时器**：它只在要重画的时候才有意义，而每次触摸本来就要经过这儿
+    /// （见 [`Self::touch`]）。代价是「过期之后不碰键盘，键帽上那句提醒会一直留着」——
+    /// 无所谓，反正一碰就复位了，而且那时候点下去也只会重新开始确认。
+    fn expire_clear(&mut self) -> bool {
+        let Some(at) = self.clear_armed else {
+            return false;
+        };
+        if at.elapsed() < CLEAR_CONFIRM_WINDOW {
+            return false;
+        }
+        self.clear_armed = None;
+        true
+    }
+
+    /// 清空剪贴板历史（第二下确认之后才走到这儿）。
     fn clear_clipboard(&mut self) {
+        // 记住**刚清掉的是哪一条**（历史里最新那条就是系统剪贴板里那条）——
+        // 下次键盘弹出来时壳会把它再报一遍，`note_clipboard` 靠这个标记挡住。
+        self.cleared_clipboard = self.clipboard.entries().first().cloned();
         if self.clipboard.clear() {
             self.after_clipboard_change();
         }

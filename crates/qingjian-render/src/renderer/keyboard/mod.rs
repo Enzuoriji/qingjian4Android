@@ -775,9 +775,23 @@ fn label(key: &Key, state: &KeyboardState) -> String {
         // 剪贴板那一格写的是**那条文本**。喂进来的 `state.clipboard` 就是这一屏该画的
         // 那几条（会话按滚动量切好的），所以格号直接就是下标；滚到头、后面没那么多条时
         // 给空串，`draw_key` 见空就整个不画。
-        KeyId::Clipboard(index) => state.clipboard.get(index).cloned().unwrap_or_default(),
+        KeyId::Clipboard(index) => {
+            // 卡片是**单行**设计：换行符后面那一行会被画到卡片外面（裁掉），看着就是个白框。
+            // 按用户说的「多行的部分直接省略」——只留第一行（2026-09-23）。
+            // **只在这儿截**：上屏时交出去的还是原文（见 `Session::clipboard`）。
+            // 按用户说的「多行的部分直接省略」——只留第一行（2026-09-23）。
+            // **只在这儿截**：上屏时交出去的还是原文（见 `Session::clipboard`）。
+            let text = state.clipboard.get(index).cloned().unwrap_or_default();
+            text.lines().next().unwrap_or_default().to_owned()
+        }
         KeyId::Tool(index) => TOOLS.get(index).copied().unwrap_or_default().to_owned(),
-        KeyId::ClipboardClear => "清空".to_owned(),
+        // 「清空」要按两下：第一下之后这张键帽改口，说清楚再点一下就真清
+        KeyId::ClipboardClear => if state.clear_armed {
+            "确认清空"
+        } else {
+            "清空"
+        }
+        .to_owned(),
         // 表情格子与分类标签**不走这儿**：两样都由 `draw_emoji_page` 自己画
         // （标签按分类数均分、一格画图标还是文字得看是哪一类；格子要横着摆好几页）
         KeyId::Emoji(_) | KeyId::EmojiGroup(_) => String::new(),

@@ -513,6 +513,13 @@ K13 ②**（那版滑的是上面那条标签条）。六个要点：
   颜文字那条格子从**键盘顶边**起，**第 0 格固定是「最近」**（`draw_recent_cell`），
   颜文字从第 1 格起排（`draw_emoji_grid` 的 `start_slot` 参数）。
 
+**剪贴板打磨（K14，2026-09-23）**：`Session` 多两个字段——`clear_armed: Option<Instant>`
+（第一下点过了、等第二下）与 `cleared_clipboard: Option<String>`（刚清掉的是哪条）。
+两者都**不引定时器**：过期由 `expire_clear()` 惰性判（`touch` 开头调一次），
+「别记回来」由 `note_clipboard` 里一句相等判断挡。键帽那句「确认清空」靠
+`KeyboardState::clear_armed` 传进渲染器——`Keyboard::surface` 的参数因此到 8 个，
+挂了 `#[allow(clippy::too_many_arguments)]` 并留了话：下次再加就该像 `EmojiView` 那样打包。
+
 **按键判定改用「格子的边界」（2026-09-23，修「打字偶尔漏字母」）**：命中区从前只盖住键帽
 （`renderer/keyboard/mod.rs` 里 `keys.push(KeyHit { x, width: key_width, .. })`），键帽之间
 那条缝**不归任何键**——键盘上约三成的面积是死区，手指落偏一点就一个字都不出（震动照发，

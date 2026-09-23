@@ -461,6 +461,9 @@ impl Keyboard {
     ///
     /// Shift 与中 / 英是引擎那头的状态（`Session` 拿着），画的时候借过来用一下；
     /// 剪贴板那一份也是（记录在会话里，键盘只负责画出来）；键盘自己只记「哪个键看着是按下的」。
+    // 参数到 8 个了：下次再往里加东西（不是改现有的）就该像 `EmojiView` 那样
+    // 打包一个 `ClipboardView`——剪贴板那一摊（列表 + 零头 + 清空确认）本来是挨着的一家人。
+    #[allow(clippy::too_many_arguments)]
     pub fn surface(
         &mut self,
         renderer: Option<&mut Renderer>,
@@ -468,6 +471,7 @@ impl Keyboard {
         mode: InputMode,
         clipboard: &[String],
         clipboard_offset: f32,
+        clear_armed: bool,
         emoji: EmojiView<'_>,
     ) -> Vec<u8> {
         if self.metrics.width <= 0.0 {
@@ -481,6 +485,7 @@ impl Keyboard {
                 pressed: self.pressed,
                 clipboard,
                 clipboard_offset,
+                clear_armed,
                 emoji_pages: emoji.pages,
                 emoji_shift: emoji.shift,
                 emoji_groups: emoji.labels,
@@ -760,6 +765,7 @@ impl Keyboard {
     /// 按住键时那张预览气泡的位图（8 字节头 + 预乘 RGBA）。没按住、或那个键没什么可预览的，就是空的。
     ///
     /// 壳收到空字节串要把浮动小窗收起来——跟候选条「空表示不该在」一个规矩。
+    #[allow(clippy::too_many_arguments)]
     pub fn popup_surface(
         &mut self,
         renderer: Option<&mut Renderer>,
@@ -767,6 +773,7 @@ impl Keyboard {
         mode: InputMode,
         clipboard: &[String],
         clipboard_offset: f32,
+        clear_armed: bool,
         emoji: EmojiView<'_>,
     ) -> Vec<u8> {
         let Some((key, rect)) = self.pressed_key() else {
@@ -780,7 +787,12 @@ impl Keyboard {
         }
         // 剪贴板那几格**不弹气泡**（2026-09-21 用户要的）：气泡正好压在下面那几条上，
         // 按住一条想看别的就碍事了；那儿也没什么要预览的——一条的内容本来就写在卡片上。
-        if matches!(key.id, KeyId::Clipboard(_)) {
+        //
+        // **往左滑着要删的时候除外**（2026-09-23 补的那条例外）：上面那条说的是「平时」，
+        // 结果把删除态也一起挡了（这段早退在 `pressed_deleting` 那个分支**之前**返回）——
+        // 手指划过去只看得见卡片变个色，说不出松手会干什么。
+        // 「松手删除」那句话的代码一直在下面，只是走不到这儿。
+        if matches!(key.id, KeyId::Clipboard(_)) && !self.pressed_deleting {
             self.forget_popup();
             return Vec::new();
         }
@@ -825,6 +837,7 @@ impl Keyboard {
                 pressed: self.pressed,
                 clipboard,
                 clipboard_offset,
+                clear_armed,
                 emoji_pages: emoji.pages,
                 emoji_shift: emoji.shift,
                 emoji_groups: emoji.labels,

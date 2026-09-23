@@ -39,7 +39,7 @@ pub enum InputMode {
 ///
 /// 2026-09-23 之前标签行是一屏五个文字格、靠横滑看后面的分类；现在**全部分类平铺一行**
 /// （照 fcitx5-android），所以一格里塞不下「Smileys & Emotion」这种长名字——改画图标。
-/// 颜文字面板那 22 个中文分类反过来：一行挤 22 个图标小到认不出，那儿画文字。
+/// （颜文字那页后来整个不分类了，那条标签行都不要了，见 `KeyboardLayout::kaomoji`。）
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GroupLabel {
     /// 画图标。
@@ -131,6 +131,12 @@ pub struct KeyboardState<'a> {
     ///
     /// 类内只有一页时给 `None`：没什么可指示的，不画。
     pub emoji_pager: Option<(f32, usize)>,
+
+    /// 「清空」那一下点过了、正等第二下确认。
+    ///
+    /// 剪贴板的清空要按两下（第一下手滑就清光所有历史太狠），第一下之后键帽改口说
+    /// 「确认清空」——画什么由它定，什么时候过期由会话定（那边有钟）。
+    pub clear_armed: bool,
 
     /// 剪贴板列表**让开不足一格的那点**（点，0 到一格高之间）。
     ///
