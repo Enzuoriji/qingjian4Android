@@ -1130,15 +1130,22 @@ impl Session {
             let theme = self.theme();
             // 渲染是从**传进去的第一格**开始往外铺的，所以要喂它「这一格相对视口的位置」
             let scroll = self.strip.local_scroll(self.visible().start, self.scroll);
+            // 先算好：闭包里借的是 `self.renderer`，里面再问 `self` 会撞借用
+            let bottom_line = self.bottom_line();
             let rendered = self.renderer.as_mut().and_then(|renderer| {
                 renderer
+                    // 最后那个参数必须与 [`Self::bar_height`] **同一个来源**
+                    // （`bottom_line()` = 有释义表 **或** 云联想开着）。
+                    // 从前这儿只传了 `self.annotations`：开着云联想、没挂释义表时，
+                    // 算高度按「有那一行」、画出来却没有——位图比壳以为的矮一整行，
+                    // 于是**所有按键整体上偏**，按 `n` 出 `j`（用户 2026-09-23 报的）。
                     .render_bar(
                         &self.frame,
                         self.width,
                         &theme,
                         self.density,
                         scroll,
-                        self.annotations,
+                        bottom_line,
                     )
                     .ok()
             });
@@ -1707,7 +1714,10 @@ impl Session {
 
     /// 候选条在整块输入视图里占的高度（像素）。键盘接在它下面。
     fn bar_pixels(&self) -> f32 {
-        self.bar_height() * self.density
+        // **必须与渲染器算位图高度时同一个口径**（那边是 `(高 × 密度).round()`，见
+        // `render_bar`）：这个数是壳拿来把触摸 y 换算到键盘的偏移，差一像素，
+        // 所有按键就整体偏一像素——边缘上按就串到隔壁键（2026-09-23 的测试量出来的）。
+        (self.bar_height() * self.density).round()
     }
 
     /// 手指离按下那点这么近（像素）就算没挪窝。**要按密度换算**：安卓自己的触摸阈值是 8 dp，

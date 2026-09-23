@@ -118,6 +118,10 @@ impl Session {
         if config.predict != *self.config.predict() {
             attach_cloud(&mut self.engine, &config.predict);
             self.config.set_predict(config.predict.clone());
+            // **候选条高度也跟着这个开关走**（最下面那行「译文 + 云补全」，
+            // 见 `Session::bottom_line`）——不重画的话位图还是老高度，
+            // 而壳换算触摸用的那个数已经变了，所有按键会整体串位（2026-09-23）。
+            self.bar_dirty = true;
         }
 
         push_to_engine(&mut self.engine, &config);
@@ -142,6 +146,7 @@ impl Session {
                 self.annotations = false;
                 self.config.set_language(None);
                 // 那行小字没了，候选条要矮一截——位图得重画
+                // （高度看的是 `Session::bottom_line`：有释义表 **或** 云联想开着）
                 self.bar_dirty = true;
                 return;
             }
@@ -161,7 +166,9 @@ impl Session {
                 self.engine.set_translator(Box::new(glossary));
                 self.annotations = true;
                 self.config.set_language(Some(language));
-                // 高度跟着 `annotations` 走（off ↔ 非 off 差一行），位图必须重画
+                // 那行译文回来了，候选条要高一行——位图必须重画
+                // （高度看的是 `Session::bottom_line`，不是 `annotations` 本身：
+                // 云联想单独开着时那一行也要留）
                 self.bar_dirty = true;
             }
             Err(error) => {

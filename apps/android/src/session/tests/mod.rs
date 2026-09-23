@@ -1578,6 +1578,85 @@ fn an_unknown_event_does_not_drop_the_pressed_key() {
     );
 }
 
+/// 配置文件里把云联想开着、又没挂释义表时，触摸偏移也**必须**跟位图对得上
+/// （2026-09-23：用户就是这么进坏状态的——E8 开了云联想，学习语言没设）。
+#[test]
+fn cloud_prediction_from_the_config_keeps_the_touch_offset_honest() {
+    let Some(dictionary) = dictionary() else {
+        return;
+    };
+    let data = config_dir(
+        "cloud",
+        "[predict]
+enabled = true
+base_url = \"http://127.0.0.1:9\"
+api_key = \"test\"
+",
+    );
+    // bundle 传 None：没有释义表，`annotations` 是假的——只剩云联想撑着那一行
+    let mut session = Session::open(&dictionary, "zh-CN", None, Some(&data)).expect("会话该能打开");
+    session.configure(WIDTH, PORTRAIT_HEIGHT, DENSITY, 0.0, false, false);
+    session.keyboard_surface();
+    assert!(
+        session.engine.prediction_enabled(),
+        "配置里开着，联想器该挂上"
+    );
+    assert!(!session.annotations, "没传 bundle，不该有释义表");
+
+    type_text(&mut session, "ni");
+    let bytes = session.bar_surface();
+    assert!(!bytes.is_empty(), "组句时候选条该在位");
+    assert_eq!(
+        surface_height(&bytes),
+        session.bar_pixels() as u32,
+        "开着云联想、没释义表时，位图高度与触摸偏移也必须一致"
+    );
+}
+
+/// 位图字节串里那个高（8 字节头的后 4 字节，大端）。
+fn surface_height(bytes: &[u8]) -> u32 {
+    assert!(bytes.len() >= 8, "连头都没有，不是一张位图");
+    u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]])
+}
+
+/// **候选条位图的高度，必须等于壳拿来换算触摸的那个数**。
+///
+/// 壳把触摸 y 减掉 `bar_pixels()` 才是键盘里的坐标——这个数跟位图实际多高对不上的话，
+/// **所有按键会整体上下偏那么多**：偏一行，按 `n` 就出 `j`（用户 2026-09-23 报的
+/// 「按下 n 判断的是 j」）。`⌫`／空格这些更低的行也会跟着串位。
+///
+/// 这里特意造出**会让两个来源分开**的那个组合：云联想开着、但没挂释义表
+/// （候选条最下面那一行「译文 + 云补全」的高度，两边都得算上）。
+#[test]
+fn the_bar_bitmap_height_matches_the_touch_offset() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.annotations = false;
+    let predict = qingjian_predict::PredictConfig {
+        enabled: true,
+        base_url: "http://127.0.0.1:9".to_owned(),
+        // 只是把联想器建起来，不发请求——**必需一个密钥**，给个假的
+        api_key: Some("test".to_owned()),
+        ..Default::default()
+    };
+    super::config::attach_cloud(&mut session.engine, &predict);
+    assert!(
+        session.engine.prediction_enabled(),
+        "云联想该挂上了——这条测试要的就是「开着云联想、没有释义表」这个组合"
+    );
+
+    // 组句，候选条才画得出来
+    tap_key(&mut session, KeyId::Letter('n'));
+    let bytes = session.bar_surface();
+    assert!(!bytes.is_empty(), "组句时候选条该在位");
+    assert_eq!(
+        surface_height(&bytes),
+        session.bar_pixels() as u32,
+        "候选条位图的高度必须等于壳换算触摸用的那个数——差多少，所有按键就整体偏多少"
+    );
+}
+
 /// 连着快打同一个键十下：**十下都该出**（用户 2026-09-23：有些字母依旧会漏掉）。
 #[test]
 fn ten_quick_taps_all_type() {

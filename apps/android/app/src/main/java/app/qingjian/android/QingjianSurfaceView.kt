@@ -88,6 +88,9 @@ class QingjianSurfaceView(context: Context) : View(context) {
     /** 尺寸变化时回调，用来让服务重新告诉 Rust 该画多宽（转屏等）。 */
     var onConfigure: (() -> Unit)? = null
 
+    /** `getLocationOnScreen` 的接收缓冲——**每次触摸都要用**，别在热路径上反复分配。 */
+    private val locationOnScreen = IntArray(2)
+
     /** 每根手指按下的时刻，用来判够不够久。 */
     private val downAt = HashMap<Int, Long>()
 
@@ -205,7 +208,24 @@ class QingjianSurfaceView(context: Context) : View(context) {
         val index = event.actionIndex
         val action = event.actionMasked
         val pointer = event.getPointerId(index)
-        val y = event.getY(index)
+
+        // **坐标自己从「屏幕坐标 − 视图在屏幕上的位置」算**，不用 `event.getY()`。
+        //
+        // 原因：输入法窗口的位置是系统那边摆的，**它比窗口真正搬到位慢一拍**
+        // （2026-09-23 量到的：候选条一长高，窗口 42ms 就搬到新位置了，
+        // 而输入系统过了 250ms 还在按老位置换算触摸）。那一拍里 `event.getY()`
+        // 整整少算一个候选条的高度（模拟器上 90 像素 ≈ 一行键），
+        // 于是**按 `n` 出 `j`**——用户报的「打 en 不出 n」就是这个：
+        // 每次刚开始组句（候选条从矮的变高的）之后紧跟着的那一下必中。
+        //
+        // `getRawY()` 是触摸在屏幕上的真实位置，`getLocationOnScreen()` 是视图**此刻**
+        // 真正在哪儿，两者一减就是视图内的坐标，跟系统那边记的窗口位置无关。
+        // 差值对所有手指是同一个数（窗口只有一个），所以只算一次、各自加上。
+        val loc = locationOnScreen
+        getLocationOnScreen(loc)
+        val dy = (event.getRawY() - event.getY()) - loc[1]
+        val dx = (event.getRawX() - event.getX()) - loc[0]
+        val y = event.getY(index) + dy
 
         when (action) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
@@ -252,12 +272,16 @@ class QingjianSurfaceView(context: Context) : View(context) {
         if (action == MotionEvent.ACTION_MOVE) {
             for (i in 0 until event.pointerCount) {
                 flags = flags or (
-                    onTouch?.invoke(action, event.getPointerId(i), event.getX(i), event.getY(i))
-                        ?: 0
+                    onTouch?.invoke(
+                        action,
+                        event.getPointerId(i),
+                        event.getX(i) + dx,
+                        event.getY(i) + dy,
+                    ) ?: 0
                     )
             }
         } else {
-            flags = onTouch?.invoke(action, pointer, event.getX(index), y) ?: 0
+            flags = onTouch?.invoke(action, pointer, event.getX(index) + dx, y) ?: 0
         }
         onTouchDone?.invoke(flags)
         // 抬手的这一下要**在 touch 之后报**：Rust 那边靠「刚才是谁在滚这条带子」判该不该甩，
