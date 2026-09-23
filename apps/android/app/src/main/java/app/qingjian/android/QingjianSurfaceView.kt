@@ -51,8 +51,17 @@ class QingjianSurfaceView(context: Context) : View(context) {
     val bottomInsetPoints: Float
         get() = bottomInset / resources.displayMetrics.density
 
-    /** 触摸回调 `(actionMasked, pointerId, x, y)`，坐标是整块输入视图的、且是**那根手指**的。 */
-    var onTouch: ((Int, Int, Float, Float) -> Unit)? = null
+    /**
+     * 一次触摸：把**一根手指**的位置送进 Rust，返回它要的刷新掩码。
+     *
+     * `ACTION_MOVE` 时会对**每一根**手指各调一次（见 `onTouchEvent`），所以这里**只送数据、
+     * 不做事后收尾**——收尾（取位图、重画）交给 [onTouchDone]，一次事件只做一遍。
+     * 从前是每根手指各调一次带收尾的版本，两根手指移动就是**整屏重画两遍**（2026-09-23 修的）。
+     */
+    var onTouch: ((Int, Int, Float, Float) -> Int)? = null
+
+    /** 一次事件的所有手指都送完了：拿累积的掩码做收尾（取位图、重画）。 */
+    var onTouchDone: ((Int) -> Unit)? = null
 
     /**
      * 连发回调：某根手指按住够久了，问一次「要不要再来一下」，参数是那根手指的 pointer id。
@@ -237,13 +246,20 @@ class QingjianSurfaceView(context: Context) : View(context) {
         // 本来就不带 pointer index），照着它只报第一根的话，第二根手指的滑动 / 气泡 /
         // 手势全都不工作——两只拇指交替快打时那一半的按键就「没反应」。
         // 按下 / 抬起 / 取消都带 index，照旧只报那一根。
+        // 掩码在这一层累积：几根手指就取几次「谁要重画」的并集，**收尾只做一次**。
+        // 每根手指各收一次尾的话，两根手指移动 = 整屏重画两遍。
+        var flags = 0
         if (action == MotionEvent.ACTION_MOVE) {
             for (i in 0 until event.pointerCount) {
-                onTouch?.invoke(action, event.getPointerId(i), event.getX(i), event.getY(i))
+                flags = flags or (
+                    onTouch?.invoke(action, event.getPointerId(i), event.getX(i), event.getY(i))
+                        ?: 0
+                    )
             }
         } else {
-            onTouch?.invoke(action, pointer, event.getX(index), y)
+            flags = onTouch?.invoke(action, pointer, event.getX(index), y) ?: 0
         }
+        onTouchDone?.invoke(flags)
         // 抬手的这一下要**在 touch 之后报**：Rust 那边靠「刚才是谁在滚这条带子」判该不该甩，
         // 而那个记录是移动时记下的，抬手时已经无用了（见 `Session::start_fling`）
         if (lifting) {

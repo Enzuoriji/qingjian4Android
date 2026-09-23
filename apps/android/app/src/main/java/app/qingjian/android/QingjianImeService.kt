@@ -216,11 +216,13 @@ class QingjianImeService : InputMethodService() {
         // 发尺寸变化回调，等它就成了死锁。宽度变了（转屏）时再走 onConfigure。
         configure(view)
         view.onConfigure = { configure(view) }
+        // 送数据与收尾**分开**：`ACTION_MOVE` 会按根逐次调 `onTouch`，收尾只在
+        // `onTouchDone` 里做一次——不然两根手指移动就是整屏重画两遍（2026-09-23 修的）。
         view.onTouch = { action, pointer, x, y ->
-            val started = SystemClock.elapsedRealtime()
-            val flags = QingjianNative.touch(handle, action, pointer, x, y)
-            afterInput(view, flags, started)
+            touchStartedAt = SystemClock.elapsedRealtime()
+            QingjianNative.touch(handle, action, pointer, x, y)
         }
+        view.onTouchDone = { flags -> afterInput(view, flags, touchStartedAt) }
         // 长按连发：计时器在视图那边，到点问 Rust「这根手指按住的键要不要再来一下」。
         // 哪个键连发是输入语义，壳不判断——Rust 那边没按着该连发的键就什么也不做。
         view.onRepeat = { pointer ->
@@ -257,6 +259,9 @@ class QingjianImeService : InputMethodService() {
      * 同步做，一次超过一帧的时间打字就会跟不上手感。慢了就报出来。连发走的是同一条路，
      * 所以这里也是连发的耗时观测点——连发要是慢，手感一样钝。
      */
+    /** 这一批触摸是什么时候开始的——`onTouch` 与 `onTouchDone` 两次回调之间递这个。 */
+    private var touchStartedAt = 0L
+
     private fun afterInput(view: QingjianSurfaceView, flags: Int, started: Long) {
         // 先上屏再镜像拼音：上屏会把组字区替换掉，剩下的拼音要紧跟着补回去
         if (flags and QingjianNative.FLAG_COMMIT != 0) {
