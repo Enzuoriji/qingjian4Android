@@ -90,6 +90,14 @@ object QingjianNative {
     external fun resetPanel(handle: Long): Int
 
     /**
+     * 返回键：把开着的那层收掉（展开选词的面板、工具页这些），返回同一种位掩码。
+     *
+     * **返回 0 表示这一下不归输入法管**——壳照常把返回交给应用（收起键盘）。
+     * 非 0 就说明收掉了点什么，那一下不再往下传。
+     */
+    external fun dismiss(handle: Long): Int
+
+    /**
      * 一次触摸，返回 [FLAG_BAR] 那样的位掩码，告诉壳哪些面要重取。
      *
      * `pointer` 是安卓给的 pointer id，`x` / `y` 是**那根手指**的坐标，且坐标是整块输入视图的

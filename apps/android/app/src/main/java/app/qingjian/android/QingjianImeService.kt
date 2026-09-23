@@ -428,6 +428,26 @@ class QingjianImeService : InputMethodService() {
         connection.finishComposingText()
     }
 
+    /**
+     * 返回键：先把输入法**自己开着的那层**收掉（展开选词的面板、工具页这些），
+     * 收掉了这一下就不再往下传。
+     *
+     * Rust 那边说「这一下归我管」才吃（返回非 0 的掩码）；什么都没开着就返回 0，
+     * 返回键照常交给应用收起键盘——那是用户熟悉的动作，输入法不该抢。
+     *
+     * 放在 `onKeyDown` 而不是 `onKeyUp`：`onKeyUp` 到时系统多半已经把窗口收了。
+     */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK && handle != 0L) {
+            val flags = QingjianNative.dismiss(handle)
+            if (flags != 0) {
+                inputView?.let { afterInput(it, flags, SystemClock.elapsedRealtime()) }
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     /** 换应用时把没上屏的拼音丢掉，免得在 A 应用敲的拼音跑到 B 应用里。 */
     /**
      * 键盘每次弹出来都**回字母页**：收起来再弹出来不该还停在数字页。

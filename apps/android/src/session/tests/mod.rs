@@ -2085,22 +2085,20 @@ fn the_backspace_popup_warns_before_clearing() {
     assert!(warned.len() > plain.len(), "提示是句话，位图该比一个图标大");
 }
 
-/// **候选条上按住不放不做任何事**——长按就是「慢慢点一下」。
+/// **候选条上按住不放 = 展开选词**（K13）。
 ///
-/// 原先是「长按候选 = 删词」（K8），2026-09-20 用户说这功能没用，摘掉了：
-/// 删词走的是 `Engine::forget`，而引擎缺省那个 `NoLearner` 什么都删不动，
-/// 纯词库词更是本来就没学习记录可清——接上 `Learner` 才有意义，见
-/// `docs/plan/android-keyboard.md` 的 K8 与 K8+。
+/// 长按在候选条上本来是空的：K8 那个「长按删候选」2026-09-20 摘掉了，此后是
+/// 「长按 = 慢慢点一下」。K13 把它改成开面板——候选条右端已经有 `×` 和 `‹ ›` 三块，
+/// 再加一个入口太挤，而长按一直没派上用场。
 ///
-/// 这条守着两件事：心跳一直敲（壳每 50ms 一次）时**不删任何东西**，
-/// 以及**松手仍然照常选中那个候选**——长按不该变成一个「按了没反应」的黑洞。
+/// 这条守着两件事：心跳一直敲（壳每 50ms 一次）时**面板开得起来**，
+/// 以及**松手不上屏**——那一下从「点候选」变成了「开面板」。
 #[test]
-fn holding_a_candidate_does_nothing_but_still_selects_on_release() {
+fn holding_a_candidate_opens_the_expanded_panel() {
     let Some(mut session) = ready() else {
         return;
     };
     type_text(&mut session, "nihao");
-    let first = drawn(&session).first().map(|text| (*text).to_owned());
     let (x, y) = bar_centre(&session, BarHitId::Candidate(0));
 
     session.touch(MotionAction::Down, POINTER, x, y);
@@ -2108,16 +2106,74 @@ fn holding_a_candidate_does_nothing_but_still_selects_on_release() {
         session.repeat(POINTER);
     }
     session.bar_surface();
+    session.keyboard_surface();
 
-    assert_eq!(
-        drawn(&session).first().map(|text| (*text).to_owned()),
-        first,
-        "按住不放不该动候选"
-    );
+    // 「收得掉」就是「开着」——收起来这一个动作之外没有别的含义
+    assert_ne!(session.dismiss(), 0, "长按候选条之后该开着面板");
 
     session.touch(MotionAction::Up, POINTER, x, y);
 
-    assert_eq!(session.take_commit(), first, "松手该照常选中按住的那个候选");
+    assert_eq!(
+        session.take_commit(),
+        None,
+        "开面板那一下不该顺手把按住的那个候选上屏"
+    );
+}
+
+/// 面板里点一格就上屏那一个——它不是只能看。
+///
+/// 点哪儿落在哪一格由渲染器量（与候选条同一套），这里不指定是哪个词：
+/// 格子宽度跟着主题与候选内容走，钉死一个坐标的测试会随字体一动就碎。
+#[test]
+fn tapping_a_cell_in_the_panel_commits_it() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let (x, y) = bar_centre(&session, BarHitId::Candidate(0));
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.repeat(POINTER);
+    session.bar_surface();
+    session.keyboard_surface();
+
+    // 面板占着键盘那块地方，所以它的局部坐标要加上候选条那一段才是整块视图的
+    let top = session.bar_pixels();
+    session.touch(MotionAction::Down, 2, 30.0, top + 40.0);
+    session.touch(MotionAction::Up, 2, 30.0, top + 40.0);
+
+    assert!(
+        session.take_commit().is_some(),
+        "点面板里的格子该上屏那个候选"
+    );
+}
+
+/// 上屏之后面板自己收起来：候选都上屏了，面板里已经没得选，
+/// 留着它等于把键盘白占着（下一次敲键盘会落在一块空面板上）。
+#[test]
+fn committing_closes_the_panel() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    type_text(&mut session, "nihao");
+    let (x, y) = bar_centre(&session, BarHitId::Candidate(0));
+
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.repeat(POINTER);
+    session.bar_surface();
+    session.keyboard_surface();
+    session.touch(MotionAction::Up, POINTER, x, y);
+
+    let top = session.bar_pixels();
+    session.touch(MotionAction::Down, 2, 30.0, top + 40.0);
+    session.touch(MotionAction::Up, 2, 30.0, top + 40.0);
+    assert!(session.take_commit().is_some(), "先得上屏一个");
+
+    assert_eq!(
+        session.dismiss(),
+        0,
+        "上屏之后面板该已经收了，没什么可返回的"
+    );
 }
 
 /// 空格没有字可显示，按住也不弹——弹一个空框子只是晃眼。

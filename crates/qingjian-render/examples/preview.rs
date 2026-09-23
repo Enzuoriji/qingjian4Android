@@ -7,9 +7,9 @@ use std::time::Instant;
 
 use clap::Parser;
 use qingjian_render::{
-    FontLibrary, Frame, Key, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Layout, Popup,
-    Preedit, PreeditSegment, PreeditStyle, Renderer, Row, Shadow, ShiftState, StatusCell, Theme,
-    Tone,
+    FontLibrary, Frame, Key, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Layout,
+    PanelArea, Popup, Preedit, PreeditSegment, PreeditStyle, Renderer, Row, Shadow, ShiftState,
+    StatusCell, Theme, Tone,
 };
 
 /// 预览键盘用的宽度（点）——按一台常见手机的竖屏宽。
@@ -256,6 +256,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Renderer::bar_height(&Theme::light(), false, false),
     );
 
+    // 展开面板（安卓）：候选折成多行、盖住键盘那一块。滚到一半的样子也出一张
+    let panel_rows = panel_candidates();
+    // 面板高度 = 键盘高度（它盖住键盘），宽度与候选条一样通栏
+    let panel_height = KeyboardTheme::light().height;
+    for (theme_name, theme) in [("light", Theme::light()), ("dark", Theme::dark())] {
+        for (state_name, scroll) in [("top", 0.0), ("scrolled", PANEL_SCROLL)] {
+            let started = Instant::now();
+            let rendered = renderer.render_candidates_panel(
+                &panel_rows,
+                PanelArea {
+                    width: BAR_WIDTH,
+                    height: panel_height,
+                    // 预览里不让开手势条：那是壳报上来的数，出图时按 0 看得更全
+                    bottom_inset: 0.0,
+                },
+                &theme,
+                args.scale,
+                scroll,
+            )?;
+            let elapsed = started.elapsed();
+            let path = args
+                .out
+                .join(format!("panel-{state_name}-{theme_name}.png"));
+            rendered.rendered.pixmap.save_png(&path)?;
+            let (w, h) = rendered.rendered.content_size_points();
+            println!(
+                "{:<28} {:>4.0}×{:<4.0}pt  {:>8.2?}  {} 个格子  {}",
+                format!("panel-{state_name}-{theme_name}"),
+                w,
+                h,
+                elapsed,
+                rendered.grid.len(),
+                path.display()
+            );
+        }
+    }
+
     for probe in [
         "青简 hello 🙂 日本語 骨直曜",
         "開発(かいはつ)する",
@@ -339,6 +376,53 @@ fn bar_with_sentence() -> Frame {
     let mut frame = bar_page();
     frame.sentence = Some("你好，很高兴认识你！".to_owned());
     frame
+}
+
+/// 预览「滚过一段」那张图滚多远（点）：两行多一点，上下都露着半行才看得出是滚过的。
+const PANEL_SCROLL: f32 = 96.0;
+
+/// 展开面板上的一屏：敲 `ni` 那种高频音节的候选（真机上 `ni` 有五百来个，
+/// 这里取三十个，够铺满一屏再滚起来）。
+///
+/// **长短故意不齐**：面板是按内容分宽的，全是一样长的词就看不出这一点了。
+fn panel_candidates() -> Vec<Row> {
+    const WORDS: [&str; 30] = [
+        "你",
+        "尼",
+        "泥",
+        "逆",
+        "拟",
+        "妮",
+        "匿",
+        "腻",
+        "倪",
+        "霓",
+        "你好",
+        "你们",
+        "你的",
+        "你我",
+        "你呢",
+        "匿名",
+        "逆天",
+        "泥沙",
+        "拟定",
+        "溺爱",
+        "你好像",
+        "你好看",
+        "你好吗",
+        "逆水行舟",
+        "泥沙俱下",
+        "拟于不伦",
+        "你死我活",
+        "你",
+        "拟",
+        "泥",
+    ];
+    WORDS
+        .iter()
+        .enumerate()
+        .map(|(index, word)| annotated(index, word, &[], false))
+        .collect()
 }
 
 /// 横排真机截图那一次云端整句到了：拼音行右侧带云朵的整句补全。

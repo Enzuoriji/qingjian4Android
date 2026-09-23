@@ -455,6 +455,25 @@ Server 每次轮询比对用户 `dicts\` 的路径 / mtime / 长度快照，配�
 JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `QingjianNative.kt` 一一对应（类名与包名参与符号名），**改一边必须同时改另一边**。
 设计与取舍见 `docs/design/keyboard.md`。
 
+**展开选词（K13 ①，2026-09-23）**：候选条**长按**（`Session::repeat` 里查 `pressed` 里有没有这根手指）
+弹一块多行网格盖住键盘区，一屏铺三十来个候选、能上下滚。四个要点：
+
+- **面板占的就是键盘那张位图**：`keyboard_surface()` 在 `expanded` 时分流到 `expanded_surface()`，
+  所以**壳一行没改**——还是「上面一条候选条、下面一张位图」，触摸也照样按 y 分派
+  （`Session::touch` 里 `expanded && y >= bar_pixels` 那一路走 `touch_expanded`）。
+- **量宽、画法、行高都与候选条共用**：渲染器 `renderer/panel/` 的 `CandidateGrid` 折行用的是
+  `bar_cell_widths` 量出来的那份宽度，每格调 `draw_bar_row` 画——同一个词在两处一样宽。
+- **高度照键盘位图算**（`keyboard_height() + bottom_inset`，不是 `keyboard_height()`）：键盘的键
+  只排到 `theme.height`，底下那一段是留给系统导航栏的，候选铺满整张图会伸进去被压住。
+  候选画在一张**只有可用高度**的小图上再整张贴回来（画布自己不裁，与键盘剪贴板页同一个路数）。
+- **滚动上限从这一帧的网格上问**，所以滚动时**不能**把 `expanded_view` 置空当脏标记——
+  那样下一拍 `max_scroll` 返回 0、滚不动。用单独的 `expanded_dirty`，位图留着。
+
+**返回键**（加在 K13）：`Session::dismiss` 是唯一一个「这一下归不归我管」的 JNI——
+**返回 0 = 不归输入法**，壳照常把返回交给应用去收键盘；收面板、把页切回字母页都一定带着
+`KEYBOARD` 那一位，所以「非 0 = 我处理了」成立。壳挂在 `onKeyDown`（不能用 `onKeyUp`：
+那会儿窗口多半已经被系统收掉了）。
+
 **用户学习（2026-09-22 接上）**：`Session::open` 的 `data_dir`（安卓传的是 `filesDir`）有值时，
 在 `filesDir/learning/` 下开一个 `FrequencyLearner`（主文件 `user.tsv`，几张兄弟表由它推导同目录）
 并 `with_learner` 挂上；**任何一步失败都只记日志、退回不挂**——学不了顶多是排得不够顺，输入法起不来是另一回事。

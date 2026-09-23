@@ -23,7 +23,8 @@ use qingjian_lm::BigramModel;
 use qingjian_platform::extra_dictionaries;
 use qingjian_render::{
     BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
-    Preedit, PreeditSegment, PreeditStyle, RenderedBar, Renderer, Row, ShiftState, Theme, Tone,
+    PanelArea, Preedit, PreeditSegment, PreeditStyle, RenderedBar, RenderedPanel, Renderer, Row,
+    ShiftState, Theme, Tone,
 };
 use qingjian_translate::Glossary;
 
@@ -467,6 +468,36 @@ pub struct Session {
     /// 键盘那半边的手指记在 [`Keyboard`] 自己手里，两边各记各的：一根手指属于谁，
     /// 由按下时落在哪半边决定，之后一直归它。这样抬起时不会因为手指划到了别处而丢掉这一下。
     pressed: Vec<BarPress>,
+
+    /// 展开选词的面板开着没有（长按候选条弹出来，见 [`Self::open_expanded`]）。
+    ///
+    /// 开着时**键盘那张位图换成面板**（[`Self::keyboard_surface`] 在那儿分流）：
+    /// 面板要盖住键盘、高度也照键盘来，所以壳那边一行都不用改——还是
+    /// 「上面一条候选条、下面一张位图」，触摸也照样按 y 分派。
+    expanded: bool,
+
+    /// 面板被拉上去多少（点，纵向）。0 是第一行贴着面板顶边。
+    ///
+    /// 与剪贴板列表、表情格子**同一套做法**：跟手滚，随手停在哪儿都行。
+    expanded_scroll: f32,
+
+    /// 面板甩出去之后的那一段滑行（与别的几套各走各的）。
+    expanded_fling: Option<Fling>,
+
+    /// 刚才**真的滚过面板**的那根手指（与 [`Self::scrolled`] 同一个用途）。
+    expanded_scrolled: Option<i32>,
+
+    /// 画好的面板（位图 + 命中）。收起时是 `None`。
+    ///
+    /// 滚动当中**不丢掉旧的**：滚动上限要从这一帧的网格上问（格子是折行铺的，多高只有
+    /// 铺完才知道），丢了它下一拍就滚不动了。要重画由 [`Self::expanded_dirty`] 说了算。
+    expanded_view: Option<RenderedPanel>,
+
+    /// 面板要重画。滚动一格、候选换了都置它，画完清掉。
+    expanded_dirty: bool,
+
+    /// 此刻按在面板上的那根手指。
+    expanded_press: Option<PanelPress>,
 }
 
 /// 一根按在候选条上的手指。
@@ -490,6 +521,25 @@ struct BarPress {
     /// 上一次报上来的横坐标。横滚要的是**位移增量**（这一下比上一下挪了多少），
     /// 不是「离按下那点多远」——跟手滚就得一次一次地加。
     last: f32,
+}
+
+/// 一根按在展开面板上的手指。
+///
+/// 面板**一次只认一根**：它是「一屏看全部」，没有多指同时点的道理，滚动本来就是单指的事。
+/// 后来的一根会顶掉前一根（与候选条那批手指不一样，那边一根一根都记着）。
+#[derive(Debug, Clone, Copy)]
+struct PanelPress {
+    /// 安卓给的 pointer id。不是它的事件一律不理。
+    pointer: i32,
+
+    /// 按下时的坐标（面板局部像素）。抬起时靠它判「挪没挪窝」。
+    at: (f32, f32),
+
+    /// 上一次报上来的纵坐标。竖滚要的是**位移增量**，与候选条那边同理。
+    last: f32,
+
+    /// 手指已经滑开了，这一下不再算「点击」——拖过就只是滚了一下，抬起不上屏。
+    sliding: bool,
 }
 
 impl Session {
@@ -713,6 +763,13 @@ impl Session {
             pending_commands: Vec::new(),
             pending_settings: false,
             pressed: Vec::new(),
+            expanded: false,
+            expanded_scroll: 0.0,
+            expanded_fling: None,
+            expanded_scrolled: None,
+            expanded_view: None,
+            expanded_dirty: false,
+            expanded_press: None,
         })
     }
 
@@ -751,6 +808,8 @@ impl Session {
     /// 跟 [`Self::clear`] **分开**：换应用要连拼音一起丢掉，而 BACK 收起键盘再弹出来**不该动拼音**
     /// ——安卓那时根本没结束输入（`onFinishInput` 不触发），只是窗口藏了。
     pub fn reset_panel(&mut self) -> i32 {
+        // 键盘又弹出来了：展开面板收起来（用户要打字了，拼音与候选都留着）
+        self.close_expanded();
         self.set_panel(Panel::Letters);
         self.mask()
     }
@@ -956,7 +1015,13 @@ impl Session {
     }
 
     /// 键盘的位图（8 字节头 + 预乘 RGBA）。没配过宽度、渲染器不可用、或者键盘不由这里画时返回空。
+    ///
+    /// **面板开着时这里是面板**（[`Self::expanded_surface`]）：两者占同一块地方、同高同宽，
+    /// 所以壳那边不必知道有两个东西——还是「上面一条候选条、下面一张位图」。
     pub fn keyboard_surface(&mut self) -> Vec<u8> {
+        if self.expanded {
+            return self.expanded_surface();
+        }
         let (shift, mode) = (self.shift, self.mode);
         let (first, end) = self.clipboard_range();
         let (clipboard, offset) = (
@@ -1034,27 +1099,34 @@ impl Session {
             self.scrolled = None;
             self.clipboard_fling = None;
             self.clipboard_scrolled = None;
+            self.expanded_fling = None;
+            self.expanded_scrolled = None;
         }
         let bar_pixels = self.bar_pixels();
-        let fired = self
-            .keyboard
-            .as_mut()
-            .and_then(|keyboard| keyboard.touch(action, pointer, x, y - bar_pixels));
-        match fired {
-            Some(Fired::Key(key)) => self.apply(action::on_key(key)),
-            Some(Fired::MoveCursor(steps)) => self.move_cursor(steps),
-            Some(Fired::ClearToStart) => self.clear_to_start(),
-            Some(Fired::DeleteClipboard(index)) => self.apply(Act::DeleteClipboard(index)),
-            Some(Fired::ClipboardScroll(delta)) => {
-                // 记下是这根手指在滚——抬手时靠它判该不该甩（那时 `presses` 里已经没有它了）
-                if matches!(self.panel, Panel::Emoji | Panel::Kaomoji) {
-                    self.scroll_emoji(delta);
-                } else {
-                    self.clipboard_scrolled = Some(pointer);
-                    self.scroll_clipboard(delta);
+        if self.expanded && y >= bar_pixels {
+            // 展开面板开着：键盘那块地方画的是面板，落在那里的触摸也就归它
+            self.touch_expanded(action, pointer, x, y - bar_pixels);
+        } else {
+            let fired = self
+                .keyboard
+                .as_mut()
+                .and_then(|keyboard| keyboard.touch(action, pointer, x, y - bar_pixels));
+            match fired {
+                Some(Fired::Key(key)) => self.apply(action::on_key(key)),
+                Some(Fired::MoveCursor(steps)) => self.move_cursor(steps),
+                Some(Fired::ClearToStart) => self.clear_to_start(),
+                Some(Fired::DeleteClipboard(index)) => self.apply(Act::DeleteClipboard(index)),
+                Some(Fired::ClipboardScroll(delta)) => {
+                    // 记下是这根手指在滚——抬手时靠它判该不该甩（那时 `presses` 里已经没有它了）
+                    if matches!(self.panel, Panel::Emoji | Panel::Kaomoji) {
+                        self.scroll_emoji(delta);
+                    } else {
+                        self.clipboard_scrolled = Some(pointer);
+                        self.scroll_clipboard(delta);
+                    }
                 }
+                None => {}
             }
-            None => {}
         }
         self.touch_bar(action, pointer, x, y);
         self.mask()
@@ -1116,6 +1188,14 @@ impl Session {
     /// 原先这儿挂着「长按候选 = 删词」，2026-09-20 摘掉了，理由见
     /// `docs/plan/android-keyboard.md` 的 K8。
     pub fn repeat(&mut self, pointer: i32) -> i32 {
+        // 手指按在**候选条**上够久了：展开选词（K13）。
+        //
+        // 入口选长按是因为候选条右端已经有 `×` 和 `‹ ›` 三块，再加一个太挤；
+        // 而长按在候选条上本来就没用上（K8 那个「长按删候选」2026-09-20 摘掉了）。
+        if self.pressed.iter().any(|held| held.pointer == pointer) {
+            self.open_expanded();
+            return self.mask();
+        }
         let key = self.keyboard.as_mut().and_then(|keyboard| {
             let key = keyboard.held(pointer).filter(|key| action::repeats(*key))?;
             // 记一笔，抬起时就不再按「点击」补一下了
@@ -1148,6 +1228,11 @@ impl Session {
             MotionAction::Down | MotionAction::PointerDown => {
                 // 落在键盘那头，不归这里管
                 if y >= self.bar_pixels() {
+                    return;
+                }
+                // 面板开着的时候，候选条这一条就是「面板外面」：点它收起来，那一下不上屏
+                if self.expanded {
+                    self.close_expanded();
                     return;
                 }
                 let hit = self.bar.as_ref().and_then(|bar| bar.hit(x, y));
@@ -1207,10 +1292,202 @@ impl Session {
         }
     }
 
+    /// 展开选词：把候选铺成一块**盖住键盘**的多行面板。
+    ///
+    /// 入口是长按候选条（[`Self::repeat`]）；出口有三个——点一个上屏、点候选条、
+    /// 按返回（壳报进来，走 [`Self::dismiss`]）。
+    ///
+    /// 一个候选都没有时不开：空面板既没得选又占掉整块键盘，不如什么都不发生。
+    fn open_expanded(&mut self) {
+        if self.expanded || self.candidates.is_empty() {
+            return;
+        }
+        self.expanded = true;
+        self.expanded_scroll = 0.0;
+        self.expanded_fling = None;
+        self.expanded_scrolled = None;
+        self.expanded_dirty = true;
+        // **这一下从「按着候选条」变成「开了面板」**：手指还按着，但抬手时不该再算成
+        // 点了一下候选条（那会上屏），所以把它从候选条那批手指里摘掉
+        self.pressed.clear();
+    }
+
+    /// 收起面板。收起之后键盘要重画——那块地方换回键盘了。
+    fn close_expanded(&mut self) {
+        if !self.expanded {
+            return;
+        }
+        self.expanded = false;
+        self.expanded_scroll = 0.0;
+        self.expanded_fling = None;
+        self.expanded_scrolled = None;
+        self.expanded_view = None;
+        self.expanded_dirty = false;
+        self.expanded_press = None;
+        self.mark_keyboard_dirty();
+    }
+
+    /// 返回键按下了：把开着的那层收掉。
+    ///
+    /// 返回 [`flags`] 的掩码，**0 表示这一下不归我们管**（壳照常把返回交给应用）。
+    /// 面板收起来、页切回字母页都一定带着 [`flags::KEYBOARD`] 那一位，
+    /// 所以「非 0 = 我处理了」这条判断成立。
+    pub fn dismiss(&mut self) -> i32 {
+        if self.expanded {
+            self.close_expanded();
+        } else if self.panel != Panel::Letters {
+            // 工具页 / 表情页 / 剪贴板页开着：返回先回字母页，跟主流输入法一致
+            self.set_panel(Panel::Letters);
+        } else {
+            return 0;
+        }
+        self.mask()
+    }
+
+    /// 展开面板的位图（8 字节头 + 预乘 RGBA）。**它占的是键盘那块地方**。
+    ///
+    /// 没画过或者要重画时现画一张。每格摆在哪儿由渲染器量（与候选条同一套量宽），
+    /// 这里只管把「整份候选、占多大地方、滚到哪儿」三样喂进去。
+    fn expanded_surface(&mut self) -> Vec<u8> {
+        if self.expanded_dirty || self.expanded_view.is_none() {
+            let rows = self.rows_of(0..CANDIDATE_LIMIT);
+            let theme = self.theme();
+            let area = PanelArea {
+                width: self.width,
+                // 与键盘位图同高：键盘的高度是「键排到哪儿」，位图下面还给系统手势条
+                // 留了一段（`render_keyboard` 加上去的），面板得跟着，不然视图高度会变
+                height: self.keyboard_height() + self.bottom_inset,
+                bottom_inset: self.bottom_inset,
+            };
+            let rendered = self.renderer.as_mut().and_then(|renderer| {
+                renderer
+                    .render_candidates_panel(
+                        &rows,
+                        area,
+                        &theme,
+                        self.density,
+                        self.expanded_scroll,
+                    )
+                    .ok()
+            });
+            let Some(rendered) = rendered else {
+                return Vec::new();
+            };
+            self.expanded_view = Some(rendered);
+            self.expanded_dirty = false;
+        }
+        self.expanded_view
+            .as_ref()
+            .map_or_else(Vec::new, |view| surface::encode(&view.rendered.pixmap))
+    }
+
+    /// 展开面板那半边的触摸。`x` / `y` 是**面板局部**的像素（壳已减掉候选条高度）。
+    ///
+    /// 与候选条一个路数，只是方向换了：那边横着滚，这边**竖着滚**。
+    /// 点一下上屏——面板上除了候选格没有别的可点的东西，命中哪格就上屏哪个。
+    fn touch_expanded(&mut self, action: MotionAction, pointer: i32, x: f32, y: f32) {
+        match action {
+            MotionAction::Down | MotionAction::PointerDown => {
+                self.expanded_press = Some(PanelPress {
+                    pointer,
+                    at: (x, y),
+                    last: y,
+                    sliding: false,
+                });
+            }
+            MotionAction::Move => {
+                let slop = self.touch_slop();
+                let Some(press) = self
+                    .expanded_press
+                    .as_mut()
+                    .filter(|press| press.pointer == pointer)
+                else {
+                    return;
+                };
+                if !within_slop(press.at, slop, x, y) {
+                    press.sliding = true;
+                }
+                // 手指往上移 = 内容往上走 = 看后面的候选。**只认这一下的位移增量**，所以是跟手的
+                let step = press.last - y;
+                press.last = y;
+                if press.sliding && step != 0.0 {
+                    self.scroll_expanded(step);
+                    // 记下是**这根手指**在滚：只有它抬起时才谈得上甩
+                    self.expanded_scrolled = Some(pointer);
+                }
+            }
+            MotionAction::Up | MotionAction::PointerUp => {
+                let Some(press) = self.expanded_press.filter(|press| press.pointer == pointer)
+                else {
+                    return;
+                };
+                self.expanded_press = None;
+                // 拖过就只是滚了一下，**不上屏**——与候选条同一条规矩
+                // （要「滚到哪儿就选哪个」的话，一路翻看过去就没法全身而退了）
+                if press.sliding {
+                    return;
+                }
+                let scroll = self.expanded_scroll;
+                let index = self
+                    .expanded_view
+                    .as_ref()
+                    .and_then(|view| view.hit(x, y, scroll));
+                if let Some(index) = index {
+                    self.commit_candidate(index);
+                }
+            }
+            MotionAction::Cancel => self.expanded_press = None,
+        }
+    }
+
+    /// 面板竖着滚 `step` 像素（正数 = 内容往上走，看后面的候选）。
+    ///
+    /// 两端夹住：滚到头再拖也拖不出空白。上限从**这一帧的网格**上问——
+    /// 面板的格子是折行铺的，多高只有铺完才知道。
+    fn scroll_expanded(&mut self, step: f32) {
+        let max = self.expanded_max_scroll();
+        let wanted = (self.expanded_scroll + step).clamp(0.0, max);
+        if wanted == self.expanded_scroll {
+            return;
+        }
+        self.expanded_scroll = wanted;
+        self.expanded_dirty = true;
+    }
+
+    /// 面板此刻最远能滚到哪儿（像素）。还没画过时是 0——那时也滚不动。
+    fn expanded_max_scroll(&self) -> f32 {
+        self.expanded_view
+            .as_ref()
+            .map_or(0.0, |view| view.max_scroll(self.panel_pixels()))
+    }
+
+    /// 面板在输入视图里占的高度（像素）——就是键盘那么高（它盖住键盘）。
+    fn panel_pixels(&self) -> f32 {
+        self.keyboard_height() * self.density
+    }
+
+    /// 上屏**整份候选里**第 `index` 个。
+    ///
+    /// 两条路都走这儿：候选条的命中给的是页内下标（调用处先换算成整份的），
+    /// 展开面板给的本来就是整份的下标。
+    fn commit_candidate(&mut self, index: usize) {
+        if let Some(candidate) = self.candidates.get(index).cloned() {
+            let text = self.engine.commit(&candidate);
+            self.commit_text(text);
+        }
+    }
+
     /// 这一轮下来哪些面要重取、有没有话要交给应用。
     fn mask(&self) -> i32 {
         let mut mask = 0;
-        if self.keyboard.as_ref().is_some_and(Keyboard::dirty) {
+        // 面板开着时**键盘那块地方画的是面板**，所以「要不要重取位图」看的是面板脏不脏；
+        // 没开面板时才轮到键盘。**这次不报下次就没人报了**——`expanded_surface` 一画完
+        // 就把脏标记清掉，掩码不再带这一位，壳那边也就跟着停了。
+        if self.expanded {
+            if self.expanded_dirty || self.expanded_view.is_none() {
+                mask |= flags::KEYBOARD;
+            }
+        } else if self.keyboard.as_ref().is_some_and(Keyboard::dirty) {
             mask |= flags::KEYBOARD;
         }
         if self.bar_dirty {
@@ -1222,7 +1499,7 @@ impl Session {
         if self.pending_commit.is_some() || !self.pending_commands.is_empty() {
             mask |= flags::COMMIT;
         }
-        if self.fling.is_some() || self.clipboard_fling.is_some() {
+        if self.fling.is_some() || self.clipboard_fling.is_some() || self.expanded_fling.is_some() {
             mask |= flags::FLING;
         }
         if self.pending_settings {
@@ -1254,11 +1531,7 @@ impl Session {
             Act::Push(c) => self.type_letter(c),
             Act::CommitCandidate(index) => {
                 // 命中矩形里的下标是**画出来那一批**里的（从最左边看得见的那个数起）
-                let absolute = self.visible().start + index;
-                if let Some(candidate) = self.candidates.get(absolute).cloned() {
-                    let text = self.engine.commit(&candidate);
-                    self.commit_text(text);
-                }
+                self.commit_candidate(self.visible().start + index);
             }
             Act::CommitHighlighted => {
                 // 高亮那个：就是最左边看得见的那个（空格上屏的是它）
@@ -1587,6 +1860,15 @@ impl Session {
         self.relayout();
         self.refresh();
         self.preedit_dirty = true;
+        // 展开面板开着时：候选换了要重画（云联想的词回来也算），一个都不剩就收起来——
+        // 空面板既没得选、还占着整块键盘（上屏之后就是这种情况）
+        if self.expanded {
+            if self.candidates.is_empty() {
+                self.close_expanded();
+            } else {
+                self.expanded_dirty = true;
+            }
+        }
     }
 
     /// 用当前的候选与滚动位置重建待画的那一帧。
@@ -1607,17 +1889,28 @@ impl Session {
         self.strip.slice(self.scroll, self.viewport())
     }
 
+    /// 候选中 `range` 这一段转成要画的行。
+    ///
+    /// **转法只能有一份**：高亮、云端词的云朵、译文的挂法都在 [`row`] 里定，
+    /// 三处（候选条看得见的那几格、整条带子、展开面板）各转各的迟早会不一致。
+    /// 越界的段按实际长度夹住，不 panic。
+    fn rows_of(&self, range: Range<usize>) -> Vec<Row> {
+        let end = range.end.min(self.candidates.len());
+        let start = range.start.min(end);
+        self.candidates[start..end]
+            .iter()
+            .enumerate()
+            .map(|(i, candidate)| row(start + i, candidate))
+            .collect()
+    }
+
     /// 画哪几个候选、页码是几。这一轮不画译文，所以不调 `engine.annotate()`。
     ///
     /// **只画看得见的那几格**（十来个，两边各带一个只露半边的），不是「铺一整批」——
     /// 带子是通的，滚到哪儿画哪儿。
     fn build_frame(&self) -> Frame {
         let visible = self.visible();
-        let rows: Vec<Row> = self.candidates[visible.clone()]
-            .iter()
-            .enumerate()
-            .map(|(i, candidate)| row(visible.start + i, candidate))
-            .collect();
+        let rows = self.rows_of(visible.clone());
         let viewport = self.viewport();
         let screens = self.strip.screens(viewport);
         Frame {
@@ -1681,13 +1974,7 @@ impl Session {
     /// **只铺前 [`CANDIDATE_LIMIT`] 个**：这一步要逐格量宽度，引擎那边动不动几百个候选，
     /// 全铺下来就是几十毫秒（见那个常数的注释）。
     fn relayout(&mut self) {
-        let rows: Vec<Row> = self
-            .candidates
-            .iter()
-            .take(CANDIDATE_LIMIT)
-            .enumerate()
-            .map(|(i, candidate)| row(i, candidate))
-            .collect();
+        let rows = self.rows_of(0..CANDIDATE_LIMIT);
         let theme = self.theme();
         self.strip = self
             .renderer
@@ -1741,7 +2028,11 @@ impl Session {
     /// 横竖两个分量是**两回事**：候选条那条带子横着滚（用 [`Self::scroll_by`] 的方向），
     /// 剪贴板列表竖着滚（用 [`Self::scroll_clipboard`] 的方向，符号正好相反）。
     pub fn start_fling(&mut self, pointer: i32, velocity_x: f32, velocity_y: f32) -> i32 {
-        if self.clipboard_scrolled == Some(pointer) {
+        if self.expanded_scrolled == Some(pointer) {
+            // 面板竖着滚：手指往上甩（速度为负）= 内容往上走 = `scroll_expanded` 变大，
+            // 与那边收的「手指挪了多少」同向，所以符号**不取反**；除以 1000 换成像素/毫秒
+            self.expanded_fling = Fling::new(velocity_y / 1000.0);
+        } else if self.clipboard_scrolled == Some(pointer) {
             // 手指往上甩（速度为负）= 列表往下看 = `clipboard_scroll` 变大，
             // 而 `scroll_clipboard` 收的是「手指挪了多少」，所以符号**不取反**；
             // 除以 1000 换成 `Fling` 用的像素/毫秒
@@ -2011,8 +2302,8 @@ impl Session {
                 self.fling = None;
             }
         }
-        // 剪贴板那份列表（竖着滚）。两套各记各的速度，但只有一套会在跑——
-        // 剪贴板页开着时没有候选条，反过来也一样
+        // 剪贴板那份列表（竖着滚）。几套各记各的速度，但同一时刻只有一套会在跑——
+        // 面板开着时没有候选条、也没有剪贴板页，反过来也一样
         if let Some(fling) = self.clipboard_fling.as_mut() {
             let step = fling.step(dt);
             let finished = fling.finished();
@@ -2020,6 +2311,16 @@ impl Session {
             self.scroll_clipboard(step);
             if finished || (step != 0.0 && self.clipboard_scroll == before) {
                 self.clipboard_fling = None;
+            }
+        }
+        // 展开面板（也竖着滚，与剪贴板同一套，只是走自己的位移）
+        if let Some(fling) = self.expanded_fling.as_mut() {
+            let step = fling.step(dt);
+            let finished = fling.finished();
+            let before = self.expanded_scroll;
+            self.scroll_expanded(step);
+            if finished || (step != 0.0 && self.expanded_scroll == before) {
+                self.expanded_fling = None;
             }
         }
         self.mask()

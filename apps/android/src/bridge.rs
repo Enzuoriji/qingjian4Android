@@ -250,6 +250,22 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_popupOrigin(
     array.into_raw()
 }
 
+/// 返回键：把开着的那层收掉（展开面板 / 工具页这些）。
+///
+/// **返回 0 表示这一下不归输入法管**，壳照常把返回交给应用（[`Session::dismiss`] 的约定）：
+/// 反过来「非 0 = 我处理了」也成立。
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_qingjian_android_QingjianNative_dismiss(
+    _env: JNIEnv,
+    _this: JObject,
+    handle: jlong,
+) -> jint {
+    match unsafe { from_handle(handle) } {
+        Some(session) => catch_unwind(AssertUnwindSafe(|| session.dismiss())).unwrap_or(0),
+        None => 0,
+    }
+}
+
 /// 键盘又要弹出来了：把页复位回字母页，返回 [`crate::session::flags`] 的位掩码。
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_qingjian_android_QingjianNative_resetPanel(

@@ -537,7 +537,10 @@ impl Renderer {
     /// [`MIN_CELL_WIDTH`]（单字候选的自然宽度只有二十来点，没这条底线就成了点不着的针）。
     ///
     /// 不再「把一行铺满」：带子是能滚的，铺满就没有滚的余地了。
-    fn bar_cell_widths(&mut self, rows: &[Row], m: &Metrics) -> Vec<f32> {
+    ///
+    /// 展开面板（[`super::panel`]）量的是**同一份宽**——同一个候选词，在候选条上
+    /// 和在面板里该占一样宽。
+    pub(super) fn bar_cell_widths(&mut self, rows: &[Row], m: &Metrics) -> Vec<f32> {
         let floor = m.px(MIN_CELL_WIDTH);
         rows.iter()
             .map(|row| {
@@ -556,7 +559,10 @@ impl Renderer {
     /// 一格约 68 点宽，序号连间距就吃掉十来点，去掉相当于**每个词多出半个字**，
     /// 三字词被截成「你…」的那条线也就跟着往后挪了。
     /// 序号仍在 [`Row::index`] 里（桌面候选窗要用），只是这里不画。
-    fn draw_bar_row(
+    ///
+    /// 展开面板（[`super::panel`]）每一格也是调它画的——**同一份画法**，
+    /// 云朵、居中、截断补省略号都在里面，两边不该长得不一样。
+    pub(super) fn draw_bar_row(
         &mut self,
         canvas: &mut Canvas,
         m: &Metrics,
@@ -617,13 +623,14 @@ impl Renderer {
 /// 候选条上一行的行框：顶边与高度（像素）。
 ///
 /// 几个绘制助手共用同一条，省得「顶边 + 高度」这一对参数在每个签名里各传一遍。
+/// 展开面板（[`super::panel`]）每一格也是拿它当行框用的——面板一行就是一格的框。
 #[derive(Debug, Clone, Copy)]
-struct Band {
+pub(super) struct Band {
     /// 行框顶边。
-    top: f32,
+    pub(super) top: f32,
 
     /// 行框高度。
-    height: f32,
+    pub(super) height: f32,
 }
 
 impl Band {
@@ -668,7 +675,10 @@ fn top_line_height(theme: &Theme) -> f32 {
 }
 
 /// 下排候选行占的高度（点）。
-fn candidate_row_height(theme: &Theme) -> f32 {
+///
+/// 展开面板（[`super::panel`]）一格用的就是它——**两边一样高**，同一个候选
+/// 在候选条上和在面板里占的地方一样大。
+pub(super) fn candidate_row_height(theme: &Theme) -> f32 {
     theme.text_font.line_height + theme.row_padding * 2.0
 }
 

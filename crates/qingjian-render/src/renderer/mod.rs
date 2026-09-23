@@ -7,6 +7,7 @@ mod columns;
 mod horizontal;
 mod item;
 mod keyboard;
+mod panel;
 mod rendered;
 mod status;
 mod top_line;
@@ -25,6 +26,7 @@ use crate::theme::{FontSpec, Theme};
 
 pub use bar::{BarHit, BarHitId, BarStrip, RenderedBar};
 pub use keyboard::{KeyHit, Popup, RenderedKeyboard};
+pub use panel::{CandidateGrid, PanelArea, RenderedPanel};
 pub use rendered::Rendered;
 pub use status::{RenderedStatus, StatusCell};
 
