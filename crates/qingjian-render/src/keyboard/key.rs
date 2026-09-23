@@ -63,10 +63,10 @@ pub enum KeyId {
     Emoji(usize),
 
     /// 表情页上面那条分类标签里、**这一屏**的第几个（点一下切到那一类）。
+    ///
+    /// 整条标签是能横着滑的（K13 ②，2026-09-23），所以「第几个」是**屏内**的下标——
+    /// 会话按当前位移换算成整份分类里的第几个，渲染则把这个位移画进格子的位置上。
     EmojiGroup(usize),
-
-    /// 分类标签条往前后翻一屏：`-1` 上一屏、`1` 下一屏。
-    EmojiGroupPage(isize),
 }
 
 /// 按键的样式。只影响配色，不影响行为。
@@ -172,9 +172,7 @@ impl Key {
             | KeyId::Comma
             | KeyId::Period
             | KeyId::Panel(_)
-            | KeyId::ClipboardClear
-            // 分类条那两个箭头是「翻」，不是内容
-            | KeyId::EmojiGroupPage(_) => KeyStyle::Function,
+            | KeyId::ClipboardClear => KeyStyle::Function,
         }
     }
 }

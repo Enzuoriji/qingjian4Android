@@ -249,14 +249,13 @@ impl KeyboardLayout {
     /// 箭头翻（与候选条那对 `‹ ›` 一个意思）。下面三行 × 5 格 = 15 个表情，
     /// 一屏这么多；多了靠上下滑（与剪贴板那套滚动一样，下一步接）。
     pub fn emoji() -> Self {
+        // 标签行**整条都是分类**、能横着滑（2026-09-23，K13 ②）：以前是两头两个
+        // 「‹ ›」翻页箭头、中间只摆得下三个分类，一屏就那三个。去掉箭头之后一屏五个，
+        // 找分类靠滑（跟手 + 甩 + 松手吸附），比一下一下点箭头快。
         let mut rows = vec![KeyRow {
-            keys: vec![
-                Key::new(KeyId::EmojiGroupPage(-1), 1.0),
-                Key::new(KeyId::EmojiGroup(0), 1.0),
-                Key::new(KeyId::EmojiGroup(1), 1.0),
-                Key::new(KeyId::EmojiGroup(2), 1.0),
-                Key::new(KeyId::EmojiGroupPage(1), 1.0),
-            ],
+            keys: (0..EMOJI_COLS)
+                .map(|index| Key::new(KeyId::EmojiGroup(index), 1.0))
+                .collect(),
         }];
         for row in 0..EMOJI_ROWS {
             rows.push(KeyRow {

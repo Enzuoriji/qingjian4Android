@@ -149,6 +149,12 @@ pub enum Fired {
     ///
     /// 与空格移光标一样是**连续**的——拖动当中每一拍都要走，不是等松手才结算。
     ClipboardScroll(f32),
+
+    /// 表情页的标签行横着挪一下：手指这一拍左右挪了多少像素（往右为正）。
+    ///
+    /// 与 [`Self::ClipboardScroll`] 一样是连续的。松手之后的吸附不在这儿报——
+    /// 抬手时壳会调 `start_fling`，那边按速度决定「甩一段」还是「就地吸附」。
+    GroupScroll(f32),
 }
 
 /// 表情面板要画的那一串：这一屏的条目、标签条上的分类名、选中的是标签里第几个。
@@ -163,11 +169,16 @@ pub struct EmojiView<'a> {
     /// 这一屏要画的那些字符（emoji 或颜文字）。
     pub items: &'a [String],
 
-    /// 标签条上这一屏的几个分类名。
+    /// 标签行上这一屏的几个分类名。
     pub labels: &'a [String],
 
     /// 选中的是标签里第几个（画成选中态）。
     pub group: usize,
+
+    /// 标签行让开不足一格的那点（点，正数 = 内容往左走）——横滑的零头。
+    ///
+    /// 与格子那边同一个分工：整格由会话切好，渲染器只挪零头。
+    pub group_offset: f32,
 }
 
 /// 尺寸与外观。壳在 `Session::configure` 时给一份。
@@ -262,6 +273,16 @@ struct Press {
 
     /// 上一拍手指在哪儿（纵向像素）。滚动是**增量**的（这一拍走多少），得记住上一下。
     last_y: f32,
+
+    /// 上一次报上来的横坐标（像素）——表情页标签行横滑要的是**位移增量**，
+    /// 与 [`Self::last_y`] 同理，只是方向换成横的。
+    last_x: f32,
+
+    /// 这根手指在标签行上**横着滑起来了**（K13 ②）。
+    ///
+    /// 越过死区才算，之后这一下就不再是「点了某个分类」。与 [`Self::scrolling`] 互斥：
+    /// 表情页的标签行横着滑、格子区竖着滑，同一页两个方向。
+    scrolling_x: bool,
 
     /// 这根手指**起过手势**（上滑清空 / 左滑删除的阈值碰过），即使后来滑回来了也一直记着。
     ///
@@ -397,6 +418,15 @@ impl Keyboard {
         KeyboardLayout::clipboard().row_height(self.height(), gap) + gap
     }
 
+    /// 表情页**标签行**有多高（点）——它下面才是格子区。
+    ///
+    /// 与画的时候**同一套算法**（[`KeyboardLayout::row_height`]）：标签行是第 0 行，
+    /// 各行等高。横滑的判定靠它划出「手指在不在标签行上」——**按行判而不是按格判**，
+    /// 落在格子之间的缝里也得能滑（剪贴板那边 2026-09-21 吃过这个亏）。
+    pub fn label_height(&self) -> f32 {
+        KeyboardLayout::emoji().row_height(self.height(), self.theme().gap_y)
+    }
+
     /// 标脏，下次 `surface` 重画。Shift 与中 / 英切换改的是键帽长相，由 `Session` 叫它。
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
@@ -450,6 +480,7 @@ impl Keyboard {
                 emojis: emoji.items,
                 emoji_groups: emoji.labels,
                 emoji_group: emoji.group,
+                emoji_group_offset: emoji.group_offset,
                 emoji_offset: emoji.offset,
             };
             let rendered = renderer.and_then(|renderer| {
@@ -505,6 +536,8 @@ impl Keyboard {
                     deleting: false,
                     scrolling: false,
                     last_y: y,
+                    last_x: x,
+                    scrolling_x: false,
                     gestured: false,
                     repeated: false,
                 });
@@ -515,6 +548,9 @@ impl Keyboard {
                 let hit = self.hit(x, y);
                 let dead_zone = CURSOR_DEAD_ZONE * self.metrics.density;
                 let clear_swipe = CLEAR_SWIPE * self.metrics.density;
+                // 标签行的下边界（像素）。**先算出来**：下面要可变借 `presses`，
+                // 那期间不能再借 `self` 问这个数
+                let label_bottom = self.label_height() * self.metrics.density;
                 if let Some(press) = self
                     .presses
                     .iter_mut()
@@ -550,6 +586,26 @@ impl Keyboard {
                     // 判的是**哪一页**，不是「按住了哪个格子」——手指落在格子之间的缝里、
                     // 或者落在某个没内容的空格子上，一样得能滚（用户 2026-09-21 指出的：
                     // 原来只有按住表情格才算滚，手指稍微偏一点就滑不动）。
+                    // 表情页的**标签行**横着滑 = 换分类（K13 ②，2026-09-23）。判在纵向滚动之前：
+                    // 同一页上有两个方向的手势，按方向认，先认出来的算数。
+                    // **按「手指在不在标签行上」判，不是按「按住了哪个分类格」**——落在格子
+                    // 之间的缝里也得能滑（剪贴板那边 2026-09-21 就吃过这个亏）。
+                    if self.layout.is_emoji() && press.at.1 < label_bottom {
+                        let dx = x - press.at.0;
+                        let slop = SCROLL_SLOP * self.metrics.density;
+                        if press.scrolling_x || dx.abs() >= slop {
+                            press.scrolling_x = true;
+                            press.gestured = true;
+                            let step = x - press.last_x;
+                            press.last_x = x;
+                            if step != 0.0 {
+                                return Some(Fired::GroupScroll(step));
+                            }
+                        }
+                        // 标签行上没有别的手势：滑动之外什么也不做（点击由抬起时结算）
+                        self.refresh_pressed();
+                        return None;
+                    }
                     if self.layout.is_clipboard() || self.layout.is_emoji() {
                         let dx = x - press.at.0;
                         let dy = y - press.at.1;
@@ -751,6 +807,7 @@ impl Keyboard {
                 emojis: emoji.items,
                 emoji_groups: emoji.labels,
                 emoji_group: emoji.group,
+                emoji_group_offset: emoji.group_offset,
                 emoji_offset: emoji.offset,
             };
             let density = self.metrics.density;

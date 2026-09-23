@@ -469,6 +469,22 @@ JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `Qin
 - **滚动上限从这一帧的网格上问**，所以滚动时**不能**把 `expanded_view` 置空当脏标记——
   那样下一拍 `max_scroll` 返回 0、滚不动。用单独的 `expanded_dirty`，位图留着。
 
+**表情分类横滑（K13 ②，2026-09-23）**：标签行去掉两头的 `‹ ›`（`KeyId::EmojiGroupPage` 整个删掉），
+一屏摆 `EMOJI_COLS` 个分类（从 3 个变 5 个），多的靠横滑看。三个要点：
+
+- **滚动量在会话、零头在渲染器**：`Session::emoji_group_scroll` 是连续位移（点），
+  `emoji_group_first()` 切出这一屏该画哪几个分类、`emoji_group_offset()` 给出不足一格的零头
+  （用 `first` 反推而不是取余：滑过头被 `first` 夹住时取余会算出个对不上的零头）。
+  渲染器只把标签行按 `emoji_group_offset` 往左挪（`renderer/keyboard/mod.rs` 的 `slot_x`），
+  **命中区用的是同一个 `slot_x`**，所以画在哪就点得着哪——滑到一半露半格时也是对的。
+- **横向手势判在纵向滚动之前**（`Keyboard::touch` 的 `Move` 分支）：表情页上标签行横着滑、
+  格子区竖着滑，同一页两个方向，按方向认、先认出来的算数。**按行判不按格判**——
+  `Keyboard::label_height()` 划出标签行的下边界，落在格子之间的缝里也能滑。
+- **`start_fling` 多第三路**：`emoji_group_scrolled` 记下是哪根手指横滑的，抬手时走
+  `Fling::new(-velocity_x / 1000.0)`（与候选条那条带子同向、同算法）；**没甩起来就就地吸附**
+  （`settle_emoji_groups`：四舍五入到整格）——停在两格中间的话，看不出现在是哪一类，
+  点下去还会点到左边那格。
+
 **返回键**（加在 K13）：`Session::dismiss` 是唯一一个「这一下归不归我管」的 JNI——
 **返回 0 = 不归输入法**，壳照常把返回交给应用去收键盘；收面板、把页切回字母页都一定带着
 `KEYBOARD` 那一位，所以「非 0 = 我处理了」成立。壳挂在 `onKeyDown`（不能用 `onKeyUp`：

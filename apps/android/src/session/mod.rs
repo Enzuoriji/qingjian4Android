@@ -157,7 +157,11 @@ struct EmojiPanel {
 }
 
 /// 标签条一屏摆几个分类。
-const EMOJI_GROUP_SLOTS: usize = 3;
+/// 表情页的标签行一屏摆几个分类——与格子同宽，所以就是 [`EMOJI_COLS`]。
+///
+/// 2026-09-23（K13 ②）：以前是 3（两头各占一个翻页箭头），现在整条都能横滑、箭头去掉了，
+/// 一屏因此多出两个分类。
+const EMOJI_GROUP_SLOTS: usize = EMOJI_COLS;
 
 /// 「最近用过的」那个分类在标签条上叫什么（它是**插在最前面**的第 0 类，不是表里的）。
 const RECENT_LABEL: &str = "最近";
@@ -209,21 +213,16 @@ impl EmojiPanel {
         }
     }
 
-    /// 标签条上这一屏要画的那几个分类名。
-    fn labels(&self, screen: usize) -> &[String] {
-        let start = (screen * EMOJI_GROUP_SLOTS).min(self.names.len());
-        let end = (start + EMOJI_GROUP_SLOTS).min(self.names.len());
+    /// 标签行上从第 `first` 个起要画的那几个分类名（不够几个就短）。
+    fn labels(&self, first: usize, count: usize) -> &[String] {
+        let start = first.min(self.names.len());
+        let end = (start + count).min(self.names.len());
         &self.names[start..end]
     }
 
-    /// 这一屏第一个标签在整份里是第几个（点标签时要把屏幕号换算回去）。
-    fn screen_start(&self, screen: usize) -> usize {
-        (screen * EMOJI_GROUP_SLOTS).min(self.names.len())
-    }
-
-    /// 标签条一共几屏（至少 1）。
-    fn screens(&self) -> usize {
-        self.names.len().div_ceil(EMOJI_GROUP_SLOTS).max(1)
+    /// 一共有几个分类。
+    fn group_count(&self) -> usize {
+        self.names.len()
     }
 
     /// 把「最近用过的」摆到最前面当一类（一条都没有时不摆）。
@@ -418,8 +417,18 @@ pub struct Session {
     emoji: EmojiPanel,
     kaomoji: EmojiPanel,
 
-    /// 标签条翻到第几屏（一屏 [`EMOJI_GROUP_SLOTS`] 个分类）。
-    emoji_group_screen: usize,
+    /// 分类标签条被拉走多少（点，正数 = 内容往左走）。
+    ///
+    /// **跟手滚的连续位移**，不是「第几屏」：一屏摆得下 [`EMOJI_GROUP_SLOTS`] 个分类，
+    /// 多出来的靠这个数看，松手吸附到整格（[`Self::settle_emoji_groups`]）。
+    /// 与剪贴板列表、展开面板同一套路子，只是方向换成了横的。
+    emoji_group_scroll: f32,
+
+    /// 分类标签条的惯性滑行（与别的几套各走各的）。
+    emoji_group_fling: Option<Fling>,
+
+    /// 刚才**真的横着拖过标签条**的那根手指（与 [`Self::scrolled`] 同一个用途）。
+    emoji_group_scrolled: Option<i32>,
 
     /// 表情页的格子被拉上去多少（点）。0 是第一行贴着网格区顶边。
     ///
@@ -747,7 +756,9 @@ impl Session {
             emoji_recent,
             emoji: emoji_panel,
             kaomoji: kaomoji_panel,
-            emoji_group_screen: 0,
+            emoji_group_scroll: 0.0,
+            emoji_group_fling: None,
+            emoji_group_scrolled: None,
             emoji_scroll: 0.0,
             clipboard: data_dir.map_or_else(Recent::default, |dir| {
                 Recent::open(dir.join(CLIPBOARD_FILE), CLIPBOARD_LIMIT)
@@ -828,9 +839,9 @@ impl Session {
         if panel == Panel::Clipboard {
             self.clipboard_scroll = 0.0;
         }
-        // 表情页也从第一屏分类看起
+        // 表情页也从第一个分类看起
         if matches!(panel, Panel::Emoji | Panel::Kaomoji) {
-            self.emoji_group_screen = 0;
+            self.emoji_group_scroll = 0.0;
         }
         // 换页了，正在跑的那段滑行按的是上一页的视口，停掉
         self.clipboard_fling = None;
@@ -986,10 +997,9 @@ impl Session {
         let emoji = EmojiView {
             offset: self.emoji_offset(),
             items: panel.visible(self.emoji_first_row()),
-            labels: panel.labels(self.emoji_group_screen),
-            group: panel
-                .group
-                .saturating_sub(panel.screen_start(self.emoji_group_screen)),
+            labels: panel.labels(self.emoji_group_first(), EMOJI_GROUP_SLOTS),
+            group: panel.group.saturating_sub(self.emoji_group_first()),
+            group_offset: self.emoji_group_offset(),
         };
         match self.keyboard.as_mut() {
             Some(keyboard) => keyboard.popup_surface(
@@ -1035,10 +1045,9 @@ impl Session {
         let emoji = EmojiView {
             offset: self.emoji_offset(),
             items: panel.visible(self.emoji_first_row()),
-            labels: panel.labels(self.emoji_group_screen),
-            group: panel
-                .group
-                .saturating_sub(panel.screen_start(self.emoji_group_screen)),
+            labels: panel.labels(self.emoji_group_first(), EMOJI_GROUP_SLOTS),
+            group: panel.group.saturating_sub(self.emoji_group_first()),
+            group_offset: self.emoji_group_offset(),
         };
         match self.keyboard.as_mut() {
             Some(keyboard) => keyboard.surface(
@@ -1101,6 +1110,8 @@ impl Session {
             self.clipboard_scrolled = None;
             self.expanded_fling = None;
             self.expanded_scrolled = None;
+            self.emoji_group_fling = None;
+            self.emoji_group_scrolled = None;
         }
         let bar_pixels = self.bar_pixels();
         if self.expanded && y >= bar_pixels {
@@ -1124,6 +1135,11 @@ impl Session {
                         self.clipboard_scrolled = Some(pointer);
                         self.scroll_clipboard(delta);
                     }
+                }
+                Some(Fired::GroupScroll(delta)) => {
+                    // 记下是这根手指在横滑——抬手时靠它判「甩一段还是就地吸附」
+                    self.emoji_group_scrolled = Some(pointer);
+                    self.scroll_emoji_groups(delta);
                 }
                 None => {}
             }
@@ -1499,7 +1515,11 @@ impl Session {
         if self.pending_commit.is_some() || !self.pending_commands.is_empty() {
             mask |= flags::COMMIT;
         }
-        if self.fling.is_some() || self.clipboard_fling.is_some() || self.expanded_fling.is_some() {
+        if self.fling.is_some()
+            || self.clipboard_fling.is_some()
+            || self.expanded_fling.is_some()
+            || self.emoji_group_fling.is_some()
+        {
             mask |= flags::FLING;
         }
         if self.pending_settings {
@@ -1527,7 +1547,6 @@ impl Session {
         match act {
             Act::Emoji(index) => self.commit_emoji(index),
             Act::EmojiGroup(index) => self.pick_emoji_group(index),
-            Act::EmojiGroupPage(step) => self.turn_emoji_groups(step),
             Act::Push(c) => self.type_letter(c),
             Act::CommitCandidate(index) => {
                 // 命中矩形里的下标是**画出来那一批**里的（从最左边看得见的那个数起）
@@ -2028,7 +2047,17 @@ impl Session {
     /// 横竖两个分量是**两回事**：候选条那条带子横着滚（用 [`Self::scroll_by`] 的方向），
     /// 剪贴板列表竖着滚（用 [`Self::scroll_clipboard`] 的方向，符号正好相反）。
     pub fn start_fling(&mut self, pointer: i32, velocity_x: f32, velocity_y: f32) -> i32 {
-        if self.expanded_scrolled == Some(pointer) {
+        if self.emoji_group_scrolled == Some(pointer) {
+            // 标签行横着滚：手指往左甩（速度为负）= 看后面的分类 = 位移变大，所以取负；
+            // 与候选条那条带子同一个方向、同一个算法
+            let fling = Fling::new(-velocity_x / 1000.0);
+            match fling {
+                Some(fling) => self.emoji_group_fling = Some(fling),
+                // 没甩起来（慢慢拖到一半松手）：**就地吸附到最近的分类**——
+                // 停在两格中间的话一眼看不出现在哪一类，点下去还会点到左边那格
+                None => self.settle_emoji_groups(),
+            }
+        } else if self.expanded_scrolled == Some(pointer) {
             // 面板竖着滚：手指往上甩（速度为负）= 内容往上走 = `scroll_expanded` 变大，
             // 与那边收的「手指挪了多少」同向，所以符号**不取反**；除以 1000 换成像素/毫秒
             self.expanded_fling = Fling::new(velocity_y / 1000.0);
@@ -2158,8 +2187,8 @@ impl Session {
 
     /// 点了分类标签：切到那一类。`index` 是**这一屏里的第几个**，要换算回整份里的下标。
     fn pick_emoji_group(&mut self, index: usize) {
-        let start = self.emoji_panel().screen_start(self.emoji_group_screen);
-        let target = start + index;
+        // 命中给的是**标签行上第几格**，换算成整份分类里的第几个：加上这一屏的起点
+        let target = self.emoji_group_first() + index;
         let panel = self.emoji_panel_mut();
         if target >= panel.names.len() {
             return;
@@ -2211,14 +2240,74 @@ impl Session {
     }
 
     /// 标签条往前后翻一屏，夹在首末屏之间。
-    fn turn_emoji_groups(&mut self, step: isize) {
-        let screens = self.emoji_panel().screens();
-        let target = (self.emoji_group_screen as isize + step).clamp(0, screens as isize - 1);
-        let target = target as usize;
-        if target == self.emoji_group_screen {
+    /// 标签行上一个分类占多宽（像素）——与格子同宽：整块键盘宽除以一屏几个。
+    ///
+    /// 滚动的步长、吸附的位置、第几个分类起，全按它算。
+    fn emoji_group_pitch(&self) -> f32 {
+        let columns = EMOJI_GROUP_SLOTS.max(1) as f32;
+        self.viewport() / columns
+    }
+
+    /// 标签行此刻从**整份分类**里的第几个开始画。
+    ///
+    /// 与画的时候同一个口径：位移除以格宽取整，所以「画出来的第一格」就是它。
+    fn emoji_group_first(&self) -> usize {
+        let pitch = self.emoji_group_pitch();
+        if pitch <= 0.0 {
+            return 0;
+        }
+        // 夹在「最后一个分类能停在开头」的位置上，免得滑过头时第一格算到整份外面去
+        let last = self
+            .emoji_panel()
+            .group_count()
+            .saturating_sub(EMOJI_GROUP_SLOTS);
+        ((self.emoji_group_scroll / pitch).floor() as usize).min(last)
+    }
+
+    /// 标签行让开不足一格的那点（点）。整格的部分由 [`Self::emoji_group_first`] 切好，
+    /// 渲染器只挪这个零头——与剪贴板、展开面板同一个分工。
+    fn emoji_group_offset(&self) -> f32 {
+        let pitch = self.emoji_group_pitch();
+        if pitch <= 0.0 {
+            return 0.0;
+        }
+        // 用 first 反推而不是取余：滑过头被 `first` 夹住时，取余会算出个对不上的零头
+        (self.emoji_group_scroll - self.emoji_group_first() as f32 * pitch).clamp(0.0, pitch)
+    }
+
+    /// 标签行最远能拉走多少（像素）。分类比一屏少就没得滚。
+    fn emoji_group_max_scroll(&self) -> f32 {
+        let count = self.emoji_panel().group_count();
+        count.saturating_sub(EMOJI_GROUP_SLOTS) as f32 * self.emoji_group_pitch()
+    }
+
+    /// 标签行跟着手指横着滚。
+    ///
+    /// `delta` 是手指这一拍挪了多少**像素**（往右为正）——手指往右拖是把内容往右带，
+    /// 看的是更前面的分类，所以滚动量是**减**（正数 = 内容往左走）。
+    fn scroll_emoji_groups(&mut self, delta: f32) {
+        let max = self.emoji_group_max_scroll();
+        let wanted = (self.emoji_group_scroll - delta).clamp(0.0, max);
+        if wanted == self.emoji_group_scroll {
             return;
         }
-        self.emoji_group_screen = target;
+        self.emoji_group_scroll = wanted;
+        self.mark_keyboard_dirty();
+    }
+
+    /// 松手（或者甩完）之后**吸附到最近的分类**：停在两格中间的话，
+    /// 一眼看不出现在是哪一类，点下去还会点到左边那格。
+    fn settle_emoji_groups(&mut self) {
+        let pitch = self.emoji_group_pitch();
+        if pitch <= 0.0 {
+            return;
+        }
+        let settled = (self.emoji_group_scroll / pitch).round() * pitch;
+        let settled = settled.clamp(0.0, self.emoji_group_max_scroll());
+        if settled == self.emoji_group_scroll {
+            return;
+        }
+        self.emoji_group_scroll = settled;
         self.mark_keyboard_dirty();
     }
 
@@ -2321,6 +2410,17 @@ impl Session {
             self.scroll_expanded(step);
             if finished || (step != 0.0 && self.expanded_scroll == before) {
                 self.expanded_fling = None;
+            }
+        }
+        // 分类标签条（横着滚）。甩完（或者滚到头）**吸附到最近的分类**，与松手那条路一个收尾
+        if let Some(fling) = self.emoji_group_fling.as_mut() {
+            let step = fling.step(dt);
+            let finished = fling.finished();
+            let before = self.emoji_group_scroll;
+            self.scroll_emoji_groups(-step);
+            if finished || (step != 0.0 && self.emoji_group_scroll == before) {
+                self.emoji_group_fling = None;
+                self.settle_emoji_groups();
             }
         }
         self.mask()

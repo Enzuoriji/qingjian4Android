@@ -41,10 +41,9 @@ pub fn on_key(key: KeyId) -> Act {
         // （它才知道列表滚到哪儿了）
         KeyId::Clipboard(index) => Act::PasteClipboard(index),
         KeyId::ClipboardClear => Act::ClearClipboard,
-        // 表情页：点一个上屏、点标签切分类、翻标签条
+        // 表情页：点一个上屏、点标签切分类（标签条本身能横着滑，不归这里管）
         KeyId::Emoji(index) => Act::Emoji(index),
         KeyId::EmojiGroup(index) => Act::EmojiGroup(index),
-        KeyId::EmojiGroupPage(step) => Act::EmojiGroupPage(step),
     }
 }
 

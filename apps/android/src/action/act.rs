@@ -80,7 +80,4 @@ pub enum Act {
 
     /// 表情页上点了个分类标签：切到那一类。
     EmojiGroup(usize),
-
-    /// 表情页的标签条翻一屏。
-    EmojiGroupPage(isize),
 }

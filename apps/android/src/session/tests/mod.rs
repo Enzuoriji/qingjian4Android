@@ -2878,6 +2878,100 @@ fn swiping_left_on_an_emoji_deletes_nothing() {
     );
 }
 
+/// 给表情面板塞几个分类——**多于一屏**才谈得上横滑。
+///
+/// 不走随包目录那份真表：这几条要的是「分类比一屏多」，叫什么名字无所谓；
+/// 而真表得过一遍「渲染器画不画得出来」（`retain`），在测试的环境里未必留得住。
+fn fill_groups(session: &mut Session, count: usize) {
+    session.emoji.names = (0..count).map(|index| format!("分类{index}")).collect();
+    session.emoji.group = 0;
+}
+
+/// 表情页的分类标签条**能横着滑**（K13 ②，2026-09-23）。
+///
+/// 以前是一行定宽格子加两头 `‹ ›` 箭头，一屏只摆得下三个分类、只能点。
+/// 现在整条都能滑：跟手拖、松手吸附到最近的一格。
+#[test]
+fn the_group_strip_follows_the_finger() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_bar(&mut session, BarHitId::Tools);
+    fill_groups(&mut session, 8);
+    tap_key(&mut session, KeyId::Tool(1));
+    assert_eq!(session.panel, Panel::Emoji, "该在表情页");
+
+    assert_eq!(session.emoji_group_first(), 0, "刚进来从第一个分类看起");
+
+    // 在标签行上横着拖一格：手指往左走 = 看后面的分类
+    let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
+    let pitch = session.emoji_group_pitch();
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - pitch, y);
+    session.touch(MotionAction::Up, POINTER, x - pitch, y);
+
+    assert_eq!(
+        session.emoji_group_first(),
+        1,
+        "往左拖了一格，该看到第二个分类起"
+    );
+}
+
+/// 慢慢拖到一半松手：**吸附到最近的分类**。
+///
+/// 停在两格中间的话，一眼看不出现在选的是哪一类，点下去还会点到左边那格。
+#[test]
+fn the_group_strip_settles_after_a_slow_drag() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_bar(&mut session, BarHitId::Tools);
+    fill_groups(&mut session, 8);
+    tap_key(&mut session, KeyId::Tool(1));
+
+    let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
+    let pitch = session.emoji_group_pitch();
+    // 拖了六成格、慢到不算「甩」
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - pitch * 0.6, y);
+    session.touch(MotionAction::Up, POINTER, x - pitch * 0.6, y);
+    // 壳每次抬手都会报一次速度，0 表示没甩起来
+    session.start_fling(POINTER, 0.0, 0.0);
+
+    assert_eq!(
+        session.emoji_group_offset(),
+        0.0,
+        "该吸附回整格上，不该停在半路"
+    );
+    assert_eq!(session.emoji_group_first(), 1, "六成格就近吸到第二类");
+}
+
+/// 滑过之后**点第 0 格，选中的是第二个分类**——命中的是屏内下标，
+/// 得加上这一屏的起点才是整份里的第几个。
+#[test]
+fn tapping_a_group_uses_the_scrolled_position() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_bar(&mut session, BarHitId::Tools);
+    fill_groups(&mut session, 8);
+    tap_key(&mut session, KeyId::Tool(1));
+
+    let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
+    let pitch = session.emoji_group_pitch();
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - pitch, y);
+    session.touch(MotionAction::Up, POINTER, x - pitch, y);
+
+    tap_key(&mut session, KeyId::EmojiGroup(0));
+
+    assert_eq!(
+        session.emoji_panel().group,
+        1,
+        "滑过一格之后，屏幕上第 0 格是第二个分类"
+    );
+}
+
 /// 剪贴板历史**落盘**：换一个会话（＝进程重启）它还在。
 ///
 /// 别的剪贴板测试都用内存态（`ready()` 的数据目录传 `None`），这条特意走一遍真文件。

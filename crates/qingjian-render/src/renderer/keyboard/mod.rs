@@ -126,13 +126,21 @@ impl Renderer {
                 // 剪贴板那一段是从顶边起的（`sheet_top` = 0），所以减不减都一样；
                 // 表情页那一段在标签条**下面**，不减就会整片往下偏一行。
                 let slot_y = if inside { top - sheet_top } else { top };
+                // 分类标签条能横着滑（K13 ②）：标签行整条按偏移往左走。
+                // **只挪这一个数**——下面命中区用的是同一个 `slot_x`，所以画在哪就点得着哪，
+                // 两边不会各走各的（滑到一半露半格时也是对的）。
+                let slot_x = if matches!(key.id, KeyId::EmojiGroup(_)) {
+                    x - state.emoji_group_offset * scale
+                } else {
+                    x
+                };
                 self.draw_key(
                     target,
                     key,
                     state,
                     theme,
                     scale,
-                    (x, slot_y, key_width, row_height),
+                    (slot_x, slot_y, key_width, row_height),
                 );
                 // 滚出窗口的那部分不该还能点：命中区裁到窗口里，整个滚出去的就不报了
                 let (hit_y, hit_height) = if inside {
@@ -144,7 +152,7 @@ impl Renderer {
                 if hit_height > 0.0 {
                     keys.push(KeyHit {
                         id: key.id,
-                        x,
+                        x: slot_x,
                         y: hit_y,
                         width: key_width,
                         height: hit_height,
@@ -451,8 +459,6 @@ fn label(key: &Key, state: &KeyboardState) -> String {
         // 表情格子写的是**那一个 emoji 或那一条颜文字**（会话切好的这一屏）
         KeyId::Emoji(index) => state.emojis.get(index).cloned().unwrap_or_default(),
         KeyId::EmojiGroup(index) => state.emoji_groups.get(index).cloned().unwrap_or_default(),
-        KeyId::EmojiGroupPage(step) if step < 0 => "‹".to_owned(),
-        KeyId::EmojiGroupPage(_) => "›".to_owned(),
         KeyId::Letter(c) => {
             if state.shift.is_upper() {
                 c.to_uppercase().to_string()

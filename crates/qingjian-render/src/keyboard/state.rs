@@ -59,6 +59,13 @@ pub struct KeyboardState<'a> {
     /// 这一屏的标签里，当前这一类是第几个（画成选中态）。
     pub emoji_group: usize,
 
+    /// 分类标签条**被拉走多少**（点，正数 = 内容往左走）。
+    ///
+    /// 一屏摆得下 [`crate::EMOJI_COLS`] 个分类，多出来的靠这个位移看：跟手拖多少就走多少，
+    /// 松手吸附到整格。整格那部分由会话切（[`Self::emoji_groups`] 给的就已经是这一屏该画的），
+    /// 这里只剩零头——与 [`Self::clipboard_offset`] 一个道理，**不做除法**。
+    pub emoji_group_offset: f32,
+
     /// 表情页的格子**让开不足一行的那点**（点）。与 [`Self::clipboard_offset`] 一个道理：
     /// 整行由会话切好，这里只挪零头——一页放不下（笑脸那一类 172 个），不滚看不完。
     pub emoji_offset: f32,
