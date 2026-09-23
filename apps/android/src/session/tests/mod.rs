@@ -10,7 +10,7 @@ mod cloud;
 mod config;
 
 use super::flags;
-use super::{CANDIDATE_LIMIT, Session};
+use super::{CANDIDATE_LIMIT, EMOJI_GROUP_SLOTS, Session};
 use crate::action::{Act, Command};
 use crate::touch::MotionAction;
 use qingjian_core::CandidateKind;
@@ -2890,14 +2890,14 @@ fn fill_groups(session: &mut Session, count: usize) {
 /// 表情页的分类标签条**能横着滑**（K13 ②，2026-09-23）。
 ///
 /// 以前是一行定宽格子加两头 `‹ ›` 箭头，一屏只摆得下三个分类、只能点。
-/// 现在整条都能滑：跟手拖、松手吸附到最近的一格。
+/// 现在整条都能滑，而且是**跟手**的：手指拖到哪儿，标签行就走到哪儿。
 #[test]
 fn the_group_strip_follows_the_finger() {
     let Some(mut session) = ready() else {
         return;
     };
     tap_bar(&mut session, BarHitId::Tools);
-    fill_groups(&mut session, 8);
+    fill_groups(&mut session, 10);
     tap_key(&mut session, KeyId::Tool(1));
     assert_eq!(session.panel, Panel::Emoji, "该在表情页");
 
@@ -2917,33 +2917,90 @@ fn the_group_strip_follows_the_finger() {
     );
 }
 
-/// 慢慢拖到一半松手：**吸附到最近的分类**。
+/// 横着拖过半页松手：**翻一整页**（一次换新的五个），选中的类跟着换到新页第一个。
 ///
-/// 停在两格中间的话，一眼看不出现在选的是哪一类，点下去还会点到左边那格。
+/// 用户 2026-09-23 定的手感：滑一下就是新的一批五个，不是一格一格挪。
 #[test]
-fn the_group_strip_settles_after_a_slow_drag() {
+fn a_swipe_flips_a_whole_page() {
     let Some(mut session) = ready() else {
         return;
     };
     tap_bar(&mut session, BarHitId::Tools);
-    fill_groups(&mut session, 8);
+    fill_groups(&mut session, 10);
     tap_key(&mut session, KeyId::Tool(1));
 
     let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
-    let pitch = session.emoji_group_pitch();
-    // 拖了六成格、慢到不算「甩」
+    let page = session.emoji_group_page();
     session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x - pitch * 0.6, y);
-    session.touch(MotionAction::Up, POINTER, x - pitch * 0.6, y);
-    // 壳每次抬手都会报一次速度，0 表示没甩起来
+    session.touch(MotionAction::Move, POINTER, x - page * 0.6, y);
+    session.touch(MotionAction::Up, POINTER, x - page * 0.6, y);
     session.start_fling(POINTER, 0.0, 0.0);
 
+    assert_eq!(session.emoji_group_offset(), 0.0, "该吸附到整页上");
     assert_eq!(
-        session.emoji_group_offset(),
-        0.0,
-        "该吸附回整格上，不该停在半路"
+        session.emoji_group_first(),
+        EMOJI_GROUP_SLOTS,
+        "翻一整页，看到的是接下来的五个分类"
     );
-    assert_eq!(session.emoji_group_first(), 1, "六成格就近吸到第二类");
+    assert_eq!(
+        session.emoji_panel().group,
+        EMOJI_GROUP_SLOTS,
+        "选中的类跟着换到新页的第一个，下面的表情也换"
+    );
+}
+
+/// 甩得再快也**只按位移算**——分类标签不跟惯性。
+///
+/// 手指只挪了小半页、速度却很大：从前会顺着速度滑行出去好几格，现在只在松手处就近吸附。
+#[test]
+fn a_fast_fling_still_turns_one_page() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_bar(&mut session, BarHitId::Tools);
+    fill_groups(&mut session, 10);
+    tap_key(&mut session, KeyId::Tool(1));
+
+    let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
+    let page = session.emoji_group_page();
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - page * 0.3, y);
+    session.touch(MotionAction::Up, POINTER, x - page * 0.3, y);
+    // 往左甩得很猛——旧写法正是拿这个速度去起滑行的
+    session.start_fling(POINTER, -5000.0, 0.0);
+
+    assert_eq!(
+        session.emoji_group_first(),
+        0,
+        "不到半页就松手，退回原位；速度再大也不滑行"
+    );
+}
+
+/// 拖了不到半页又滑回来：**原来选中的那一类不动**。
+///
+/// 用户先前点中的是第几类，手滑一下再松开，还是第几类——别被「翻页」顺带重置成页首那格。
+#[test]
+fn a_short_drag_keeps_the_picked_group() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_bar(&mut session, BarHitId::Tools);
+    fill_groups(&mut session, 10);
+    tap_key(&mut session, KeyId::Tool(1));
+
+    // 先点中第三个分类
+    tap_key(&mut session, KeyId::EmojiGroup(2));
+    assert_eq!(session.emoji_panel().group, 2, "该选中第三类");
+
+    let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
+    let page = session.emoji_group_page();
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - page * 0.2, y);
+    session.touch(MotionAction::Up, POINTER, x - page * 0.2, y);
+    session.start_fling(POINTER, 0.0, 0.0);
+
+    assert_eq!(session.emoji_group_first(), 0, "不到半页，退回原位");
+    assert_eq!(session.emoji_panel().group, 2, "没翻页就不该动选中的类");
 }
 
 /// 滑过之后**点第 0 格，选中的是第二个分类**——命中的是屏内下标，

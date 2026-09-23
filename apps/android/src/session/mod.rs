@@ -419,13 +419,10 @@ pub struct Session {
 
     /// 分类标签条被拉走多少（点，正数 = 内容往左走）。
     ///
-    /// **跟手滚的连续位移**，不是「第几屏」：一屏摆得下 [`EMOJI_GROUP_SLOTS`] 个分类，
-    /// 多出来的靠这个数看，松手吸附到整格（[`Self::settle_emoji_groups`]）。
+    /// **跟手滚的连续位移**，不是「第几页」：一屏摆得下 [`EMOJI_GROUP_SLOTS`] 个分类，
+    /// 多出来的靠这个数看，松手吸附到**整页**（[`Self::settle_emoji_groups`]）。
     /// 与剪贴板列表、展开面板同一套路子，只是方向换成了横的。
     emoji_group_scroll: f32,
-
-    /// 分类标签条的惯性滑行（与别的几套各走各的）。
-    emoji_group_fling: Option<Fling>,
 
     /// 刚才**真的横着拖过标签条**的那根手指（与 [`Self::scrolled`] 同一个用途）。
     emoji_group_scrolled: Option<i32>,
@@ -757,7 +754,6 @@ impl Session {
             emoji: emoji_panel,
             kaomoji: kaomoji_panel,
             emoji_group_scroll: 0.0,
-            emoji_group_fling: None,
             emoji_group_scrolled: None,
             emoji_scroll: 0.0,
             clipboard: data_dir.map_or_else(Recent::default, |dir| {
@@ -1110,7 +1106,6 @@ impl Session {
             self.clipboard_scrolled = None;
             self.expanded_fling = None;
             self.expanded_scrolled = None;
-            self.emoji_group_fling = None;
             self.emoji_group_scrolled = None;
         }
         let bar_pixels = self.bar_pixels();
@@ -1515,11 +1510,7 @@ impl Session {
         if self.pending_commit.is_some() || !self.pending_commands.is_empty() {
             mask |= flags::COMMIT;
         }
-        if self.fling.is_some()
-            || self.clipboard_fling.is_some()
-            || self.expanded_fling.is_some()
-            || self.emoji_group_fling.is_some()
-        {
+        if self.fling.is_some() || self.clipboard_fling.is_some() || self.expanded_fling.is_some() {
             mask |= flags::FLING;
         }
         if self.pending_settings {
@@ -2048,15 +2039,9 @@ impl Session {
     /// 剪贴板列表竖着滚（用 [`Self::scroll_clipboard`] 的方向，符号正好相反）。
     pub fn start_fling(&mut self, pointer: i32, velocity_x: f32, velocity_y: f32) -> i32 {
         if self.emoji_group_scrolled == Some(pointer) {
-            // 标签行横着滚：手指往左甩（速度为负）= 看后面的分类 = 位移变大，所以取负；
-            // 与候选条那条带子同一个方向、同一个算法
-            let fling = Fling::new(-velocity_x / 1000.0);
-            match fling {
-                Some(fling) => self.emoji_group_fling = Some(fling),
-                // 没甩起来（慢慢拖到一半松手）：**就地吸附到最近的分类**——
-                // 停在两格中间的话一眼看不出现在哪一类，点下去还会点到左边那格
-                None => self.settle_emoji_groups(),
-            }
+            // 分类标签**按整页翻、不跟惯性**（用户 2026-09-23 要的手感）：甩得再快也只翻一页。
+            // 速度参数在这儿用不上，但这一路仍要认出来——它在 `emoji_group_scrolled` 上留了记号
+            self.settle_emoji_groups();
         } else if self.expanded_scrolled == Some(pointer) {
             // 面板竖着滚：手指往上甩（速度为负）= 内容往上走 = `scroll_expanded` 变大，
             // 与那边收的「手指挪了多少」同向，所以符号**不取反**；除以 1000 换成像素/毫秒
@@ -2189,11 +2174,18 @@ impl Session {
     fn pick_emoji_group(&mut self, index: usize) {
         // 命中给的是**标签行上第几格**，换算成整份分类里的第几个：加上这一屏的起点
         let target = self.emoji_group_first() + index;
-        let panel = self.emoji_panel_mut();
-        if target >= panel.names.len() {
+        self.set_emoji_group(target);
+    }
+
+    /// 切到整份分类里的第 `target` 个，并把格子滚回顶部。
+    ///
+    /// **点标签**与**横滑翻页**都走这儿（2026-09-23）：滑一下就是换一批新的五个，
+    /// 与点一格同一个结果，省得换类之后的收尾写两遍。
+    fn set_emoji_group(&mut self, target: usize) {
+        if target >= self.emoji_panel().names.len() {
             return;
         }
-        panel.group = target;
+        self.emoji_panel_mut().group = target;
         // 换了一类就从上头看起（不然会停在上一次滑到的位置，看着像空的）
         self.emoji_scroll = 0.0;
         self.mark_keyboard_dirty();
@@ -2295,20 +2287,36 @@ impl Session {
         self.mark_keyboard_dirty();
     }
 
-    /// 松手（或者甩完）之后**吸附到最近的分类**：停在两格中间的话，
-    /// 一眼看不出现在是哪一类，点下去还会点到左边那格。
+    /// 一页多宽（像素）：一屏摆得下几个分类，一页就是几个格宽。
+    ///
+    /// **翻页的单位**（2026-09-23）：横滑按整页走，不再一格一格挪。
+    fn emoji_group_page(&self) -> f32 {
+        self.emoji_group_pitch() * EMOJI_GROUP_SLOTS as f32
+    }
+
+    /// 松手之后**吸附到最近的整页**，滚到新页就改选那一页的第一个分类。
+    ///
+    /// 一页就是原来的一屏（[`EMOJI_GROUP_SLOTS`] 个分类），所以「滑一下 = 换一批新的五个」，
+    /// 下面的表情跟着换（用户 2026-09-23 要的手感，原来是按格滚 + 惯性）。
+    ///
+    /// 判「要不要改选」看的是**原来选中的那一类还在不在眼前**，不是「页号有没有变」：
+    /// 拖了不到半页又滑回原位时，选中的那一类还在这一页里，就不该被重置成页首那格
+    /// （用户先前点中的是第几类，滑一下手滑回来还是第几类）。
     fn settle_emoji_groups(&mut self) {
-        let pitch = self.emoji_group_pitch();
-        if pitch <= 0.0 {
+        let page = self.emoji_group_page();
+        if page <= 0.0 {
             return;
         }
-        let settled = (self.emoji_group_scroll / pitch).round() * pitch;
-        let settled = settled.clamp(0.0, self.emoji_group_max_scroll());
-        if settled == self.emoji_group_scroll {
+        self.emoji_group_scroll = ((self.emoji_group_scroll / page).round() * page)
+            .clamp(0.0, self.emoji_group_max_scroll());
+        let first = self.emoji_group_first();
+        let group = self.emoji_panel().group;
+        if (first..first + EMOJI_GROUP_SLOTS).contains(&group) {
+            // 原来那一类还在这一页上：只把位置对齐，选中的不动
+            self.mark_keyboard_dirty();
             return;
         }
-        self.emoji_group_scroll = settled;
-        self.mark_keyboard_dirty();
+        self.set_emoji_group(first);
     }
 
     /// 剪贴板列表跟着手指滚。
@@ -2410,17 +2418,6 @@ impl Session {
             self.scroll_expanded(step);
             if finished || (step != 0.0 && self.expanded_scroll == before) {
                 self.expanded_fling = None;
-            }
-        }
-        // 分类标签条（横着滚）。甩完（或者滚到头）**吸附到最近的分类**，与松手那条路一个收尾
-        if let Some(fling) = self.emoji_group_fling.as_mut() {
-            let step = fling.step(dt);
-            let finished = fling.finished();
-            let before = self.emoji_group_scroll;
-            self.scroll_emoji_groups(-step);
-            if finished || (step != 0.0 && self.emoji_group_scroll == before) {
-                self.emoji_group_fling = None;
-                self.settle_emoji_groups();
             }
         }
         self.mask()

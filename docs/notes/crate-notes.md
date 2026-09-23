@@ -469,8 +469,8 @@ JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `Qin
 - **滚动上限从这一帧的网格上问**，所以滚动时**不能**把 `expanded_view` 置空当脏标记——
   那样下一拍 `max_scroll` 返回 0、滚不动。用单独的 `expanded_dirty`，位图留着。
 
-**表情分类横滑（K13 ②，2026-09-23）**：标签行去掉两头的 `‹ ›`（`KeyId::EmojiGroupPage` 整个删掉），
-一屏摆 `EMOJI_COLS` 个分类（从 3 个变 5 个），多的靠横滑看。三个要点：
+**表情分类翻页（K13 ②，2026-09-23）**：标签行去掉两头的 `‹ ›`（`KeyId::EmojiGroupPage` 整个删掉），
+一屏摆 `EMOJI_COLS` 个分类（从 3 个变 5 个），多的靠横滑**按整页翻**。四个要点：
 
 - **滚动量在会话、零头在渲染器**：`Session::emoji_group_scroll` 是连续位移（点），
   `emoji_group_first()` 切出这一屏该画哪几个分类、`emoji_group_offset()` 给出不足一格的零头
@@ -480,10 +480,18 @@ JNI 入口是 `Java_app_qingjian_android_QingjianNative_*`，与 Kotlin 侧 `Qin
 - **横向手势判在纵向滚动之前**（`Keyboard::touch` 的 `Move` 分支）：表情页上标签行横着滑、
   格子区竖着滑，同一页两个方向，按方向认、先认出来的算数。**按行判不按格判**——
   `Keyboard::label_height()` 划出标签行的下边界，落在格子之间的缝里也能滑。
-- **`start_fling` 多第三路**：`emoji_group_scrolled` 记下是哪根手指横滑的，抬手时走
-  `Fling::new(-velocity_x / 1000.0)`（与候选条那条带子同向、同算法）；**没甩起来就就地吸附**
-  （`settle_emoji_groups`：四舍五入到整格）——停在两格中间的话，看不出现在是哪一类，
-  点下去还会点到左边那格。
+- **翻页的单位是一屏**：`settle_emoji_groups` 把位移四舍五入到 `emoji_group_page()`
+  （= 一屏宽），滑过半页就翻一页、不到半页退回原位。**判「要不要改选」看的是原来那一类
+  还在不在眼前**（`first..first + EMOJI_GROUP_SLOTS`），不是「页号变没变」——
+  拖了不到半页又滑回来时，用户先前点中的那一类还在这一页里，不该被重置成页首那格。
+  滚到新页且原来那一类已经不在眼前了，才 `set_emoji_group(first)`（点标签走同一条路）。
+- **`start_fling` 里也认这一路，但不跟惯性**（用户 2026-09-23 要的手感）：抬手直接
+  `settle_emoji_groups()`，速度参数整个不用——甩得再快也只在松手处就近吸附。
+  原先按候选条那套走 `Fling`，用户反馈「拖着有惯性、要滑完才刷新」，遂改。
+
+**滑起来之后不画按下态**：`Keyboard::refresh_pressed` 里排掉 `scrolling_x` 的那根手指
+（不然键帽上那个放大气泡会跟着手指跑一整路）。注意这一步**必须放在横滑分支 return 之前**——
+早先写在分支末尾，而横滑那一路 `return Some(Fired::GroupScroll(..))` 提前走掉了，压根没走到。
 
 **返回键**（加在 K13）：`Session::dismiss` 是唯一一个「这一下归不归我管」的 JNI——
 **返回 0 = 不归输入法**，壳照常把返回交给应用去收键盘；收面板、把页切回字母页都一定带着

@@ -153,7 +153,7 @@ pub enum Fired {
     /// 表情页的标签行横着挪一下：手指这一拍左右挪了多少像素（往右为正）。
     ///
     /// 与 [`Self::ClipboardScroll`] 一样是连续的。松手之后的吸附不在这儿报——
-    /// 抬手时壳会调 `start_fling`，那边按速度决定「甩一段」还是「就地吸附」。
+    /// 抬手时壳会调 `start_fling`，那边**按整页吸附**（分类标签不跟惯性，2026-09-23）。
     GroupScroll(f32),
 }
 
@@ -282,6 +282,8 @@ struct Press {
     ///
     /// 越过死区才算，之后这一下就不再是「点了某个分类」。与 [`Self::scrolling`] 互斥：
     /// 表情页的标签行横着滑、格子区竖着滑，同一页两个方向。
+    /// 置上之后 [`Keyboard::refresh_pressed`] 也不再认这根手指——滑起来是「浏览」，
+    /// 不该画按下的样儿（含键帽上那个放大气泡）。
     scrolling_x: bool,
 
     /// 这根手指**起过手势**（上滑清空 / 左滑删除的阈值碰过），即使后来滑回来了也一直记着。
@@ -593,17 +595,24 @@ impl Keyboard {
                     if self.layout.is_emoji() && press.at.1 < label_bottom {
                         let dx = x - press.at.0;
                         let slop = SCROLL_SLOP * self.metrics.density;
-                        if press.scrolling_x || dx.abs() >= slop {
+                        let step = if press.scrolling_x || dx.abs() >= slop {
                             press.scrolling_x = true;
                             press.gestured = true;
                             let step = x - press.last_x;
                             press.last_x = x;
-                            if step != 0.0 {
-                                return Some(Fired::GroupScroll(step));
-                            }
+                            step
+                        } else {
+                            0.0
+                        };
+                        // 滑起来之后这一下就不再是「按住了某一格」，把按下态撤掉——
+                        // 不然键帽上那个放大气泡会跟着手指跑一整路（用户 2026-09-23 指出的）。
+                        // **必须赶在下面 return 之前调**：早先这一步写在后面，横滑那一路
+                        // 提前 `return Some(Fired::GroupScroll)` 走掉了，压根没走到，气泡照旧。
+                        self.refresh_pressed();
+                        if step != 0.0 {
+                            return Some(Fired::GroupScroll(step));
                         }
                         // 标签行上没有别的手势：滑动之外什么也不做（点击由抬起时结算）
-                        self.refresh_pressed();
                         return None;
                     }
                     if self.layout.is_clipboard() || self.layout.is_emoji() {
@@ -989,12 +998,16 @@ impl Keyboard {
     ///
     /// 多根手指同时按着时取**最后按下**的那根——键帽只画得出一个按下态，
     /// 而这已经够用：反馈要的是「我这一下碰到了」，不是同时高亮好几格。
+    ///
+    /// **横滑起来的那根不算**（2026-09-23）：分类标签行滑起来之后是「浏览」不是「按住了
+    /// 某一格」，再按下去的样儿画（连带键帽上那个放大气泡）就与手上的动作对不上了——
+    /// 用户滑标签时看到气泡跟着跑，正是这个。滑动**之前**（刚按下还没越过死区）照旧算按下。
     fn refresh_pressed(&mut self) {
         let held = self
             .presses
             .iter()
             .rev()
-            .find(|press| !press.sliding && press.key.is_some());
+            .find(|press| !press.sliding && !press.scrolling_x && press.key.is_some());
         let key = held.and_then(|press| press.key);
         let clearing = held.is_some_and(|press| press.clearing);
         let deleting = held.is_some_and(|press| press.deleting);
