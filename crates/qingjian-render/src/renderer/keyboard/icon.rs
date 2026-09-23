@@ -1,4 +1,5 @@
-//! 键盘上那几个图标：⇧ 大小写、⌫ 退格，以及工具页那几格上的剪贴板 / 表情 / 颜文字 / 设置。
+//! 键盘上那几个图标：⇧ 大小写、⌫ 退格，工具页那几格上的剪贴板 / 表情 / 颜文字 / 设置，
+//! 以及表情面板分类标签上那一排（2026-09-23 加的）。
 //!
 //! **路径是生成的**，来自 `assets/icon/material/` 里那几张 Google **Material Symbols** 的 svg
 //! （Apache-2.0）：
@@ -23,6 +24,7 @@ use tiny_skia::{BlendMode, Transform};
 
 use crate::canvas::Canvas;
 use crate::color::Color;
+use crate::keyboard::GroupIcon;
 
 /// 图标边长相对**键高**的比例。
 ///
@@ -97,6 +99,33 @@ pub(crate) fn draw_settings(canvas: &mut Canvas, cx: f32, cy: f32, size: f32, co
         size,
         color,
     );
+}
+
+/// 画表情面板分类标签上那个图标，居中在 `(cx, cy)`，边长 `size` 像素。
+///
+/// 「哪个分类用哪个图标」由会话层定（见 [`GroupIcon`]），这儿只认枚举值。
+pub(crate) fn draw_group(
+    canvas: &mut Canvas,
+    icon: GroupIcon,
+    cx: f32,
+    cy: f32,
+    size: f32,
+    color: Color,
+) {
+    let (path, bbox) = match icon {
+        GroupIcon::Recent => (path::history(), path::BOXES[6]),
+        // 笑脸那格复用工具页的表情图标：同一个意思，没必要再下一张
+        GroupIcon::Smile => (path::mood(), path::BOXES[3]),
+        GroupIcon::People => (path::people(), path::BOXES[7]),
+        GroupIcon::Animals => (path::pets(), path::BOXES[8]),
+        GroupIcon::Food => (path::cake(), path::BOXES[9]),
+        GroupIcon::Travel => (path::car(), path::BOXES[10]),
+        GroupIcon::Activities => (path::ball(), path::BOXES[11]),
+        GroupIcon::Objects => (path::objects(), path::BOXES[12]),
+        GroupIcon::Symbols => (path::symbols(), path::BOXES[13]),
+        GroupIcon::Flags => (path::flag(), path::BOXES[14]),
+    };
+    draw(canvas, path, bbox, cx, cy, size, color);
 }
 
 /// 把一段路径缩到**最长边 = `size`** 并居中在 `(cx, cy)`，然后填色。

@@ -233,7 +233,17 @@ class QingjianSurfaceView(context: Context) : View(context) {
         }
         tracker.addMovement(event)
 
-        onTouch?.invoke(action, pointer, event.getX(index), y)
+        // **移动要逐根手指报**：`ACTION_MOVE` 的 `actionIndex` 恒为 0（AOSP 的 MOVE 事件
+        // 本来就不带 pointer index），照着它只报第一根的话，第二根手指的滑动 / 气泡 /
+        // 手势全都不工作——两只拇指交替快打时那一半的按键就「没反应」。
+        // 按下 / 抬起 / 取消都带 index，照旧只报那一根。
+        if (action == MotionEvent.ACTION_MOVE) {
+            for (i in 0 until event.pointerCount) {
+                onTouch?.invoke(action, event.getPointerId(i), event.getX(i), event.getY(i))
+            }
+        } else {
+            onTouch?.invoke(action, pointer, event.getX(index), y)
+        }
         // 抬手的这一下要**在 touch 之后报**：Rust 那边靠「刚才是谁在滚这条带子」判该不该甩，
         // 而那个记录是移动时记下的，抬手时已经无用了（见 `Session::start_fling`）
         if (lifting) {

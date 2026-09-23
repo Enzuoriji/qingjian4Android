@@ -5,6 +5,7 @@
 
 mod config;
 mod fling;
+mod slide;
 
 #[cfg(test)]
 mod tests;
@@ -22,9 +23,9 @@ use qingjian_learning::{CLIPBOARD_LIMIT, EMOJI_RECENT_LIMIT, FrequencyLearner, R
 use qingjian_lm::BigramModel;
 use qingjian_platform::extra_dictionaries;
 use qingjian_render::{
-    BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, InputMode, KeyboardLayout, Panel,
-    PanelArea, Preedit, PreeditSegment, PreeditStyle, RenderedBar, RenderedPanel, Renderer, Row,
-    ShiftState, Theme, Tone,
+    BarHitId, BarStrip, CLIPBOARD_CELLS, FontLibrary, Frame, GroupIcon, GroupLabel, InputMode,
+    KeyboardLayout, Panel, PanelArea, Preedit, PreeditSegment, PreeditStyle, RenderedBar,
+    RenderedPanel, Renderer, Row, ShiftState, Theme, Tone,
 };
 use qingjian_translate::Glossary;
 
@@ -35,6 +36,7 @@ use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 use config::{ConfigState, attach_cloud, configured_language, push_to_engine};
 use fling::Fling;
+use slide::Slide;
 
 /// 算「滚到第几条起」时给除法的一点补偿（单位是「格」，也就是一格的万分之一）。
 ///
@@ -152,28 +154,33 @@ struct EmojiPanel {
     /// 每个分类的字符，与 [`Self::names`] 一一对应。
     items: Vec<Vec<String>>,
 
-    /// 当前选中的是第几类。
-    group: usize,
-}
+    /// 所有分类的条目按 [`EMOJI_SLOTS`] 个一页切开、首尾相接——一页就是屏幕上摆得下的
+    /// 那一整屏，**表情页横着翻的就是它**（2026-09-23 起；原来是一个分类竖着滚到底）。
+    pages: Vec<Vec<String>>,
 
-/// 标签条一屏摆几个分类。
-/// 表情页的标签行一屏摆几个分类——与格子同宽，所以就是 [`EMOJI_COLS`]。
-///
-/// 2026-09-23（K13 ②）：以前是 3（两头各占一个翻页箭头），现在整条都能横滑、箭头去掉了，
-/// 一屏因此多出两个分类。
-const EMOJI_GROUP_SLOTS: usize = EMOJI_COLS;
+    /// 第 i 个分类占 [`Self::pages`] 的哪几页（闭区间），与 [`Self::names`] 一一对应。
+    ranges: Vec<(usize, usize)>,
+
+    /// 标签行上那一排：与 [`Self::names`] 一一对应，说了每一格画图标还是画名字。
+    ///
+    /// **跟着 [`Self::names`] 一起算好存着**（不是每次现算）：它里面存了名字的副本，
+    /// 现算的话借的正是 `names`，一个结构借自己存不下来。
+    labels: Vec<GroupLabel>,
+}
 
 /// 「最近用过的」那个分类在标签条上叫什么（它是**插在最前面**的第 0 类，不是表里的）。
 const RECENT_LABEL: &str = "最近";
 
-/// 一屏摆几个表情（与 `qingjian_render` 的 `EMOJI_COLS × EMOJI_ROWS` 是同一个数）。
+/// **一页摆几个**表情——一屏摆得下多少就是一页多少（`qingjian_render` 的
+/// `EMOJI_COLS × EMOJI_ROWS`，两处是同一个数）。横着翻页翻的单位就是它。
 const EMOJI_SLOTS: usize = 15;
 
-/// 一行摆几格（与 `qingjian_render` 的 `EMOJI_COLS` 是同一个数）。
-const EMOJI_COLS: usize = 5;
-
-/// 一屏可见几行（与 `qingjian_render` 的 `EMOJI_ROWS` 是同一个数）。
-const EMOJI_ROWS: usize = 3;
+/// 手速超过这么多（**点/毫秒**）就算「甩」，朝手甩的方向翻一页，跟拖了多远无关。
+///
+/// 0.05 点/毫秒 = 50 点/秒，正是安卓 `ViewConfiguration` 的 `scaledMinimumFlingVelocity`
+/// （50 dp/s）——fcitx5-android 那个 ViewPager2 判「甩没甩」用的就是这条线。
+/// **特别低**：轻轻一拨就过线，所以「滑一下就翻页」。只判方向、不看大小（再快也只翻一页）。
+const MIN_PAGE_FLING: f32 = 0.05;
 
 impl EmojiPanel {
     /// 从文件读。文件不在或读不了就是个空的——表情面板画不出来，别的照常用。
@@ -206,23 +213,66 @@ impl EmojiPanel {
         if names.len() != items.len() {
             return Self::default();
         }
-        Self {
+        let mut panel = Self {
             names,
             items,
-            group: 0,
+            ..Self::default()
+        };
+        panel.rebuild();
+        panel
+    }
+
+    /// 把每个分类的条目按 [`EMOJI_SLOTS`] 个一页切开，重排页区间。
+    ///
+    /// **内容变过就要重来一遍**（「最近」多了一条 / 少了、滤掉画不出来的字形），
+    /// 页数与每一页的起点都会跟着变。切完把当前页夹回范围内：页数会变少，
+    /// 不夹的话下标指到外面去，那一页就是空的。
+    fn rebuild(&mut self) {
+        self.pages.clear();
+        self.ranges.clear();
+        for items in &self.items {
+            let first = self.pages.len();
+            for chunk in items.chunks(EMOJI_SLOTS) {
+                self.pages.push(chunk.to_vec());
+            }
+            // 一个条目都没有的分类给一个**空页**占位：页区间不能是空的，
+            // 空了「点这个分类跳它第一页」会跳到隔壁分类去
+            if self.pages.len() == first {
+                self.pages.push(Vec::new());
+            }
+            self.ranges.push((first, self.pages.len() - 1));
         }
+        self.labels = self.names.iter().map(|name| group_label(name)).collect();
     }
 
-    /// 标签行上从第 `first` 个起要画的那几个分类名（不够几个就短）。
-    fn labels(&self, first: usize, count: usize) -> &[String] {
-        let start = first.min(self.names.len());
-        let end = (start + count).min(self.names.len());
-        &self.names[start..end]
+    /// 第 `page` 页属于第几个分类。
+    fn group_of_page(&self, page: usize) -> usize {
+        self.ranges
+            .iter()
+            .position(|(first, last)| (*first..=*last).contains(&page))
+            .unwrap_or(0)
     }
 
-    /// 一共有几个分类。
-    fn group_count(&self) -> usize {
-        self.names.len()
+    /// 第 `group` 个分类的第一页是哪一页（点标签就跳到这儿）。
+    fn page_of_group(&self, group: usize) -> usize {
+        self.ranges.get(group).map_or(0, |(first, _)| *first)
+    }
+
+    /// 第 `group` 个分类一共几页（分页细条画几格用它）。
+    fn pages_of_group(&self, group: usize) -> usize {
+        self.ranges
+            .get(group)
+            .map_or(1, |(first, last)| last - first + 1)
+    }
+
+    /// 第 `page` 页上那几个字符（不够一页就短）。
+    fn page_items(&self, page: usize) -> &[String] {
+        self.pages.get(page).map_or(&[][..], Vec::as_slice)
+    }
+
+    /// 一共有几页。
+    fn page_count(&self) -> usize {
+        self.pages.len()
     }
 
     /// 把「最近用过的」摆到最前面当一类（一条都没有时不摆）。
@@ -236,14 +286,14 @@ impl EmojiPanel {
                 self.names.remove(0);
                 self.items.remove(0);
             }
-            return;
-        }
-        if has {
+        } else if has {
             self.items[0] = recent.to_vec();
         } else {
             self.names.insert(0, RECENT_LABEL.to_owned());
             self.items.insert(0, recent.to_vec());
         }
+        // 页是按内容切的，动过就得重排（「最近」从无到有会多出一整个分类的页）
+        self.rebuild();
     }
 
     /// 把画不出来的条目去掉——「画不画得出来」由调用方判（那边有渲染器，知道字体里
@@ -262,24 +312,64 @@ impl EmojiPanel {
         }
         self.names = names;
         self.items = items;
-        self.group = 0;
+        // 滤掉过整个分类，页要重排
+        self.rebuild();
     }
+}
 
-    /// 当前这一类里，**从第 `first` 行起要画的那几个**。
-    ///
-    /// 一页放不下（笑脸那一类 172 个），所以要能往下滑——跟剪贴板那份列表同一个做法：
-    /// 整行的那部分在这儿切，不足一行的零头由渲染器让开。
-    fn visible(&self, first: usize) -> &[String] {
-        let items = self.items.get(self.group).map_or(&[][..], Vec::as_slice);
-        let start = (first * EMOJI_COLS).min(items.len());
-        let end = (start + EMOJI_SLOTS).min(items.len());
-        &items[start..end]
-    }
+/// 一个分类名在标签行上画什么。
+///
+/// 表情表里那九个分类各有图标（照 fcitx5-android 的选型，Google 的 Material Symbols）；
+/// 颜文字那 22 个中文分类没有——一行挤 22 格，图标小到认不出，还是画两个字的名字。
+fn group_label(name: &str) -> GroupLabel {
+    let icon = match name {
+        RECENT_LABEL => GroupIcon::Recent,
+        "Smileys & Emotion" => GroupIcon::Smile,
+        "People & Body" => GroupIcon::People,
+        "Animals & Nature" => GroupIcon::Animals,
+        "Food & Drink" => GroupIcon::Food,
+        "Travel & Places" => GroupIcon::Travel,
+        "Activities" => GroupIcon::Activities,
+        "Objects" => GroupIcon::Objects,
+        "Symbols" => GroupIcon::Symbols,
+        "Flags" => GroupIcon::Flags,
+        _ => return GroupLabel::Text(name.to_owned()),
+    };
+    GroupLabel::Icon(icon)
+}
 
-    /// 当前这一类一共几行（一行的格数是 [`EMOJI_COLS`]）。
-    fn rows(&self) -> usize {
-        let count = self.items.get(self.group).map_or(0, Vec::len);
-        count.div_ceil(EMOJI_COLS)
+/// 表情面板这一刻该画什么：前后各一页 + 当前页、上面那条标签、分页细条。
+///
+/// **是个自由函数，不是会话的方法**：它借的是面板里的字符（`EmojiView` 存的是切片），
+/// 而调用处紧接着要可变借键盘——走 `&self` 的方法就把整台会话借住了，借字段才拆得开。
+fn emoji_view(panel: &EmojiPanel, scroll: f32, width: f32, density: f32) -> EmojiView<'_> {
+    let width = width.max(1.0);
+    let scale = density.max(1.0);
+    let last = panel.page_count().saturating_sub(1);
+    let page = ((scroll / width).floor().max(0.0) as usize).min(last);
+    // 前后各一页：跟手时相邻那页要跟着露出来。两头没有的那一侧给空切片，
+    // 渲染器照样按「±1 个整宽」摆，摆到视口外面的自然看不见。
+    let before = if page > 0 {
+        panel.page_items(page - 1)
+    } else {
+        &[]
+    };
+    let after = if page < last {
+        panel.page_items(page + 1)
+    } else {
+        &[]
+    };
+    let group = panel.group_of_page(page);
+    // 分页细条：这一类一共几页、已经翻过几页。**带小数**——跟手时细条要跟得住手指，
+    // 一整格一整格跳的话看着像卡住了。
+    let offset = (scroll - page as f32 * width) / width;
+    let passed = (page - panel.page_of_group(group)) as f32 + offset;
+    EmojiView {
+        pages: [before, panel.page_items(page), after],
+        shift: (scroll - page as f32 * width) / scale,
+        labels: &panel.labels,
+        group,
+        pager: Some((passed, panel.pages_of_group(group))),
     }
 }
 
@@ -417,21 +507,18 @@ pub struct Session {
     emoji: EmojiPanel,
     kaomoji: EmojiPanel,
 
-    /// 分类标签条被拉走多少（点，正数 = 内容往左走）。
+    /// 表情页**横滑的位移**（点，正数 = 内容往左走 = 在看后一页）。
     ///
-    /// **跟手滚的连续位移**，不是「第几页」：一屏摆得下 [`EMOJI_GROUP_SLOTS`] 个分类，
-    /// 多出来的靠这个数看，松手吸附到**整页**（[`Self::settle_emoji_groups`]）。
-    /// 与剪贴板列表、展开面板同一套路子，只是方向换成了横的。
-    emoji_group_scroll: f32,
+    /// **只有零头那部分**——整页由 [`EmojiPanel::page`] 换掉（与剪贴板那份列表同一个分工：
+    /// 整格的会话切，不足一格的渲染器让开）。松手时按它算「翻不翻、翻到哪一页」，
+    /// 再起一段吸附动画滑过去（[`Slide`]）。
+    emoji_page_scroll: f32,
 
-    /// 刚才**真的横着拖过标签条**的那根手指（与 [`Self::scrolled`] 同一个用途）。
-    emoji_group_scrolled: Option<i32>,
+    /// 刚才**真的横滑过表情格子**的那根手指（与 [`Self::scrolled`] 同一个用途）。
+    emoji_page_scrolled: Option<i32>,
 
-    /// 表情页的格子被拉上去多少（点）。0 是第一行贴着网格区顶边。
-    ///
-    /// 与剪贴板那份列表**同一套做法**：整行由会话切（[`EmojiPanel::visible`]），
-    /// 不足一行的零头交给渲染器让开。一页 15 格，笑脸那一类 172 个，不滚看不完。
-    emoji_scroll: f32,
+    /// 松手之后那一段收尾（从当前位置滑到整页）。
+    emoji_page_slide: Option<Slide>,
 
     /// 剪贴板列表甩出去之后的那一段滑行（与候选条那条带子各走各的）。
     clipboard_fling: Option<Fling>,
@@ -753,9 +840,9 @@ impl Session {
             emoji_recent,
             emoji: emoji_panel,
             kaomoji: kaomoji_panel,
-            emoji_group_scroll: 0.0,
-            emoji_group_scrolled: None,
-            emoji_scroll: 0.0,
+            emoji_page_scroll: 0.0,
+            emoji_page_scrolled: None,
+            emoji_page_slide: None,
             clipboard: data_dir.map_or_else(Recent::default, |dir| {
                 Recent::open(dir.join(CLIPBOARD_FILE), CLIPBOARD_LIMIT)
             }),
@@ -835,9 +922,12 @@ impl Session {
         if panel == Panel::Clipboard {
             self.clipboard_scroll = 0.0;
         }
-        // 表情页也从第一个分类看起
+        // 表情页：把跟手的零头和没跑完的动画清掉（上次停在哪一页还在哪一页，
+        // 与剪贴板那边不一样——那边每次进来都回最新的几条，这边保留看的进度）
         if matches!(panel, Panel::Emoji | Panel::Kaomoji) {
-            self.emoji_group_scroll = 0.0;
+            self.emoji_page_scroll = 0.0;
+            self.emoji_page_slide = None;
+            self.emoji_page_scrolled = None;
         }
         // 换页了，正在跑的那段滑行按的是上一页的视口，停掉
         self.clipboard_fling = None;
@@ -990,13 +1080,7 @@ impl Session {
             Panel::Kaomoji => &self.kaomoji,
             _ => &self.emoji,
         };
-        let emoji = EmojiView {
-            offset: self.emoji_offset(),
-            items: panel.visible(self.emoji_first_row()),
-            labels: panel.labels(self.emoji_group_first(), EMOJI_GROUP_SLOTS),
-            group: panel.group.saturating_sub(self.emoji_group_first()),
-            group_offset: self.emoji_group_offset(),
-        };
+        let emoji = emoji_view(panel, self.emoji_page_scroll, self.viewport(), self.density);
         match self.keyboard.as_mut() {
             Some(keyboard) => keyboard.popup_surface(
                 self.renderer.as_mut(),
@@ -1038,13 +1122,7 @@ impl Session {
             Panel::Kaomoji => &self.kaomoji,
             _ => &self.emoji,
         };
-        let emoji = EmojiView {
-            offset: self.emoji_offset(),
-            items: panel.visible(self.emoji_first_row()),
-            labels: panel.labels(self.emoji_group_first(), EMOJI_GROUP_SLOTS),
-            group: panel.group.saturating_sub(self.emoji_group_first()),
-            group_offset: self.emoji_group_offset(),
-        };
+        let emoji = emoji_view(panel, self.emoji_page_scroll, self.viewport(), self.density);
         match self.keyboard.as_mut() {
             Some(keyboard) => keyboard.surface(
                 self.renderer.as_mut(),
@@ -1106,7 +1184,7 @@ impl Session {
             self.clipboard_scrolled = None;
             self.expanded_fling = None;
             self.expanded_scrolled = None;
-            self.emoji_group_scrolled = None;
+            self.emoji_page_scrolled = None;
         }
         let bar_pixels = self.bar_pixels();
         if self.expanded && y >= bar_pixels {
@@ -1124,17 +1202,15 @@ impl Session {
                 Some(Fired::DeleteClipboard(index)) => self.apply(Act::DeleteClipboard(index)),
                 Some(Fired::ClipboardScroll(delta)) => {
                     // 记下是这根手指在滚——抬手时靠它判该不该甩（那时 `presses` 里已经没有它了）
-                    if matches!(self.panel, Panel::Emoji | Panel::Kaomoji) {
-                        self.scroll_emoji(delta);
-                    } else {
-                        self.clipboard_scrolled = Some(pointer);
-                        self.scroll_clipboard(delta);
-                    }
+                    self.clipboard_scrolled = Some(pointer);
+                    self.scroll_clipboard(delta);
                 }
-                Some(Fired::GroupScroll(delta)) => {
-                    // 记下是这根手指在横滑——抬手时靠它判「甩一段还是就地吸附」
-                    self.emoji_group_scrolled = Some(pointer);
-                    self.scroll_emoji_groups(delta);
+                Some(Fired::EmojiPageScroll(delta)) => {
+                    // 记下是这根手指在横滑——抬手时靠它判「翻不翻页、翻到哪一页」
+                    self.emoji_page_scrolled = Some(pointer);
+                    // 手指按下来就把还在跑的那段吸附动画停掉（「摸住就停」那个手感）
+                    self.emoji_page_slide = None;
+                    self.scroll_emoji_page(delta);
                 }
                 None => {}
             }
@@ -1300,6 +1376,8 @@ impl Session {
                 }
             }
             MotionAction::Cancel => self.pressed.clear(),
+            // 不认识的事件：什么都不做（见 [`MotionAction::Ignore`]）
+            MotionAction::Ignore => {}
         }
     }
 
@@ -1448,6 +1526,7 @@ impl Session {
                 }
             }
             MotionAction::Cancel => self.expanded_press = None,
+            MotionAction::Ignore => {}
         }
     }
 
@@ -1510,7 +1589,11 @@ impl Session {
         if self.pending_commit.is_some() || !self.pending_commands.is_empty() {
             mask |= flags::COMMIT;
         }
-        if self.fling.is_some() || self.clipboard_fling.is_some() || self.expanded_fling.is_some() {
+        if self.fling.is_some()
+            || self.clipboard_fling.is_some()
+            || self.expanded_fling.is_some()
+            || self.emoji_page_slide.is_some()
+        {
             mask |= flags::FLING;
         }
         if self.pending_settings {
@@ -2038,10 +2121,11 @@ impl Session {
     /// 横竖两个分量是**两回事**：候选条那条带子横着滚（用 [`Self::scroll_by`] 的方向），
     /// 剪贴板列表竖着滚（用 [`Self::scroll_clipboard`] 的方向，符号正好相反）。
     pub fn start_fling(&mut self, pointer: i32, velocity_x: f32, velocity_y: f32) -> i32 {
-        if self.emoji_group_scrolled == Some(pointer) {
-            // 分类标签**按整页翻、不跟惯性**（用户 2026-09-23 要的手感）：甩得再快也只翻一页。
-            // 速度参数在这儿用不上，但这一路仍要认出来——它在 `emoji_group_scrolled` 上留了记号
-            self.settle_emoji_groups();
+        if self.emoji_page_scrolled == Some(pointer) {
+            // 表情页横滑松手：按「手速 + 拖了多远」定翻不翻页，再起一段吸附动画
+            // （照 ViewPager2 的手感，2026-09-23）。**速度在这儿是真用上了**——
+            // 原来那一版整个丢掉，轻轻一甩不翻页，用户说手感不对就是这个。
+            self.settle_emoji_page(velocity_x);
         } else if self.expanded_scrolled == Some(pointer) {
             // 面板竖着滚：手指往上甩（速度为负）= 内容往上走 = `scroll_expanded` 变大，
             // 与那边收的「手指挪了多少」同向，所以符号**不取反**；除以 1000 换成像素/毫秒
@@ -2144,179 +2228,183 @@ impl Session {
         }
     }
 
-    /// 同上，要改的时候用这个。
-    fn emoji_panel_mut(&mut self) -> &mut EmojiPanel {
-        match self.panel {
-            Panel::Kaomoji => &mut self.kaomoji,
-            _ => &mut self.emoji,
-        }
-    }
-
     /// 表情页点了一个：**整条上屏**（不是像打字那样一个字符一个字符喂给引擎）。
     ///
     /// 上屏之后**留在这一页**——发 emoji 常常一次发好几个，弹回字母页反而要重新点进来。
     fn commit_emoji(&mut self, index: usize) {
-        let first = self.emoji_first_row();
-        let Some(text) = self.emoji_panel().visible(first).get(index).cloned() else {
+        let page = self.emoji_page();
+        let Some(text) = self.emoji_panel().page_items(page).get(index).cloned() else {
             return;
         };
         self.commit_text(text.clone());
         // 用过就记进「最近」，下次进来排在最前面（两页共用一份，所以两页都要更新）
         if self.emoji_recent.remember(&text) {
+            // 记住**原来在哪一类的第几页**：新的一条会让「最近」那一类的页变多
+            // （从无到有更是一下多出一整类），后面的页整体往后挪。
+            // 只把位移夹回范围是不够的——页号没动、内容挪了，看到的就是隔壁那一页
+            // （模拟器上 2026-09-23 抓到：点了面旗帜，画面跳去符号类）。
+            let page = self.emoji_page();
+            let (name, within) = {
+                let panel = self.emoji_panel();
+                let group = panel.group_of_page(page);
+                (
+                    panel.names.get(group).cloned(),
+                    page - panel.page_of_group(group),
+                )
+            };
             let recent = self.emoji_recent.entries().to_vec();
             self.emoji.set_recent(&recent);
             self.kaomoji.set_recent(&recent);
+            self.restore_emoji_page(name.as_deref(), within);
             self.mark_keyboard_dirty();
         }
     }
 
-    /// 点了分类标签：切到那一类。`index` 是**这一屏里的第几个**，要换算回整份里的下标。
+    /// 点了分类标签：跳到**那一类的第一页**。
+    ///
+    /// `index` 就是标签行上第几格——标签是**全部分类平铺**的，格号就是分类号
+    /// （2026-09-23 起。原来一屏只摆五个，还得加上这一屏的起点换算）。
     fn pick_emoji_group(&mut self, index: usize) {
-        // 命中给的是**标签行上第几格**，换算成整份分类里的第几个：加上这一屏的起点
-        let target = self.emoji_group_first() + index;
-        self.set_emoji_group(target);
+        self.set_emoji_group(index);
     }
 
-    /// 切到整份分类里的第 `target` 个，并把格子滚回顶部。
-    ///
-    /// **点标签**与**横滑翻页**都走这儿（2026-09-23）：滑一下就是换一批新的五个，
-    /// 与点一格同一个结果，省得换类之后的收尾写两遍。
+    /// 跳到第 `target` 个分类的第一页（点标签走这儿）。
     fn set_emoji_group(&mut self, target: usize) {
-        if target >= self.emoji_panel().names.len() {
-            return;
-        }
-        self.emoji_panel_mut().group = target;
-        // 换了一类就从上头看起（不然会停在上一次滑到的位置，看着像空的）
-        self.emoji_scroll = 0.0;
-        self.mark_keyboard_dirty();
-    }
-
-    /// 表情页的格子滚到第几行起了。
-    fn emoji_first_row(&self) -> usize {
-        let pitch = self.grid_pitch();
-        if pitch <= 0.0 {
-            return 0;
-        }
-        // 与剪贴板同一个理由：浮点下 `n × pitch ÷ pitch` 可能是 n-0.00001，
-        // floor 之后就少一行，滑到底时最后一行永远差一点露不全
-        let rows = self.emoji_scroll / pitch + GRID_EPSILON;
-        rows.floor().max(0.0) as usize
-    }
-
-    /// 整行之外还让开了多少（点，0 到一行高之间）——渲染器拿它把整片格子平移。
-    fn emoji_offset(&self) -> f32 {
-        let pitch = self.grid_pitch();
-        if pitch <= 0.0 {
-            return 0.0;
-        }
-        let frac = self.emoji_scroll - self.emoji_first_row() as f32 * pitch;
-        frac.clamp(0.0, pitch)
-    }
-
-    /// 表情页还能往下滚多少（点）：比一屏多出来的那几行，一行一格。
-    fn emoji_max_scroll(&self) -> f32 {
-        let visible = EMOJI_ROWS;
-        self.emoji_panel().rows().saturating_sub(visible) as f32 * self.grid_pitch()
-    }
-
-    /// 表情页的格子跟着手指滚（`delta` 是这一拍挪了多少**像素**，往下为正）。
-    fn scroll_emoji(&mut self, delta: f32) {
-        let density = if self.density > 0.0 {
-            self.density
-        } else {
-            1.0
+        let page = {
+            let panel = self.emoji_panel();
+            if target >= panel.names.len() {
+                return;
+            }
+            panel.page_of_group(target)
         };
-        let next = self.emoji_scroll - delta / density;
-        self.emoji_scroll = next.clamp(0.0, self.emoji_max_scroll());
+        self.emoji_page_scroll = page as f32 * self.emoji_page_width();
+        // 换了地方，没跑完的那段动画作废
+        self.emoji_page_slide = None;
         self.mark_keyboard_dirty();
     }
 
-    /// 标签条往前后翻一屏，夹在首末屏之间。
-    /// 标签行上一个分类占多宽（像素）——与格子同宽：整块键盘宽除以一屏几个。
-    ///
-    /// 滚动的步长、吸附的位置、第几个分类起，全按它算。
-    fn emoji_group_pitch(&self) -> f32 {
-        let columns = EMOJI_GROUP_SLOTS.max(1) as f32;
-        self.viewport() / columns
+    /// 一页多宽（像素）——就是一屏：整块键盘那么宽。
+    fn emoji_page_width(&self) -> f32 {
+        self.viewport()
     }
 
-    /// 标签行此刻从**整份分类**里的第几个开始画。
+    /// 现在在看第几页（整份 `pages` 里的下标）。
     ///
-    /// 与画的时候同一个口径：位移除以格宽取整，所以「画出来的第一格」就是它。
-    fn emoji_group_first(&self) -> usize {
-        let pitch = self.emoji_group_pitch();
-        if pitch <= 0.0 {
+    /// **从位移算**，不另外存一个「第几页」：跟手拖到一半时「现在算哪一页」本来就是个
+    /// 中间态（`floor` 过去就到下一页了），存两份迟早不同步。
+    fn emoji_page(&self) -> usize {
+        let width = self.emoji_page_width();
+        if width <= 0.0 {
             return 0;
         }
-        // 夹在「最后一个分类能停在开头」的位置上，免得滑过头时第一格算到整份外面去
-        let last = self
-            .emoji_panel()
-            .group_count()
-            .saturating_sub(EMOJI_GROUP_SLOTS);
-        ((self.emoji_group_scroll / pitch).floor() as usize).min(last)
+        let last = self.emoji_panel().page_count().saturating_sub(1);
+        ((self.emoji_page_scroll / width).floor().max(0.0) as usize).min(last)
     }
 
-    /// 标签行让开不足一格的那点（点）。整格的部分由 [`Self::emoji_group_first`] 切好，
-    /// 渲染器只挪这个零头——与剪贴板、展开面板同一个分工。
-    fn emoji_group_offset(&self) -> f32 {
-        let pitch = self.emoji_group_pitch();
-        if pitch <= 0.0 {
-            return 0.0;
-        }
-        // 用 first 反推而不是取余：滑过头被 `first` 夹住时，取余会算出个对不上的零头
-        (self.emoji_group_scroll - self.emoji_group_first() as f32 * pitch).clamp(0.0, pitch)
-    }
-
-    /// 标签行最远能拉走多少（像素）。分类比一屏少就没得滚。
-    fn emoji_group_max_scroll(&self) -> f32 {
-        let count = self.emoji_panel().group_count();
-        count.saturating_sub(EMOJI_GROUP_SLOTS) as f32 * self.emoji_group_pitch()
-    }
-
-    /// 标签行跟着手指横着滚。
+    /// 当前这一页属于第几个分类（上面那条标签画哪一个高亮）。
     ///
-    /// `delta` 是手指这一拍挪了多少**像素**（往右为正）——手指往右拖是把内容往右带，
-    /// 看的是更前面的分类，所以滚动量是**减**（正数 = 内容往左走）。
-    fn scroll_emoji_groups(&mut self, delta: f32) {
-        let max = self.emoji_group_max_scroll();
-        let wanted = (self.emoji_group_scroll - delta).clamp(0.0, max);
-        if wanted == self.emoji_group_scroll {
+    /// 只有测试直接问它——生产那条路在 [`emoji_view`] 里就地算了（那边借不到整台会话）。
+    #[cfg(test)]
+    fn emoji_page_group(&self) -> usize {
+        self.emoji_panel().group_of_page(self.emoji_page())
+    }
+
+    /// 表情页还能往后翻多少（像素）：后面还有几页，一页一格。
+    fn emoji_page_max_scroll(&self) -> f32 {
+        let last = self.emoji_panel().page_count().saturating_sub(1);
+        last as f32 * self.emoji_page_width()
+    }
+
+    /// 内容换过之后，按**原来那一类的名字 + 类内第几页**把位置重新落回去。
+    ///
+    /// 页号当然会变（新条目让「最近」那一类多一页、从无到有多一整类），但**分类的下标
+    /// 也会漂**——「最近」永远插在最前面，它一出现，后面每个分类的下标就整体 +1。
+    /// 所以不能拿旧下标去查新表（那样定位到的是隔壁那一类，模拟器上 2026-09-23 抓到：
+    /// 点了面旗帜，上屏之后画面跳去了符号类），得**按名字**认。
+    ///
+    /// 名字对新表也对不上时退回第一页——总比停在一个说不清的页上强。
+    fn restore_emoji_page(&mut self, name: Option<&str>, within: usize) {
+        let target = {
+            let panel = self.emoji_panel();
+            name.and_then(|name| panel.names.iter().position(|each| each == name))
+                .map(|group| panel.page_of_group(group) + within)
+        };
+        let Some(target) = target else {
+            self.emoji_page_scroll = 0.0;
+            return;
+        };
+        self.emoji_page_scroll = target as f32 * self.emoji_page_width();
+        // 页数可能反而变少了，落位之后再夹一道
+        self.clamp_emoji_page();
+    }
+
+    /// 把位移夹回「现在这几页」的范围里。
+    ///
+    /// **页数会变少**（「最近」清空过、滤过画不出来的字形），位移不跟着夹就会指到
+    /// 不存在的页上——屏幕上是一片空，而且怎么滑都回不来。
+    fn clamp_emoji_page(&mut self) {
+        let max = self.emoji_page_max_scroll();
+        self.emoji_page_scroll = self.emoji_page_scroll.clamp(0.0, max);
+    }
+
+    /// 表情页的格子跟着手指横着挪（`delta` 是这一拍挪了多少**像素**，往右为正）。
+    ///
+    /// 手指往右拖是把内容往右带、看的是更前面的一页，所以位移是**减**（正数 = 内容往左走）。
+    /// 夹在 `[0, 还能翻多少]` 里：头一页往前、末一页往后都拖不动
+    /// （ViewPager2 也是硬边界，不是橡皮筋回弹）。
+    fn scroll_emoji_page(&mut self, delta: f32) {
+        let max = self.emoji_page_max_scroll();
+        let wanted = (self.emoji_page_scroll - delta).clamp(0.0, max);
+        if wanted == self.emoji_page_scroll {
             return;
         }
-        self.emoji_group_scroll = wanted;
+        self.emoji_page_scroll = wanted;
         self.mark_keyboard_dirty();
     }
 
-    /// 一页多宽（像素）：一屏摆得下几个分类，一页就是几个格宽。
+    /// 表情页横滑松手：**按手速与拖了多远定翻到哪一页**，再起一段吸附动画滑过去。
     ///
-    /// **翻页的单位**（2026-09-23）：横滑按整页走，不再一格一格挪。
-    fn emoji_group_page(&self) -> f32 {
-        self.emoji_group_pitch() * EMOJI_GROUP_SLOTS as f32
-    }
-
-    /// 松手之后**吸附到最近的整页**，滚到新页就改选那一页的第一个分类。
+    /// 判定照 fcitx5-android 用的那个 `ViewPager2`（`PagerSnapHelper` + `SnapHelper::onFling`）：
     ///
-    /// 一页就是原来的一屏（[`EMOJI_GROUP_SLOTS`] 个分类），所以「滑一下 = 换一批新的五个」，
-    /// 下面的表情跟着换（用户 2026-09-23 要的手感，原来是按格滚 + 惯性）。
+    /// 1. **手速够就翻页**：朝手甩的方向翻一页，跟拖了多远无关。这条阈值**特别低**
+    ///    （安卓 `ViewConfiguration` 的 `scaledMinimumFlingVelocity`，50 dp/s），
+    ///    轻轻一拨就过——「轻甩一下也能翻页」全靠它。
+    /// 2. **手速不够看拖了多远**：拖过**半页**翻一页，不到半页回原位。
+    /// 3. 两头（头一页往前、末一页往后）到头就不动。
     ///
-    /// 判「要不要改选」看的是**原来选中的那一类还在不在眼前**，不是「页号有没有变」：
-    /// 拖了不到半页又滑回原位时，选中的那一类还在这一页里，就不该被重置成页首那格
-    /// （用户先前点中的是第几类，滑一下手滑回来还是第几类）。
-    fn settle_emoji_groups(&mut self) {
-        let page = self.emoji_group_page();
-        if page <= 0.0 {
+    /// **不是直接赋值跳过去**：从当前位置起一段减速动画（[`Slide`]）。
+    /// 用户 2026-09-23 说的「硬跳」就是少了这一段。
+    fn settle_emoji_page(&mut self, velocity_x: f32) {
+        let width = self.emoji_page_width();
+        if width <= 0.0 {
             return;
         }
-        self.emoji_group_scroll = ((self.emoji_group_scroll / page).round() * page)
-            .clamp(0.0, self.emoji_group_max_scroll());
-        let first = self.emoji_group_first();
-        let group = self.emoji_panel().group;
-        if (first..first + EMOJI_GROUP_SLOTS).contains(&group) {
-            // 原来那一类还在这一页上：只把位置对齐，选中的不动
-            self.mark_keyboard_dirty();
-            return;
-        }
-        self.set_emoji_group(first);
+        let page = self.emoji_page();
+        let last = self.emoji_panel().page_count().saturating_sub(1);
+        let offset = self.emoji_page_scroll - page as f32 * width;
+        // 「现在离得最近的那一页」：下一页露过半屏就轮到它了——手速不够时吸附到它。
+        let near = if offset > width / 2.0 {
+            (page + 1).min(last)
+        } else {
+            page
+        };
+        // 手指往左甩（速度为负）= 看后面一页 = 内容往左走，所以符号取反；
+        // 再除以 1000 换成「像素/毫秒」，与 [`Fling`] 那套同一个单位
+        let speed = -velocity_x / 1000.0;
+        let target = if speed.abs() >= MIN_PAGE_FLING * self.density {
+            // 手速够：**只看方向**，拖了多远不算
+            if speed > 0.0 {
+                (near + 1).min(last)
+            } else {
+                near.saturating_sub(1)
+            }
+        } else {
+            near
+        };
+        // 落定的位置就是「第 target 页正对着视口」，动画从当前位置滑过去。
+        // 已经在目标上（没拖动、也没甩）时 `Slide::new` 给 `None`，不起动画。
+        self.emoji_page_slide = Slide::new(self.emoji_page_scroll, target as f32 * width);
+        self.mark_keyboard_dirty();
     }
 
     /// 剪贴板列表跟着手指滚。
@@ -2419,6 +2507,15 @@ impl Session {
             if finished || (step != 0.0 && self.expanded_scroll == before) {
                 self.expanded_fling = None;
             }
+        }
+        // 表情页松手之后那一段吸附（**不是惯性**：知道要去哪一页，用固定时长滑过去）
+        if let Some(slide) = self.emoji_page_slide.as_mut() {
+            // 与别处不一样：`Slide` 给的是**绝对位置**，直接盖上就行
+            self.emoji_page_scroll = slide.step(dt);
+            if slide.finished() {
+                self.emoji_page_slide = None;
+            }
+            self.mark_keyboard_dirty();
         }
         self.mask()
     }

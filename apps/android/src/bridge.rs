@@ -297,9 +297,31 @@ pub extern "system" fn Java_app_qingjian_android_QingjianNative_touch(
         Some(session) => catch_unwind(AssertUnwindSafe(|| {
             session.touch(MotionAction::from_motion(action), pointer, x, y)
         }))
-        .unwrap_or(0),
+        .unwrap_or_else(|panic| {
+            // panic 了：这一下**不兑现**，但得留句话。静默吞掉的话，真机上表现就是
+            // 「偶尔掉个字母」——连从哪儿查都不知道（这是 2026-09-23 补的）。
+            tracing::error!(
+                action,
+                pointer,
+                reason = panic_message(&panic),
+                "touch 里 panic 了"
+            );
+            0
+        }),
         None => 0,
     }
+}
+
+/// 从 `catch_unwind` 捞到的那个 panic 里把消息取出来。
+///
+/// `panic!` 的载荷可能是 `&str` 也可能是 `String`（`panic!("{x}")` 那种），两种都认；
+/// 都取不到就给一句占位，别让日志里空着。
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+    panic
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("(panic 没有带消息)")
 }
 
 /// 长按连发：壳的计时器到点了，问一次「按住的那个键要不要再来一下」。

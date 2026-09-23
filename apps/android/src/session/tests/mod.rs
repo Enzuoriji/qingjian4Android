@@ -10,7 +10,7 @@ mod cloud;
 mod config;
 
 use super::flags;
-use super::{CANDIDATE_LIMIT, EMOJI_GROUP_SLOTS, Session};
+use super::{CANDIDATE_LIMIT, EMOJI_SLOTS, Session};
 use crate::action::{Act, Command};
 use crate::touch::MotionAction;
 use qingjian_core::CandidateKind;
@@ -1500,6 +1500,82 @@ fn lifting_a_hair_past_the_key_edge_still_counts() {
     );
 }
 
+/// 手指划出键帽、又滑回来，这一下**还算数**（2026-09-23）。
+///
+/// 从前 `sliding` 一旦置上就永不回头：快敲时拇指滚出键帽一点点，整下敲击就作废了，
+/// 滑回来也补不回来——用户报的「打字偶尔漏字母」，这一条最像。
+/// 现在每一拍重算，与同一个分支里 ⌫ 那个清空手势一个写法。
+#[test]
+fn a_tap_that_wanders_off_the_key_and_back_still_counts() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y, width, _) = key_rect(&session, KeyId::Letter('n'));
+    let mid = (x + width / 2.0, y + 10.0);
+    session.touch(MotionAction::Down, POINTER, mid.0, mid.1);
+    // 划到隔壁键上（越过 n 的命中区——它往右吃半条缝，所以要走远一点）
+    session.touch(MotionAction::Move, POINTER, x + width * 1.4, mid.1);
+    // 又滑回来
+    session.touch(MotionAction::Move, POINTER, mid.0, mid.1);
+    session.touch(MotionAction::Up, POINTER, mid.0, mid.1);
+    session.bar_surface();
+    session.keyboard_surface();
+
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("n"),
+        "划出去又滑回来，这一下不该作废"
+    );
+}
+
+/// 落在键与键之间的**缝**里也能打出字（2026-09-23）。
+///
+/// 命中区从前只盖住键帽本身，缝不归任何键——键盘上约三成的面积是死区，
+/// 手指落偏一点就是一个字母都不出（震动照发，所以感觉是「按到了却没反应」）。
+/// 现在往四边各吃半条缝，缝归最近的那个键。
+#[test]
+fn a_tap_landing_in_the_gap_still_types_a_letter() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y, width, height) = key_rect(&session, KeyId::Letter('n'));
+    // 缝在 n 右边缘与右边邻居之间（`gap_x` 点宽），取正中
+    let cx = x + width + 7.0 * DENSITY / 2.0;
+    let cy = y + height / 2.0;
+    session.touch(MotionAction::Down, POINTER, cx, cy);
+    session.touch(MotionAction::Up, POINTER, cx, cy);
+    session.bar_surface();
+    session.keyboard_surface();
+
+    let typed = preedit(&session);
+    assert!(
+        matches!(typed.as_deref(), Some("n") | Some("m")),
+        "缝里起手也该出字（归最近的那个键），实际 {typed:?}"
+    );
+}
+
+/// 不认识的事件**不该**把手正按着的那个键清掉（2026-09-23）。
+///
+/// 从前 `_` 一律当取消，一个没见过的 action 飘过来就把按下的全清了，那一下的字母就没了。
+#[test]
+fn an_unknown_event_does_not_drop_the_pressed_key() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (x, y) = key_centre(&session, KeyId::Letter('n'));
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Ignore, POINTER, x, y);
+    session.touch(MotionAction::Up, POINTER, x, y);
+    session.bar_surface();
+    session.keyboard_surface();
+
+    assert_eq!(
+        preedit(&session).as_deref(),
+        Some("n"),
+        "不认识的事件不该把这一下弄丢"
+    );
+}
+
 /// 在 `id` 这个键上按下，往 `(dx, dy)` 方向滑，再抬起。
 fn drag(session: &mut Session, id: KeyId, dx: f32, dy: f32) {
     let (x, y) = key_centre(session, id);
@@ -2866,6 +2942,9 @@ fn swiping_left_on_an_emoji_deletes_nothing() {
     };
     session.note_clipboard("留着的那条");
     tap_bar(&mut session, BarHitId::Tools);
+    // 自己塞点数据：随包那份真表在测试环境里未必加载得到，空面板上一个格子都没有，
+    // 「左滑不删」就无从试起（见 `fill_groups`）
+    fill_groups(&mut session, 3);
     tap_key(&mut session, KeyId::Tool(1));
     assert_eq!(session.panel, Panel::Emoji, "该在表情页");
 
@@ -2878,155 +2957,271 @@ fn swiping_left_on_an_emoji_deletes_nothing() {
     );
 }
 
-/// 给表情面板塞几个分类——**多于一屏**才谈得上横滑。
+/// 给表情面板塞几个分类，**每类正好一页**（[`EMOJI_SLOTS`] 个）——页号就是分类号，断言好写。
 ///
-/// 不走随包目录那份真表：这几条要的是「分类比一屏多」，叫什么名字无所谓；
+/// 不走随包目录那份真表：这几条要的是「页比一屏多」，叫什么名字无所谓；
 /// 而真表得过一遍「渲染器画不画得出来」（`retain`），在测试的环境里未必留得住。
 fn fill_groups(session: &mut Session, count: usize) {
-    session.emoji.names = (0..count).map(|index| format!("分类{index}")).collect();
-    session.emoji.group = 0;
+    fill_pages(session, count, 1);
 }
 
-/// 表情页的分类标签条**能横着滑**（K13 ②，2026-09-23）。
+/// 同上，但每类塞 `pages` 页的量——翻页与换分类的边界靠它试。
+fn fill_pages(session: &mut Session, groups: usize, pages: usize) {
+    session.emoji.names = (0..groups).map(|index| format!("分类{index}")).collect();
+    session.emoji.items = (0..groups)
+        .map(|group| {
+            (0..EMOJI_SLOTS * pages)
+                .map(|index| format!("e{group}-{index}"))
+                .collect()
+        })
+        .collect();
+    session.emoji.rebuild();
+    session.emoji_page_scroll = 0.0;
+    session.emoji_page_slide = None;
+}
+
+/// 把还在跑的那段吸附动画走完（一帧一帧敲到停）。
 ///
-/// 以前是一行定宽格子加两头 `‹ ›` 箭头，一屏只摆得下三个分类、只能点。
-/// 现在整条都能滑，而且是**跟手**的：手指拖到哪儿，标签行就走到哪儿。
+/// 松手之后**不会立刻**停在整页上——那正是「不是硬跳」的意思，所以断言之前得让它跑完。
+fn settle_slide(session: &mut Session) {
+    for _ in 0..120 {
+        if session.emoji_page_slide.is_none() {
+            return;
+        }
+        session.fling_step(16.0);
+    }
+    panic!("吸附动画一直没停");
+}
+
+/// 在表情格子区横着拖 `fraction` 页然后松手。
+///
+/// `velocity` 是壳抬手时报上来的速度（**像素/秒**，往左为负）——`0.0` 就是慢慢松开。
+fn drag_the_grid(session: &mut Session, fraction: f32, velocity: f32) {
+    let (x, y) = key_centre(session, KeyId::Emoji(0));
+    let dx = session.emoji_page_width() * fraction;
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x - dx, y);
+    session.touch(MotionAction::Up, POINTER, x - dx, y);
+    session.start_fling(POINTER, velocity, 0.0);
+}
+
+/// 表情格子**横着滑跟手**（2026-09-23 照 fcitx5 重做）。
+///
+/// 上一版横滑的是上面那条标签、下面的表情要等松手才整块换；现在滑的是下面那一大片
+/// 格子，手指拖到哪儿、内容就走到哪儿。
 #[test]
-fn the_group_strip_follows_the_finger() {
+fn the_grid_follows_the_finger() {
     let Some(mut session) = ready() else {
         return;
     };
     tap_bar(&mut session, BarHitId::Tools);
-    fill_groups(&mut session, 10);
+    fill_groups(&mut session, 4);
     tap_key(&mut session, KeyId::Tool(1));
     assert_eq!(session.panel, Panel::Emoji, "该在表情页");
 
-    assert_eq!(session.emoji_group_first(), 0, "刚进来从第一个分类看起");
-
-    // 在标签行上横着拖一格：手指往左走 = 看后面的分类
-    let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
-    let pitch = session.emoji_group_pitch();
+    let width = session.emoji_page_width();
+    let (x, y) = key_centre(&session, KeyId::Emoji(0));
     session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x - pitch, y);
-    session.touch(MotionAction::Up, POINTER, x - pitch, y);
+    session.touch(MotionAction::Move, POINTER, x - width * 0.3, y);
 
-    assert_eq!(
-        session.emoji_group_first(),
-        1,
-        "往左拖了一格，该看到第二个分类起"
+    assert!(
+        (session.emoji_page_scroll - width * 0.3).abs() < 1.0,
+        "跟手：拖了 0.3 页，位移就该是 0.3 页，实际 {}",
+        session.emoji_page_scroll
     );
+    assert_eq!(session.emoji_page(), 0, "还没拖过一整页，看到的还是第一页");
+    session.touch(MotionAction::Up, POINTER, x - width * 0.3, y);
 }
 
-/// 横着拖过半页松手：**翻一整页**（一次换新的五个），选中的类跟着换到新页第一个。
-///
-/// 用户 2026-09-23 定的手感：滑一下就是新的一批五个，不是一格一格挪。
+/// 拖过半页松手：**翻一整页**，而且是滑过去的、不是跳过去的。
 #[test]
-fn a_swipe_flips_a_whole_page() {
+fn a_swipe_past_half_a_page_turns_one() {
     let Some(mut session) = ready() else {
         return;
     };
     tap_bar(&mut session, BarHitId::Tools);
-    fill_groups(&mut session, 10);
+    fill_groups(&mut session, 4);
     tap_key(&mut session, KeyId::Tool(1));
 
-    let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
-    let page = session.emoji_group_page();
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x - page * 0.6, y);
-    session.touch(MotionAction::Up, POINTER, x - page * 0.6, y);
-    session.start_fling(POINTER, 0.0, 0.0);
-
-    assert_eq!(session.emoji_group_offset(), 0.0, "该吸附到整页上");
-    assert_eq!(
-        session.emoji_group_first(),
-        EMOJI_GROUP_SLOTS,
-        "翻一整页，看到的是接下来的五个分类"
+    drag_the_grid(&mut session, 0.6, 0.0);
+    assert!(
+        session.emoji_page_slide.is_some(),
+        "松手该起一段吸附动画——直接跳到整页就是用户说的「硬跳」"
     );
-    assert_eq!(
-        session.emoji_panel().group,
-        EMOJI_GROUP_SLOTS,
-        "选中的类跟着换到新页的第一个，下面的表情也换"
+    settle_slide(&mut session);
+    assert_eq!(session.emoji_page(), 1, "翻到第二页");
+    assert!(
+        (session.emoji_page_scroll - session.emoji_page_width()).abs() < 0.5,
+        "该正好落在整页上，实际 {}",
+        session.emoji_page_scroll
     );
 }
 
-/// 甩得再快也**只按位移算**——分类标签不跟惯性。
+/// 手速够就翻页——**哪怕连半页都没拖到**。
 ///
-/// 手指只挪了小半页、速度却很大：从前会顺着速度滑行出去好几格，现在只在松手处就近吸附。
+/// 这条正是用户 2026-09-23 说的「轻轻一甩不翻页」的解：阈值照安卓
+/// `ViewConfiguration` 的 50 dp/s，特别低，轻轻一拨就该过线。
 #[test]
-fn a_fast_fling_still_turns_one_page() {
+fn a_quick_flick_turns_a_page() {
     let Some(mut session) = ready() else {
         return;
     };
     tap_bar(&mut session, BarHitId::Tools);
-    fill_groups(&mut session, 10);
+    fill_groups(&mut session, 4);
     tap_key(&mut session, KeyId::Tool(1));
 
-    let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
-    let page = session.emoji_group_page();
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x - page * 0.3, y);
-    session.touch(MotionAction::Up, POINTER, x - page * 0.3, y);
-    // 往左甩得很猛——旧写法正是拿这个速度去起滑行的
-    session.start_fling(POINTER, -5000.0, 0.0);
+    // 才拖了 0.1 页，但甩得快（往左 800 像素/秒）
+    drag_the_grid(&mut session, 0.1, -800.0);
+    settle_slide(&mut session);
 
-    assert_eq!(
-        session.emoji_group_first(),
-        0,
-        "不到半页就松手，退回原位；速度再大也不滑行"
-    );
+    assert_eq!(session.emoji_page(), 1, "甩一下就该翻页，跟拖了多远无关");
 }
 
-/// 拖了不到半页又滑回来：**原来选中的那一类不动**。
-///
-/// 用户先前点中的是第几类，手滑一下再松开，还是第几类——别被「翻页」顺带重置成页首那格。
+/// 不到半页、也没甩（慢慢松开）：**退回原位**。
 #[test]
-fn a_short_drag_keeps_the_picked_group() {
+fn a_slow_short_drag_springs_back() {
     let Some(mut session) = ready() else {
         return;
     };
     tap_bar(&mut session, BarHitId::Tools);
-    fill_groups(&mut session, 10);
+    fill_groups(&mut session, 4);
     tap_key(&mut session, KeyId::Tool(1));
 
-    // 先点中第三个分类
+    drag_the_grid(&mut session, 0.2, 0.0);
+    settle_slide(&mut session);
+
+    assert_eq!(session.emoji_page(), 0, "不到半页又没甩，回原位");
+    assert_eq!(session.emoji_page_scroll, 0.0);
+}
+
+/// 点标签：**跳到那一类的第一页**（不是接着上次翻到的地方）。
+#[test]
+fn tapping_a_group_jumps_to_its_first_page() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_bar(&mut session, BarHitId::Tools);
+    fill_pages(&mut session, 4, 2);
+    tap_key(&mut session, KeyId::Tool(1));
+
+    // 每类两页，所以第 2 个分类从第 4 页起
     tap_key(&mut session, KeyId::EmojiGroup(2));
-    assert_eq!(session.emoji_panel().group, 2, "该选中第三类");
 
-    let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
-    let page = session.emoji_group_page();
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x - page * 0.2, y);
-    session.touch(MotionAction::Up, POINTER, x - page * 0.2, y);
-    session.start_fling(POINTER, 0.0, 0.0);
-
-    assert_eq!(session.emoji_group_first(), 0, "不到半页，退回原位");
-    assert_eq!(session.emoji_panel().group, 2, "没翻页就不该动选中的类");
+    assert_eq!(session.emoji_page(), 4, "跳到第 2 个分类的第一页");
+    assert_eq!(
+        session.emoji_page_scroll,
+        session.emoji_page_width() * 4.0,
+        "位移跟着落定在这一页上"
+    );
 }
 
-/// 滑过之后**点第 0 格，选中的是第二个分类**——命中的是屏内下标，
-/// 得加上这一屏的起点才是整份里的第几个。
+/// 翻过分类边界时，上面那条标签的高亮跟着换。
 #[test]
-fn tapping_a_group_uses_the_scrolled_position() {
+fn the_label_follows_the_page() {
     let Some(mut session) = ready() else {
         return;
     };
     tap_bar(&mut session, BarHitId::Tools);
-    fill_groups(&mut session, 8);
+    fill_pages(&mut session, 4, 2);
     tap_key(&mut session, KeyId::Tool(1));
 
-    let (x, y) = key_centre(&session, KeyId::EmojiGroup(0));
-    let pitch = session.emoji_group_pitch();
-    session.touch(MotionAction::Down, POINTER, x, y);
-    session.touch(MotionAction::Move, POINTER, x - pitch, y);
-    session.touch(MotionAction::Up, POINTER, x - pitch, y);
+    assert_eq!(session.emoji_page_group(), 0, "刚进来在第一类的第一页");
 
-    tap_key(&mut session, KeyId::EmojiGroup(0));
+    drag_the_grid(&mut session, 0.6, 0.0);
+    settle_slide(&mut session);
+    assert_eq!(session.emoji_page(), 1);
+    assert_eq!(session.emoji_page_group(), 0, "第 1 页还属于第一个分类");
 
+    drag_the_grid(&mut session, 0.6, 0.0);
+    settle_slide(&mut session);
+    assert_eq!(session.emoji_page(), 2);
     assert_eq!(
-        session.emoji_panel().group,
+        session.emoji_page_group(),
         1,
-        "滑过一格之后，屏幕上第 0 格是第二个分类"
+        "翻过分类边界了，高亮该换到第二个分类"
     );
+}
+
+/// 表情页**没有上下滚了**：一页摆满就横着翻，竖着划不该滚任何东西。
+#[test]
+fn the_emoji_page_does_not_scroll_vertically() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_bar(&mut session, BarHitId::Tools);
+    fill_groups(&mut session, 4);
+    tap_key(&mut session, KeyId::Tool(1));
+
+    let (x, y) = key_centre(&session, KeyId::Emoji(0));
+    session.touch(MotionAction::Down, POINTER, x, y);
+    session.touch(MotionAction::Move, POINTER, x, y - 200.0);
+    session.touch(MotionAction::Up, POINTER, x, y - 200.0);
+
+    assert_eq!(session.emoji_page_scroll, 0.0, "竖着划不该把表情横着挪");
+    assert_eq!(session.clipboard_scroll, 0.0, "更不该动到剪贴板那边");
+}
+
+/// 上屏一个表情之后**画面不该跳走**（2026-09-23 在模拟器上抓到的）。
+///
+/// 刚用过的那个会进「最近」，而「最近」从无到有会让后面每一类整体往后挪一页。
+/// 只把位移夹回范围里是不够的：页号没动、内容挪了，看到的就是隔壁那一类
+/// （当时是点了面旗帜，画面跳去了符号类）。
+#[test]
+fn committing_an_emoji_keeps_you_on_the_same_group() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_bar(&mut session, BarHitId::Tools);
+    fill_groups(&mut session, 4);
+    tap_key(&mut session, KeyId::Tool(1));
+
+    // 先跳到第 3 个分类
+    tap_key(&mut session, KeyId::EmojiGroup(3));
+    // 断言拿的是**这一页的内容**，不是分类下标：分类下标恰好不变（「最近」插在最前面、
+    // 后面整体后移，旧下标指向的是隔壁那一类），拿它断言等于什么都没测
+    let before = session
+        .emoji_panel()
+        .page_items(session.emoji_page())
+        .to_vec();
+    assert!(!before.is_empty(), "该有内容可比");
+
+    // 点这一页的第 0 格上屏：它会进「最近」，于是多出一类、页整体往后挪
+    tap_key(&mut session, KeyId::Emoji(0));
+
+    let after = session
+        .emoji_panel()
+        .page_items(session.emoji_page())
+        .to_vec();
+    assert_eq!(
+        after, before,
+        "上屏之后该还看着同一批内容，不该跳到隔壁那一类"
+    );
+}
+
+/// 页数变少（「最近」清空过、滤过画不出来的字形）之后，位移要**夹回范围内**——
+/// 不夹就会指到不存在的页上，屏幕上是一片空，而且怎么滑都回不来。
+#[test]
+fn shrinking_the_pages_pulls_the_scroll_back() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_bar(&mut session, BarHitId::Tools);
+    fill_groups(&mut session, 6);
+    tap_key(&mut session, KeyId::Tool(1));
+
+    session.emoji_page_scroll = 5.0 * session.emoji_page_width();
+    assert_eq!(session.emoji_page(), 5, "先翻到最后一页");
+
+    // 只剩两页了
+    session.emoji.items.truncate(2);
+    session.emoji.rebuild();
+    session.clamp_emoji_page();
+
+    assert!(
+        session.emoji_page_scroll <= session.emoji_page_max_scroll(),
+        "位移该夹回新的范围里"
+    );
+    assert!(session.emoji_page() <= 1, "当前页也该落到存在的页上");
 }
 
 /// 剪贴板历史**落盘**：换一个会话（＝进程重启）它还在。

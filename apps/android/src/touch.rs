@@ -25,14 +25,22 @@ pub enum MotionAction {
     /// 最后一根手指抬起。
     Up,
 
+    /// 系统把这次手势收走了（`ACTION_CANCEL`）。按下的状态要清掉。
     Cancel,
+
+    /// 不认识的 action——**什么都不做**。
+    ///
+    /// 「不认识」不等于「取消」：从前 `_` 一律当 `Cancel`，于是一个没见过的 action
+    /// （或者 `ACTION_OUTSIDE`）飘过来就把所有按着的手指清掉，那一下的字母就没了。
+    /// 取消有它明确的号（`ACTION_CANCEL` = 3），只认它。
+    Ignore,
 }
 
 impl MotionAction {
     /// 把安卓送来的 `actionMasked` 翻译过来。
     ///
     /// 5 / 6 是 `POINTER_DOWN` / `POINTER_UP`——**不是取消**，别把整盘按下状态清掉，
-    /// 那正是快打掉字母的原因。真不认识的（含 `CANCEL`）才当取消。
+    /// 那正是快打掉字母的原因。只有 3（`CANCEL`）才真是取消，其余不认识的**不动作**。
     pub fn from_motion(action: i32) -> Self {
         match action {
             0 => Self::Down,
@@ -40,7 +48,8 @@ impl MotionAction {
             2 => Self::Move,
             6 => Self::PointerUp,
             1 => Self::Up,
-            _ => Self::Cancel,
+            3 => Self::Cancel,
+            _ => Self::Ignore,
         }
     }
 }
@@ -77,7 +86,14 @@ mod tests {
         assert_eq!(MotionAction::from_motion(1), MotionAction::Up);
         assert_eq!(MotionAction::from_motion(2), MotionAction::Move);
         assert_eq!(MotionAction::from_motion(3), MotionAction::Cancel);
-        // 不认识的（比如 4 OUTSIDE）也当取消，最保险
-        assert_eq!(MotionAction::from_motion(4), MotionAction::Cancel);
+    }
+
+    /// 不认识的（4 = `OUTSIDE`，还有将来可能冒出来的别的号）**什么都不做**，
+    /// 不能当取消——当取消会把手正按着的那些键全清掉，那一下的字母就没了
+    /// （2026-09-23 改的，用户报「打字偶尔漏字母」时查到这一条）。
+    #[test]
+    fn an_unknown_action_does_nothing() {
+        assert_eq!(MotionAction::from_motion(4), MotionAction::Ignore);
+        assert_eq!(MotionAction::from_motion(99), MotionAction::Ignore);
     }
 }

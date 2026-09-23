@@ -35,6 +35,21 @@ ICONS = [
         "颜文字（工具页那一格）——Material 的 `sentiment_satisfied`",
     ),
     ("settings", "settings.svg", "设置（工具页那一格）——Material 的 `settings`"),
+    # 表情面板分类标签上那一排（2026-09-23，照 fcitx5-android 的选型）。
+    # 颜文字那 22 个中文分类**不用图标**：一行挤 22 个，图标小到认不出，那边画文字。
+    ("history", "history.svg", "「最近」那一类——Material 的 `history`"),
+    ("people", "emoji_people.svg", "「People & Body」——Material 的 `emoji_people`"),
+    ("pets", "pets.svg", "「Animals & Nature」——Material 的 `pets`"),
+    ("cake", "cake.svg", "「Food & Drink」——Material 的 `cake`"),
+    ("car", "directions_car.svg", "「Travel & Places」——Material 的 `directions_car`"),
+    (
+        "ball",
+        "sports_basketball.svg",
+        "「Activities」——Material 的 `sports_basketball`",
+    ),
+    ("objects", "emoji_objects.svg", "「Objects」——Material 的 `emoji_objects`"),
+    ("symbols", "emoji_symbols.svg", "「Symbols」——Material 的 `emoji_symbols`"),
+    ("flag", "flag.svg", "「Flags」——Material 的 `flag`"),
 ]
 
 
@@ -52,7 +67,8 @@ def emit_function(name, doc, segments):
 
 
 def main():
-    header = '''//! 键盘上那几个图标的路径：⇧ 大小写、⌫ 退格、剪贴板（各一个函数 + 一个包围盒）。
+    header = '''//! 键盘上那些图标的路径：⇧ 大小写、⌫ 退格、工具页那几格，
+//! 以及表情面板分类标签上那一排（各一个函数 + 一个包围盒）。
 //!
 //! **这个文件是生成的**，路径数据来自 `assets/icon/material/` 里那几张 svg
 //! （Google 的 Material Symbols，Apache-2.0）：

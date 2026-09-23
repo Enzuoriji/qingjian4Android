@@ -27,6 +27,11 @@
 
   2026-09-21 之前这几个图标是**手写的坐标**，用户看了说「不要这样做去网上找可以用的」，换成了这个。
 
+  2026-09-23 又加了表情面板**分类标签**那九个：`history`（最近）、`emoji_people`、`pets`、
+  `cake`、`directions_car`、`sports_basketball`、`emoji_objects`、`emoji_symbols`、`flag`
+  （笑脸那一格复用工具页已有的 `mood`）。选型照 fcitx5-android 的 `PickerData.Emoji`。
+  颜文字面板那 22 个中文分类**不用图标**——一行挤 22 格，图标小到认不出，那边画分类名。
+
   渲染器不解析 svg，路径由 `render-key-icon-path.py` 转成 Rust 代码：
 
   ```sh

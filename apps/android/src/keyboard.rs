@@ -8,8 +8,8 @@
 //! 这里只回答「抬起来时兑现的是哪个键」；翻成动作在 `crate::action`，执行在 `Session`。
 
 use qingjian_render::{
-    InputMode, Key, KeyHit, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Popup, Rendered,
-    RenderedKeyboard, Renderer, ShiftState,
+    GroupLabel, InputMode, Key, KeyHit, KeyId, KeyboardLayout, KeyboardState, KeyboardTheme, Popup,
+    Rendered, RenderedKeyboard, Renderer, ShiftState,
 };
 
 use crate::surface;
@@ -150,35 +150,37 @@ pub enum Fired {
     /// 与空格移光标一样是**连续**的——拖动当中每一拍都要走，不是等松手才结算。
     ClipboardScroll(f32),
 
-    /// 表情页的标签行横着挪一下：手指这一拍左右挪了多少像素（往右为正）。
+    /// 表情页的**格子区**横着挪一下：手指这一拍左右挪了多少像素（往右为正）。
     ///
-    /// 与 [`Self::ClipboardScroll`] 一样是连续的。松手之后的吸附不在这儿报——
-    /// 抬手时壳会调 `start_fling`，那边**按整页吸附**（分类标签不跟惯性，2026-09-23）。
-    GroupScroll(f32),
+    /// 与 [`Self::ClipboardScroll`] 一样是连续的。松手之后的收尾不在这儿报——
+    /// 抬手时壳会调 `start_fling`，那边按「手速 + 拖了多远」定翻不翻页，再起一段吸附动画。
+    EmojiPageScroll(f32),
 }
 
-/// 表情面板要画的那一串：这一屏的条目、标签条上的分类名、选中的是标签里第几个。
+/// 表情面板要画的那一堆：要摆的几页、上面那条标签、选中的是第几个，外加分页细条。
 ///
-/// 打包成一个结构是因为 `surface` / `popup_surface` 都得收它——三个参数一个个传，
+/// 打包成一个结构是因为 `surface` / `popup_surface` 都得收它——一个个传，
 /// 调用处会变成一长串看不出谁是谁。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EmojiView<'a> {
-    /// 这一屏的格子让开不足一行的那点（点）——整行由会话切好。
-    pub offset: f32,
+    /// `[前一页, 当前页, 后一页]`——**当前页永远在中间**，两头没有的那一侧给空切片。
+    ///
+    /// 跟手时相邻那页要跟着露出来，所以不止一页：只给当前页的话，滑到一半旁边就是空白。
+    pub pages: [&'a [String]; 3],
 
-    /// 这一屏要画的那些字符（emoji 或颜文字）。
-    pub items: &'a [String],
+    /// 当前页左边缘相对视口的偏移（点，正数 = 内容往左走 = 在看后一页）。
+    ///
+    /// 只有跟手的零头与收尾动画的中间值——整页那部分由会话换掉（`pages` 给的就已经是这几页）。
+    pub shift: f32,
 
-    /// 标签行上这一屏的几个分类名。
-    pub labels: &'a [String],
+    /// 分类标签，**全部**（不再只是看得见的那几个）。
+    pub labels: &'a [GroupLabel],
 
-    /// 选中的是标签里第几个（画成选中态）。
+    /// 当前这一页属于第几个分类（画成选中态）。
     pub group: usize,
 
-    /// 标签行让开不足一格的那点（点，正数 = 内容往左走）——横滑的零头。
-    ///
-    /// 与格子那边同一个分工：整格由会话切好，渲染器只挪零头。
-    pub group_offset: f32,
+    /// 分页细条：`(已经过的页数, 这一类的总页数)`。类内只有一页时给 `None`，不画。
+    pub pager: Option<(f32, usize)>,
 }
 
 /// 尺寸与外观。壳在 `Session::configure` 时给一份。
@@ -479,11 +481,11 @@ impl Keyboard {
                 pressed: self.pressed,
                 clipboard,
                 clipboard_offset,
-                emojis: emoji.items,
+                emoji_pages: emoji.pages,
+                emoji_shift: emoji.shift,
                 emoji_groups: emoji.labels,
                 emoji_group: emoji.group,
-                emoji_group_offset: emoji.group_offset,
-                emoji_offset: emoji.offset,
+                emoji_pager: emoji.pager,
             };
             let rendered = renderer.and_then(|renderer| {
                 renderer
@@ -579,43 +581,51 @@ impl Keyboard {
                     if press.key == Some(KeyId::Backspace) {
                         press.clearing = dy <= -clear_swipe;
                     }
-                    // 剪贴板记录区上两个手势，按**方向**分（同一块地方，先认出来的算数）：
-                    // - **上下滑 = 滚列表**（跟手，每拍都要走）
-                    // - **往左滑 = 要删这条**（松手才兑现、拖回原位就取消）
-                    // 往左是「不要了」的方向，跟候选条上「往左看后面的候选」不冲突——那儿是另一块地方。
-                    // 剪贴板页与表情页：**上下滑就是滚那一页的列表**。
-                    //
-                    // 判的是**哪一页**，不是「按住了哪个格子」——手指落在格子之间的缝里、
-                    // 或者落在某个没内容的空格子上，一样得能滚（用户 2026-09-21 指出的：
-                    // 原来只有按住表情格才算滚，手指稍微偏一点就滑不动）。
-                    // 表情页的**标签行**横着滑 = 换分类（K13 ②，2026-09-23）。判在纵向滚动之前：
-                    // 同一页上有两个方向的手势，按方向认，先认出来的算数。
-                    // **按「手指在不在标签行上」判，不是按「按住了哪个分类格」**——落在格子
-                    // 之间的缝里也得能滑（剪贴板那边 2026-09-21 就吃过这个亏）。
+                    // 表情页的**标签行只点不滑**（2026-09-23 照 fcitx5 改）：横着划过去
+                    // 什么也不做，**也不把这一下判成「滑出去了」**——标签格子窄（十个分类
+                    // 平分一行），手指偏一点就跨到邻格，判成滑动的话点标签会经常点不中。
+                    // 抬手时按**按下时命中的那一格**结算（点标签由抬起兑现）。
                     if self.layout.is_emoji() && press.at.1 < label_bottom {
+                        return None;
+                    }
+                    // 表情页的**格子区**横着滑 = 翻页（同一天改的：原来滑的是上面那条标签，
+                    // 现在滑下面这一大片——与 fcitx5 的 ViewPager2 一个位置）。
+                    // 跟手：拖多少走多少；翻不翻、翻到哪，松手时由壳按「手速 + 拖了多远」判。
+                    //
+                    // 判的是**哪一页**，不是「按住了哪个格子」——手指落在格子之间的缝里
+                    // 一样得能滑（剪贴板那边 2026-09-21 吃过这个亏）。
+                    if self.layout.is_emoji() {
                         let dx = x - press.at.0;
+                        let dy = y - press.at.1;
                         let slop = SCROLL_SLOP * self.metrics.density;
-                        let step = if press.scrolling_x || dx.abs() >= slop {
+                        if press.scrolling_x || (dx.abs() >= slop && dx.abs() > dy.abs()) {
                             press.scrolling_x = true;
                             press.gestured = true;
                             let step = x - press.last_x;
                             press.last_x = x;
-                            step
-                        } else {
-                            0.0
-                        };
-                        // 滑起来之后这一下就不再是「按住了某一格」，把按下态撤掉——
-                        // 不然键帽上那个放大气泡会跟着手指跑一整路（用户 2026-09-23 指出的）。
-                        // **必须赶在下面 return 之前调**：早先这一步写在后面，横滑那一路
-                        // 提前 `return Some(Fired::GroupScroll)` 走掉了，压根没走到，气泡照旧。
-                        self.refresh_pressed();
-                        if step != 0.0 {
-                            return Some(Fired::GroupScroll(step));
+                            // 滑起来之后这一下就不再是「按住了某一格」，把按下态撤掉——
+                            // 不然键帽上那个放大气泡会跟着手指跑一整路（用户 2026-09-23 指出的）。
+                            // **必须赶在下面 return 之前调**：早先这一步写在后面，横滑那一路
+                            // 提前 `return` 走掉了，压根没走到，气泡照旧。
+                            self.refresh_pressed();
+                            if step != 0.0 {
+                                return Some(Fired::EmojiPageScroll(step));
+                            }
+                            return None;
                         }
-                        // 标签行上没有别的手势：滑动之外什么也不做（点击由抬起时结算）
+                        // 竖着滑：表情页**没有上下滚了**（一页一格，多的横着翻），
+                        // 但这一下也不再是「点了某一格」——不然按住一格上下划会误上屏。
+                        if dy.abs() >= slop {
+                            press.sliding = true;
+                            press.gestured = true;
+                        }
                         return None;
                     }
-                    if self.layout.is_clipboard() || self.layout.is_emoji() {
+                    // 剪贴板记录区上两个手势，按**方向**分（同一块地方，先认出来的算数）：
+                    // - **上下滑 = 滚列表**（跟手，每拍都要走）
+                    // - **往左滑 = 要删这条**（松手才兑现、拖回原位就取消）
+                    // 往左是「不要了」的方向，跟候选条上「往左看后面的候选」不冲突——那儿是另一块地方。
+                    if self.layout.is_clipboard() {
                         let dx = x - press.at.0;
                         let dy = y - press.at.1;
                         let slop = SCROLL_SLOP * self.metrics.density;
@@ -627,7 +637,7 @@ impl Keyboard {
                             if step != 0.0 {
                                 return Some(Fired::ClipboardScroll(step));
                             }
-                        } else if self.layout.is_clipboard() {
+                        } else {
                             // **只有剪贴板那几格**能「往左滑删一条」——表情页的格子没有
                             // 「删」这回事（emoji 是随包的数据，不是用户的东西）。
                             // 这一条是 2026-09-21 补的：把滚动判定扩到表情格时忘了把
@@ -663,12 +673,12 @@ impl Keyboard {
                     // - ⌫ 上滑清空 / 剪贴板左滑删除（`gestured`）：**这条是补的**——往上一滑手指就出了 ⌫，
                     //   原先这里没排掉它，于是 `sliding` 一置上，`refresh_pressed` 就不认这根手指了，
                     //   气泡当场消失——用户正是靠气泡上那句「松手清空」才知道自己在干什么
-                    if !press.choosing
-                        && !press.cursor_started
-                        && !press.gestured
-                        && (press.key.is_none() || hit != press.key)
-                    {
-                        press.sliding = true;
+                    // 「滑出去了」**每一拍重算**，不是一次置上就再也不回头：手指滚出去又
+                    // 滑回键上，这一下还算数（同一个分支里 ⌫ 那个清空手势就是这么写的）。
+                    // 一次置上不复位的写法在真机上掉字母——快敲时拇指滚出键帽一点点，
+                    // 整下敲击就作废了，滑回来也补不回来（用户 2026-09-23 报的「漏字母」）。
+                    if !press.choosing && !press.cursor_started && !press.gestured {
+                        press.sliding = press.key.is_none() || hit != press.key;
                     }
                 }
                 self.refresh_pressed();
@@ -730,6 +740,8 @@ impl Keyboard {
                 self.refresh_pressed();
                 None
             }
+            // 不认识的事件：什么都不做（见 [`MotionAction::Ignore`]）
+            MotionAction::Ignore => None,
         }
     }
 
@@ -813,11 +825,11 @@ impl Keyboard {
                 pressed: self.pressed,
                 clipboard,
                 clipboard_offset,
-                emojis: emoji.items,
+                emoji_pages: emoji.pages,
+                emoji_shift: emoji.shift,
                 emoji_groups: emoji.labels,
                 emoji_group: emoji.group,
-                emoji_group_offset: emoji.group_offset,
-                emoji_offset: emoji.offset,
+                emoji_pager: emoji.pager,
             };
             let density = self.metrics.density;
             let rendered = renderer.and_then(|renderer| {

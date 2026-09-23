@@ -18,8 +18,8 @@ use super::{Rendered, Renderer};
 use crate::canvas::Canvas;
 use crate::error::RenderError;
 use crate::keyboard::{
-    CLIPBOARD_CELLS, EMOJI_ROWS, InputMode, Key, KeyId, KeyWidth, KeyboardLayout, KeyboardState,
-    Panel, ShiftState, TOOLS,
+    CLIPBOARD_CELLS, EMOJI_COLS, GroupLabel, InputMode, Key, KeyId, KeyStyle, KeyWidth,
+    KeyboardLayout, KeyboardState, Panel, ShiftState, TOOLS,
 };
 use crate::text::TextStyle;
 use crate::theme::KeyboardTheme;
@@ -58,12 +58,10 @@ impl Renderer {
         // 所以先画在一张只有记录区那么大的图上，再整张贴回来（与 `logo::draw_logo` 同一个路数）。
         // 别的页没有这一层，直接画在主画布上。
         let pitch = row_height + gap_y;
-        // 这一页有没有「能滚的那一段」、是哪几行：
-        // 剪贴板是上头那五行记录；表情页是**标签条下面**那几行网格（第 0 行是标签，不滚）
+        // 这一页有没有「能滚的那一段」、是哪几行：只有剪贴板是上头那五行记录。
+        // **表情页没有了**（2026-09-23）：那一页改成横着翻页，不再上下滚。
         let (sheet_first, sheet_rows) = if layout.is_clipboard() {
             (0, CLIPBOARD_CELLS)
-        } else if layout.is_emoji() {
-            (1, EMOJI_ROWS)
         } else {
             (0, 0)
         };
@@ -78,11 +76,7 @@ impl Renderer {
         // 这里只让开不足一格的那点：滚动时卡片就是这么一格格挪上去的。
         // **不做除法**——「第几条起」是会话按同一套几何算的，两边各算一次会差出一格。
         let frac = if sheet.is_some() {
-            if layout.is_emoji() {
-                state.emoji_offset * scale
-            } else {
-                state.clipboard_offset * scale
-            }
+            state.clipboard_offset * scale
         } else {
             0.0
         };
@@ -92,75 +86,88 @@ impl Renderer {
         let sheet_bottom = sheet_top + sheet_height;
 
         let mut keys = Vec::new();
-        let mut y = 0.0;
-        for (index, row) in layout.rows().iter().enumerate() {
-            // 窗口那几行画到小图上（顶边往上让开不足一格的那部分），其余行照旧
-            let inside =
-                sheet_height > 0.0 && index >= sheet_first && index < sheet_first + sheet_rows;
-            let top = if inside { y - frac } else { y };
-            let target = match sheet.as_mut() {
-                Some(sheet) if inside => sheet,
-                _ => &mut canvas,
-            };
-            // 按单位宽算的那部分（不含撑满的键）。有撑满键的行**铺满整宽**，
-            // 其余按自己的总宽居中——第 2 行（9 个键）由此自然得到半键错位。
-            let fixed = KeyboardLayout::row_width(row, unit, gap_x);
-            let mut x = if row.has_fill() {
-                0.0
-            } else {
-                (content_width - fixed) / 2.0
-            };
-            // 撑满的键**平分**这一行剩下的（同一排里有几个就除以几；现在最多一个，
-            // 但除以个数才对——不然两个会各自占满、叠在一起）
-            let fills = row
-                .keys
-                .iter()
-                .filter(|key| key.width == KeyWidth::Fill)
-                .count();
-            for key in &row.keys {
-                let key_width = match key.width {
-                    KeyWidth::Units(weight) => unit * weight,
-                    KeyWidth::Fill => (content_width - fixed).max(0.0) / fills.max(1) as f32,
+        if layout.is_emoji() {
+            // 表情页**自成一套摆法**（标签全平铺一行、格子横着翻页、两处都不滚），
+            // 与下面「一行一行摆键」的通用循环差得远，所以单开一条。
+            self.draw_emoji_page(
+                &mut canvas,
+                state,
+                theme,
+                scale,
+                content_width,
+                rows_height,
+                gap_x,
+                gap_y,
+                &mut keys,
+            );
+        } else {
+            let mut y = 0.0;
+            for (index, row) in layout.rows().iter().enumerate() {
+                // 窗口那几行画到小图上（顶边往上让开不足一格的那部分），其余行照旧
+                let inside =
+                    sheet_height > 0.0 && index >= sheet_first && index < sheet_first + sheet_rows;
+                let top = if inside { y - frac } else { y };
+                let target = match sheet.as_mut() {
+                    Some(sheet) if inside => sheet,
+                    _ => &mut canvas,
                 };
-                // 画进子画布的要换成**子画布自己的坐标**（它的原点是可滚那一段的顶边）。
-                // 剪贴板那一段是从顶边起的（`sheet_top` = 0），所以减不减都一样；
-                // 表情页那一段在标签条**下面**，不减就会整片往下偏一行。
-                let slot_y = if inside { top - sheet_top } else { top };
-                // 分类标签条能横着滑（K13 ②）：标签行整条按偏移往左走。
-                // **只挪这一个数**——下面命中区用的是同一个 `slot_x`，所以画在哪就点得着哪，
-                // 两边不会各走各的（滑到一半露半格时也是对的）。
-                let slot_x = if matches!(key.id, KeyId::EmojiGroup(_)) {
-                    x - state.emoji_group_offset * scale
+                // 按单位宽算的那部分（不含撑满的键）。有撑满键的行**铺满整宽**，
+                // 其余按自己的总宽居中——第 2 行（9 个键）由此自然得到半键错位。
+                let fixed = KeyboardLayout::row_width(row, unit, gap_x);
+                let mut x = if row.has_fill() {
+                    0.0
                 } else {
-                    x
+                    (content_width - fixed) / 2.0
                 };
-                self.draw_key(
-                    target,
-                    key,
-                    state,
-                    theme,
-                    scale,
-                    (slot_x, slot_y, key_width, row_height),
-                );
-                // 滚出窗口的那部分不该还能点：命中区裁到窗口里，整个滚出去的就不报了
-                let (hit_y, hit_height) = if inside {
-                    let bottom = (top + row_height).min(sheet_bottom);
-                    (top.max(sheet_top), bottom - top.max(sheet_top))
-                } else {
-                    (top, row_height)
-                };
-                if hit_height > 0.0 {
-                    keys.push(KeyHit {
-                        id: key.id,
-                        x: slot_x,
-                        y: hit_y,
-                        width: key_width,
-                        height: hit_height,
-                    });
+                // 撑满的键**平分**这一行剩下的（同一排里有几个就除以几；现在最多一个，
+                // 但除以个数才对——不然两个会各自占满、叠在一起）
+                let fills = row
+                    .keys
+                    .iter()
+                    .filter(|key| key.width == KeyWidth::Fill)
+                    .count();
+                for key in &row.keys {
+                    let key_width = match key.width {
+                        KeyWidth::Units(weight) => unit * weight,
+                        KeyWidth::Fill => (content_width - fixed).max(0.0) / fills.max(1) as f32,
+                    };
+                    // 画进子画布的要换成**子画布自己的坐标**（它的原点是可滚那一段的顶边）。
+                    // 剪贴板那一段是从顶边起的（`sheet_top` = 0），所以减不减都一样；
+                    // 表情页那一段在标签条**下面**，不减就会整片往下偏一行。
+                    let slot_y = if inside { top - sheet_top } else { top };
+                    self.draw_key(
+                        target,
+                        key,
+                        state,
+                        theme,
+                        scale,
+                        (x, slot_y, key_width, row_height),
+                    );
+                    // 滚出窗口的那部分不该还能点：命中区裁到窗口里，整个滚出去的就不报了
+                    let (hit_y, hit_height) = if inside {
+                        let bottom = (top + row_height).min(sheet_bottom);
+                        (top.max(sheet_top), bottom - top.max(sheet_top))
+                    } else {
+                        (top, row_height)
+                    };
+                    // 命中区**铺满格子**（往四边各吃半条缝），不是只盖住键帽：
+                    // 手指落在键与键之间的缝里不该一个字都不出——那是键盘上约三成的面积。
+                    // 参考项目 fcitx5-android 就是这样：它视觉上的缝是键帽往里缩出来的
+                    // （`InsetDrawable`），格子本身铺满整行。**只改命中、不动绘制**，看着一模一样。
+                    // 相邻两键各吃半条缝，边界正好落在缝中间——要滑到隔壁键还是得越过中线。
+                    if hit_height > 0.0 {
+                        keys.push(KeyHit {
+                            id: key.id,
+                            x: x - gap_x / 2.0,
+                            y: hit_y - gap_y / 2.0,
+                            width: key_width + gap_x,
+                            height: hit_height + gap_y,
+                        });
+                    }
+                    x += key_width + gap_x;
                 }
-                x += key_width + gap_x;
+                y += pitch;
             }
-            y += pitch;
         }
 
         if let Some(sheet) = sheet {
@@ -183,6 +190,269 @@ impl Renderer {
             },
             keys,
         })
+    }
+
+    /// 画表情页：上面一条分类标签、下面一片格子。
+    ///
+    /// **与别的页不是一套摆法**，所以不走上面那个「一行一行摆键」的循环：
+    ///
+    /// - 分类标签**全部分类平铺一行**（照 fcitx5-android）：格数跟着分类数走，不再固定
+    ///   五个、多的靠横滑看——哪些分类一眼看全，点一下就过去（2026-09-23 改的）；
+    /// - 格子区**横着翻页**：一页 [`EMOJI_COLS`] × [`EMOJI_ROWS`] 个，跟手时相邻那页
+    ///   跟着露出来，所以一屏要画的不止一页；
+    /// - **两处都不滚**：一页摆满就翻下一批（笑脸那一类 158 个 = 11 页）。
+    ///
+    /// 标签**只点不滑**：换分类点一下、翻页滑下面那片格子——与 fcitx5 一样。
+    #[allow(clippy::too_many_arguments)]
+    fn draw_emoji_page(
+        &mut self,
+        canvas: &mut Canvas,
+        state: &KeyboardState,
+        theme: &KeyboardTheme,
+        scale: f32,
+        content_width: f32,
+        rows_height: f32,
+        gap_x: f32,
+        gap_y: f32,
+        keys: &mut Vec<KeyHit>,
+    ) {
+        let layout = KeyboardLayout::emoji();
+        let row_height = layout.row_height(rows_height, gap_y);
+        let pitch = row_height + gap_y;
+        let unit = layout.unit_width(content_width, gap_x);
+
+        self.draw_emoji_labels(canvas, state, theme, scale, content_width, row_height, keys);
+        // 细条贴在标签行的下沿内侧，不额外占一行
+        self.draw_emoji_pager(canvas, state, theme, scale, content_width, row_height);
+        self.draw_emoji_grid(
+            canvas,
+            state,
+            theme,
+            scale,
+            content_width,
+            pitch,
+            unit,
+            gap_x,
+            row_height,
+            pitch,
+            gap_y,
+            keys,
+        );
+    }
+
+    /// 画分类标签那一行：**全部分类平铺**。
+    ///
+    /// 格宽一律「整宽 ÷ 分类数」，格子之间不留缝——一留缝，分类一多就全是缝。
+    /// 表情面板十个分类、颜文字面板二十二个，格子里放不下长名字，画什么由
+    /// [`GroupLabel`] 定：表情那边画图标，颜文字那边画两个字。
+    #[allow(clippy::too_many_arguments)]
+    fn draw_emoji_labels(
+        &mut self,
+        canvas: &mut Canvas,
+        state: &KeyboardState,
+        theme: &KeyboardTheme,
+        scale: f32,
+        content_width: f32,
+        row_height: f32,
+        keys: &mut Vec<KeyHit>,
+    ) {
+        let count = state.emoji_groups.len();
+        if count == 0 {
+            return;
+        }
+        let cell = content_width / count as f32;
+        for (index, label) in state.emoji_groups.iter().enumerate() {
+            let x = index as f32 * cell;
+            let pressed = state.pressed == Some(KeyId::EmojiGroup(index));
+            self.draw_group_cell(
+                canvas,
+                label,
+                state.emoji_group == index,
+                pressed,
+                theme,
+                scale,
+                (x, 0.0, cell, row_height),
+            );
+            // **画在哪就点得着哪**：命中区与键帽用同一个 `x` 与 `cell`，两边不会各走各的
+            keys.push(KeyHit {
+                id: KeyId::EmojiGroup(index),
+                x,
+                y: 0.0,
+                width: cell,
+                height: row_height,
+            });
+        }
+    }
+
+    /// 画一个分类标签格：一块键帽，上面画图标或名字；选中的那一类垫一块底色。
+    #[allow(clippy::too_many_arguments)]
+    fn draw_group_cell(
+        &mut self,
+        canvas: &mut Canvas,
+        label: &GroupLabel,
+        chosen: bool,
+        pressed: bool,
+        theme: &KeyboardTheme,
+        scale: f32,
+        slot: (f32, f32, f32, f32),
+    ) {
+        let (x, y, width, height) = slot;
+        let radius = (theme.radius * scale).min(width / 2.0).min(height / 2.0);
+        let cap = theme.key_color(KeyStyle::Letter, pressed);
+        canvas.fill_round_rect(x, y, width, height, radius, cap);
+        let (cx, cy) = (x + width / 2.0, y + height / 2.0);
+        if chosen {
+            // 选中那一类垫块底色（与长按弹的那排选项、工具页一个做法）
+            let inset = CARD_INSET * scale;
+            canvas.fill_round_rect(
+                x + inset,
+                y + inset,
+                width - inset * 2.0,
+                height - inset * 2.0,
+                radius / 2.0,
+                theme.key_pressed,
+            );
+        }
+        match label {
+            GroupLabel::Icon(icon) => {
+                // 图标还要按**格宽**再收一道：分类一多格子就很窄，
+                // 只按键高算出来的尺寸会顶出格子、与邻格叠在一起
+                let size = icon::size_on_key(height, scale).min(width * 0.6);
+                icon::draw_group(canvas, *icon, cx, cy, size, theme.label);
+            }
+            GroupLabel::Text(text) => {
+                let style = TextStyle::new(
+                    theme.hint_font.scaled(scale),
+                    theme.hint_font.size,
+                    theme.label,
+                    theme.text_gamma,
+                );
+                let text = self.fit(text, &style, width - CELL_TEXT_PADDING * scale * 2.0);
+                let size = self.measure(&text, &style);
+                self.draw_text(
+                    canvas,
+                    &text,
+                    &style,
+                    cx - size.width / 2.0,
+                    cy - size.height / 2.0,
+                );
+            }
+        }
+    }
+
+    /// 画表情格子区：**一页一页横着摆开**。
+    ///
+    /// 跟手时相邻那页会露出来，所以 [`KeyboardState::emoji_pages`] 里可能不止一页——
+    /// 每页按「（第几页 − 当前页）× 整宽 − 跟手位移」摆，摆到视口外面的自然看不见。
+    #[allow(clippy::too_many_arguments)]
+    fn draw_emoji_grid(
+        &mut self,
+        canvas: &mut Canvas,
+        state: &KeyboardState,
+        theme: &KeyboardTheme,
+        scale: f32,
+        content_width: f32,
+        grid_top: f32,
+        unit: f32,
+        gap_x: f32,
+        row_height: f32,
+        pitch: f32,
+        gap_y: f32,
+        keys: &mut Vec<KeyHit>,
+    ) {
+        let radius = (theme.radius * scale).min(unit / 2.0).min(row_height / 2.0);
+        for (page_index, page) in state.emoji_pages.iter().enumerate() {
+            // 当前页永远在中间（[`EMOJI_PAGE_CURRENT`]）：前后各一页就是 ±1 个整宽
+            let page_x = (page_index as f32 - EMOJI_PAGE_CURRENT as f32) * content_width
+                - state.emoji_shift * scale;
+            for (slot, ch) in page.iter().enumerate() {
+                let row = slot / EMOJI_COLS;
+                let col = slot % EMOJI_COLS;
+                let x = page_x + col as f32 * (unit + gap_x);
+                let y = grid_top + row as f32 * pitch;
+                let pressed =
+                    page_index == EMOJI_PAGE_CURRENT && state.pressed == Some(KeyId::Emoji(slot));
+                let cap = theme.key_color(KeyStyle::Letter, pressed);
+                canvas.fill_round_rect(x, y, unit, row_height, radius, cap);
+                self.draw_emoji_text(canvas, ch, theme, scale, (x, y, unit, row_height));
+            }
+        }
+        // 命中区**只报当前页**，而且按**落定后**的位置（收尾动画走完 `emoji_shift` 就是 0）。
+        // 跟手时露出来的邻页点不得——与 ViewPager2 一样，翻页途中旁边的格子不接点击。
+        let page = state.emoji_pages[EMOJI_PAGE_CURRENT];
+        for slot in 0..page.len() {
+            let row = slot / EMOJI_COLS;
+            let col = slot % EMOJI_COLS;
+            // 与别的键一样**往四边各吃半条缝**：表情格子之间也有缝，
+            // 落在缝里不该点不着（见 `render_keyboard` 里那段）
+            keys.push(KeyHit {
+                id: KeyId::Emoji(slot),
+                x: col as f32 * (unit + gap_x) - gap_x / 2.0,
+                y: grid_top + row as f32 * pitch - gap_y / 2.0,
+                width: unit + gap_x,
+                height: row_height + gap_y,
+            });
+        }
+    }
+
+    /// 表情格子上那个字（一个 emoji 或一条颜文字），居中在格子里。
+    ///
+    /// 一两个字符的（emoji）用键帽那个大号，更长的（颜文字）缩一号才塞得下。
+    fn draw_emoji_text(
+        &mut self,
+        canvas: &mut Canvas,
+        text: &str,
+        theme: &KeyboardTheme,
+        scale: f32,
+        slot: (f32, f32, f32, f32),
+    ) {
+        let (x, y, width, height) = slot;
+        let font = if text.chars().count() <= 2 {
+            theme.font
+        } else {
+            theme.hint_font
+        };
+        let style = TextStyle::new(font.scaled(scale), font.size, theme.label, theme.text_gamma);
+        let pad = CELL_TEXT_PADDING * scale;
+        let text = self.fit(text, &style, (width - pad * 2.0).max(0.0));
+        let size = self.measure(&text, &style);
+        self.draw_text(
+            canvas,
+            &text,
+            &style,
+            x + (width - size.width) / 2.0,
+            y + (height - size.height) / 2.0,
+        );
+    }
+
+    /// 标签行下沿那条分页细条：**这一类一共几页、现在翻到第几页**。
+    ///
+    /// 照 fcitx5-android 的 `PickerPaginationUi`：横着翻页得有个「还有多少」的提示，
+    /// 不然一类十几页，翻到哪儿了心里没数。底色是整条暗的，上面一块亮的跟着走，
+    /// 亮块宽 = 整宽 ÷ 页数；**类内只有一页就不画**（没什么可指示的）。
+    ///
+    /// 不额外占高度：贴在标签行的下沿内侧，下面紧接着就是格子。
+    fn draw_emoji_pager(
+        &mut self,
+        canvas: &mut Canvas,
+        state: &KeyboardState,
+        theme: &KeyboardTheme,
+        scale: f32,
+        content_width: f32,
+        bottom: f32,
+    ) {
+        let Some((passed, count)) = state.emoji_pager else {
+            return;
+        };
+        if count <= 1 {
+            return;
+        }
+        let height = PAGER_HEIGHT * scale;
+        let y = bottom - height;
+        canvas.fill_rect(0.0, y, content_width, height, theme.key_pressed);
+        let width = content_width / count as f32;
+        let x = (passed * width).clamp(0.0, content_width - width);
+        canvas.fill_rect(x, y, width, height, theme.accent);
     }
 
     /// 剪贴板一条都没有时，键盘中间写一句话（[`BLANK_CLIPBOARD`]）。
@@ -287,58 +557,9 @@ impl Renderer {
                 icon::size_on_key(height, scale),
                 theme.label,
             ),
-            // 表情格子：emoji 是**彩色字形**（`draw_text` 走 swash 那条彩色路），
-            // 颜文字是普通文字——两者共用这一格，**按内容长短自己挑字号**：
-            // 一两个字符的（emoji）用键帽那个大号，更长的（颜文字）缩一号才塞得下。
-            KeyId::Emoji(_) => {
-                let font = if text.chars().count() <= 2 {
-                    theme.font
-                } else {
-                    theme.hint_font
-                };
-                let style =
-                    TextStyle::new(font.scaled(scale), font.size, theme.label, theme.text_gamma);
-                let pad = CELL_TEXT_PADDING * scale;
-                let text = self.fit(&text, &style, width - pad * 2.0);
-                let size = self.measure(&text, &style);
-                self.draw_text(
-                    canvas,
-                    &text,
-                    &style,
-                    cx - size.width / 2.0,
-                    cy - size.height / 2.0,
-                );
-            }
-            // 分类标签：小字居中；选中那一类垫一块底色（跟长按弹的那排选项一个做法）
-            KeyId::EmojiGroup(index) => {
-                let style = TextStyle::new(
-                    theme.hint_font.scaled(scale),
-                    theme.hint_font.size,
-                    theme.label,
-                    theme.text_gamma,
-                );
-                let chosen = state.emoji_group == index;
-                if chosen {
-                    let inset = CARD_INSET * scale;
-                    canvas.fill_round_rect(
-                        x + inset,
-                        y + inset,
-                        width - inset * 2.0,
-                        height - inset * 2.0,
-                        radius / 2.0,
-                        theme.key_pressed,
-                    );
-                }
-                let text = self.fit(&text, &style, width - CELL_TEXT_PADDING * scale * 2.0);
-                let size = self.measure(&text, &style);
-                self.draw_text(
-                    canvas,
-                    &text,
-                    &style,
-                    cx - size.width / 2.0,
-                    cy - size.height / 2.0,
-                );
-            }
+            // 表情格子与分类标签**不走这儿**：两样都由 `draw_emoji_page` 自己画
+            // （标签要按分类数均分、一格画图标还是文字得看是哪一类；格子要横着摆好几页）。
+            KeyId::Emoji(_) | KeyId::EmojiGroup(_) => {}
             // 工具页的格子：**图标在上、名字在下**（搜狗那个面板就是这个样子），
             // 跟「一个大字居中」的键帽不是一回事，所以整个格子自己画
             KeyId::Tool(index) => {
@@ -428,6 +649,17 @@ const CARD_INSET: f32 = 4.0;
 /// 剪贴板一条都没有时，键盘中间那行字。
 const BLANK_CLIPBOARD: &str = "暂无剪贴板内容";
 
+/// 表情页要画的那三页里，**当前页**是第几个（帧里永远是它正对着视口）。
+///
+/// 单独拎出来当常量：渲染器里好几处要按它算前后差几页，写死 `1` 容易看漏一处。
+const EMOJI_PAGE_CURRENT: usize = 1;
+
+/// 表情页标签行下沿那条分页细条多高（点）。
+///
+/// 2 点：fcitx5-android 的 `PickerPaginationUi` 就是这个高度——够看见，
+/// 又不至于在标签行下面多出一条「线」抢眼。
+const PAGER_HEIGHT: f32 = 2.0;
+
 /// 工具页格子上那个图标占格子高度的多少。
 ///
 /// 剩下的是名字与上下留白——格子是「宽比高长」的（一单位宽 × 一行高），
@@ -456,9 +688,9 @@ fn label(key: &Key, state: &KeyboardState) -> String {
         KeyId::Clipboard(index) => state.clipboard.get(index).cloned().unwrap_or_default(),
         KeyId::Tool(index) => TOOLS.get(index).copied().unwrap_or_default().to_owned(),
         KeyId::ClipboardClear => "清空".to_owned(),
-        // 表情格子写的是**那一个 emoji 或那一条颜文字**（会话切好的这一屏）
-        KeyId::Emoji(index) => state.emojis.get(index).cloned().unwrap_or_default(),
-        KeyId::EmojiGroup(index) => state.emoji_groups.get(index).cloned().unwrap_or_default(),
+        // 表情格子与分类标签**不走这儿**：两样都由 `draw_emoji_page` 自己画
+        // （标签按分类数均分、一格画图标还是文字得看是哪一类；格子要横着摆好几页）
+        KeyId::Emoji(_) | KeyId::EmojiGroup(_) => String::new(),
         KeyId::Letter(c) => {
             if state.shift.is_upper() {
                 c.to_uppercase().to_string()
