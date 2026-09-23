@@ -425,13 +425,15 @@ mod tests {
         let control = layout.rows().last().expect("该有控制行");
         assert_eq!(
             control.keys.len(),
-            2,
-            "返回 / 清空——翻页那两个 2026-09-21 撤了"
+            3,
+            "返回 / 清空 / 锁——翻页那两个 2026-09-21 撤了，锁是 2026-09-23 加的"
         );
         let control_width = KeyboardLayout::row_width(control, unit, gap);
+        // 「窄一点、居中」而不是盯着某个比例：控制行的键是按单位宽摆的、两头留白，
+        // 加一个键（2026-09-23 加了「锁」）就会宽一点，那是应该的
         assert!(
-            (width * 0.3..width * 0.6).contains(&control_width),
-            "控制行该窄一点、居中，实际 {control_width}"
+            control_width < width - gap,
+            "控制行该比记录行窄、居中（两头留白），实际 {control_width}"
         );
     }
 

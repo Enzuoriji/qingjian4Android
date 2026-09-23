@@ -1107,8 +1107,12 @@ mod tests {
         // 卡片是近白（252）、底色是浅灰（220）——沿这一格的中线扫一遍，取白的那一段
         // （字是黑的，只夹在中间，不影响两头）
         let pixmap = &out.rendered.pixmap;
+        // 命中区**往两边各吃了半条缝**（见 `render_keyboard` 里那段：落在缝里也得打得出字），
+        // 所以从这个矩形量卡片缩进会多出那半条缝——先还原成**键自己**的左右边。
+        let gap = 7.0 * scale;
+        let (key_left, key_width) = (hit.x + gap / 2.0, hit.width - gap);
         let line = (hit.y + hit.height / 2.0) as u32;
-        let mut span = hit.x as u32..(hit.x + hit.width) as u32;
+        let mut span = key_left as u32..(key_left + key_width) as u32;
         let white = |x: u32| {
             pixmap
                 .pixel(x, line)
@@ -1117,12 +1121,12 @@ mod tests {
         let left = span.clone().find(|&x| white(x)).expect("该扫到卡片");
         let right = span.rfind(|&x| white(x)).expect("该扫到卡片");
 
-        let inset = (left as f32 - hit.x) / scale;
+        let inset = (left as f32 - key_left) / scale;
         assert!(
             (inset - CARD_INSET).abs() < 1.0,
             "卡片左边该缩进来 {CARD_INSET} 点，实际 {inset}"
         );
-        let inset = (hit.x + hit.width - 1.0 - right as f32) / scale;
+        let inset = (key_left + key_width - 1.0 - right as f32) / scale;
         assert!(
             (inset - CARD_INSET).abs() < 1.0,
             "卡片右边该缩进来 {CARD_INSET} 点，实际 {inset}"
