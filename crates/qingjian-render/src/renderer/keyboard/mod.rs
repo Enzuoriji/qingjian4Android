@@ -252,36 +252,41 @@ impl Renderer {
             row_height,
             pitch,
             gap_y,
+            // 颜文字那页第一格给了「最近」，格子从第二格起排
+            usize::from(kaomoji),
             keys,
         );
         if kaomoji {
-            self.draw_recent_button(canvas, theme, scale, content_width, unit, row_height, keys);
+            // 第一格固定是「最近」（左上角），颜文字从它右边接着排（`start_slot` = 1）
+            self.draw_recent_cell(
+                canvas,
+                theme,
+                scale,
+                (0.0, 0.0, unit, row_height),
+                state.emoji_group == 0,
+                keys,
+            );
         }
     }
 
-    /// 颜文字页右上角那个「最近」按钮（2026-09-23）。
+    /// 颜文字页**第一格**那个「最近」（2026-09-23）。
     ///
-    /// 颜文字没有分类标签行了，但「最近用过的」还得有个入口——做成浮在右上角的一个
-    /// 小方块：点一下看最近用过的，再点一下回到全部。
+    /// 颜文字没有分类标签行了，但「最近用过的」还得有个入口——**固定占第一格**
+    /// （左上角），颜文字从它右边接着排。
     ///
-    /// 命中区**插在格子前面**：`hit()` 取的是第一个匹配的，按钮压在右上角那半格上，
-    /// 插在后面就会被那一格抢走。
+    /// **是正经一格，不是浮在上面的**：浮着会压住底下那一格，用户当场说了
+    /// 「你怎么能挡住呢」。选中态（正在看最近用过的）照别的标签那样垫一块底色。
     #[allow(clippy::too_many_arguments)]
-    fn draw_recent_button(
+    fn draw_recent_cell(
         &mut self,
         canvas: &mut Canvas,
         theme: &KeyboardTheme,
         scale: f32,
-        content_width: f32,
-        unit: f32,
-        row_height: f32,
+        slot: (f32, f32, f32, f32),
+        chosen: bool,
         keys: &mut Vec<KeyHit>,
     ) {
-        let margin = RECENT_BUTTON_MARGIN * scale;
-        let width = (unit * 0.8).min(content_width - margin * 2.0);
-        let height = row_height * 0.62;
-        let x = content_width - width - margin;
-        let y = margin;
+        let (x, y, width, height) = slot;
         let radius = (theme.radius * scale).min(width / 2.0).min(height / 2.0);
         canvas.fill_round_rect(
             x,
@@ -291,7 +296,18 @@ impl Renderer {
             radius,
             theme.key_color(KeyStyle::Letter, false),
         );
-        let size = (height * 0.55).min(width * 0.55);
+        if chosen {
+            let inset = CARD_INSET * scale;
+            canvas.fill_round_rect(
+                x + inset,
+                y + inset,
+                width - inset * 2.0,
+                height - inset * 2.0,
+                radius / 2.0,
+                theme.key_pressed,
+            );
+        }
+        let size = icon::size_on_key(height, scale).min(width * 0.6);
         icon::draw_group(
             canvas,
             GroupIcon::Recent,
@@ -300,16 +316,13 @@ impl Renderer {
             size,
             theme.label,
         );
-        keys.insert(
-            0,
-            KeyHit {
-                id: KeyId::EmojiGroup(0),
-                x,
-                y,
-                width,
-                height,
-            },
-        );
+        keys.push(KeyHit {
+            id: KeyId::EmojiGroup(0),
+            x,
+            y,
+            width,
+            height,
+        });
     }
 
     /// 画分类标签那一行：**全部分类平铺**。
@@ -430,6 +443,8 @@ impl Renderer {
         row_height: f32,
         pitch: f32,
         gap_y: f32,
+        // 从**第几格**开始摆（颜文字那页第 0 格被「最近」占了，所以是 1）。
+        start_slot: usize,
         keys: &mut Vec<KeyHit>,
     ) {
         let radius = (theme.radius * scale).min(unit / 2.0).min(row_height / 2.0);
@@ -438,8 +453,10 @@ impl Renderer {
             let page_x = (page_index as f32 - EMOJI_PAGE_CURRENT as f32) * content_width
                 - state.emoji_shift * scale;
             for (slot, ch) in page.iter().enumerate() {
-                let row = slot / EMOJI_COLS;
-                let col = slot % EMOJI_COLS;
+                // 页内第几个 → **键盘上第几格**（颜文字那页要从第二格起）
+                let cell = slot + start_slot;
+                let row = cell / EMOJI_COLS;
+                let col = cell % EMOJI_COLS;
                 let x = page_x + col as f32 * (unit + gap_x);
                 let y = grid_top + row as f32 * pitch;
                 let pressed =
@@ -453,8 +470,9 @@ impl Renderer {
         // 跟手时露出来的邻页点不得——与 ViewPager2 一样，翻页途中旁边的格子不接点击。
         let page = state.emoji_pages[EMOJI_PAGE_CURRENT];
         for slot in 0..page.len() {
-            let row = slot / EMOJI_COLS;
-            let col = slot % EMOJI_COLS;
+            let cell = slot + start_slot;
+            let row = cell / EMOJI_COLS;
+            let col = cell % EMOJI_COLS;
             // 与别的键一样**往四边各吃半条缝**：表情格子之间也有缝，
             // 落在缝里不该点不着（见 `render_keyboard` 里那段）
             keys.push(KeyHit {
@@ -720,9 +738,6 @@ const CARD_INSET: f32 = 4.0;
 
 /// 剪贴板一条都没有时，键盘中间那行字。
 const BLANK_CLIPBOARD: &str = "暂无剪贴板内容";
-
-/// 颜文字页右上角那个「最近」按钮离键盘上沿、右沿各留多少（点）。
-const RECENT_BUTTON_MARGIN: f32 = 6.0;
 
 /// 表情页要画的那三页里，**当前页**是第几个（帧里永远是它正对着视口）。
 ///

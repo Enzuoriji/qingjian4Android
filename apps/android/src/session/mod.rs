@@ -186,8 +186,9 @@ const RECENT_LABEL: &str = "最近";
 const EMOJI_SLOTS: usize = 15;
 
 /// 颜文字**一页摆几个**——那一页没有分类标签行，格子比表情页多一行
-/// （`EMOJI_COLS × KAOMOJI_ROWS` = 20）。
-const KAOMOJI_SLOTS: usize = 20;
+/// （`EMOJI_COLS × KAOMOJI_ROWS` = 20 格），但**第一格被「最近」占了**，
+/// 所以能摆的颜文字是 19 个（2026-09-23：用户要求「最近固定第一个、颜文字往它右面排」）。
+const KAOMOJI_SLOTS: usize = 20 - 1;
 
 /// 手速超过这么多（**点/毫秒**）就算「甩」，朝手甩的方向翻一页，跟拖了多远无关。
 ///

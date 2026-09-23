@@ -510,9 +510,8 @@ K13 ②**（那版滑的是上面那条标签条）。六个要点：
 - `EmojiPanel::merge_groups()` 把 22 个分类并成一条长表（颜文字用）；名字留个占位的「全部」，
   面板上不画它，只用来占住「第 1 类」这个位置。
 - 渲染器 `draw_emoji_page` 按 `is_kaomoji()` 分两条路：表情那条照旧画标签行 + 细条，
-  颜文字那条格子从**键盘顶边**起、右上角画 `draw_recent_button`。
-  那个按钮的命中区**插在 `keys` 最前面**——`hit()` 取第一个匹配的，插后面会被它压住的
-  那半格抢走。
+  颜文字那条格子从**键盘顶边**起，**第 0 格固定是「最近」**（`draw_recent_cell`），
+  颜文字从第 1 格起排（`draw_emoji_grid` 的 `start_slot` 参数）。
 
 **按键判定改用「格子的边界」（2026-09-23，修「打字偶尔漏字母」）**：命中区从前只盖住键帽
 （`renderer/keyboard/mod.rs` 里 `keys.push(KeyHit { x, width: key_width, .. })`），键帽之间
