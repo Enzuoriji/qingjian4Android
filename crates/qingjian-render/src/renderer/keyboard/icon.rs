@@ -128,6 +128,26 @@ pub(crate) fn draw_group(
     draw(canvas, path, bbox, cx, cy, size, color);
 }
 
+/// 画剪贴板那把锁，居中在 `(cx, cy)`，边长 `size` 像素。
+///
+/// 两态两个图标（`lock` / `lock_open`）：只画一个「锁」的话，用户看不出现在是锁着
+/// 还是没锁——按钮上的图标该说明**当前状态**，不是「点了会怎样」。
+pub(crate) fn draw_lock(
+    canvas: &mut Canvas,
+    locked: bool,
+    cx: f32,
+    cy: f32,
+    size: f32,
+    color: Color,
+) {
+    let (path, bbox) = if locked {
+        (path::lock(), path::BOXES[15])
+    } else {
+        (path::unlock(), path::BOXES[16])
+    };
+    draw(canvas, path, bbox, cx, cy, size, color);
+}
+
 /// 把一段路径缩到**最长边 = `size`** 并居中在 `(cx, cy)`，然后填色。
 ///
 /// 按最长边而不是按高：这几个图标有宽扁的（⌫ 的包围盒是 800×640），按高缩会顶出格子。

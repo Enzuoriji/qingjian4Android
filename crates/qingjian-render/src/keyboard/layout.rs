@@ -308,6 +308,7 @@ impl KeyboardLayout {
             keys: vec![
                 Key::new(KeyId::Panel(Panel::Letters), 1.0),
                 Key::new(KeyId::ClipboardClear, 1.0),
+                Key::new(KeyId::ClipboardLock, 1.0),
             ],
         });
         Self { rows }

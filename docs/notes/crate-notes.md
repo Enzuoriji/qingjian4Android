@@ -513,6 +513,12 @@ K13 ②**（那版滑的是上面那条标签条）。六个要点：
   颜文字那条格子从**键盘顶边**起，**第 0 格固定是「最近」**（`draw_recent_cell`），
   颜文字从第 1 格起排（`draw_emoji_grid` 的 `start_slot` 参数）。
 
+**剪贴板的锁（2026-09-23）**：控制行从两个键变三个（返回 / 清空 / 锁），
+`Session::clipboard_locked` 记着，`paste_clipboard` 按它决定回不回字母页，
+`set_panel` 切到别的页时解开。顺带把 `Keyboard::surface` 的参数从 8 个收成 6 个——
+剪贴板那一摊（列表 + 零头 + 清空确认 + 锁）打包成了 `ClipboardView`，与 `EmojiView` 一个路数
+（这正是上一版留的那句话）。
+
 **剪贴板打磨（K14，2026-09-23）**：`Session` 多两个字段——`clear_armed: Option<Instant>`
 （第一下点过了、等第二下）与 `cleared_clipboard: Option<String>`（刚清掉的是哪条）。
 两者都**不引定时器**：过期由 `expire_clear()` 惰性判（`touch` 开头调一次），

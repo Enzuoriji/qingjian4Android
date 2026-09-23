@@ -640,6 +640,14 @@ impl Renderer {
                 icon::size_on_key(height, scale),
                 theme.label,
             ),
+            KeyId::ClipboardLock => icon::draw_lock(
+                canvas,
+                state.clipboard_locked,
+                cx,
+                main_cy,
+                icon::size_on_key(height, scale),
+                theme.label,
+            ),
             KeyId::Backspace => icon::draw_backspace(
                 canvas,
                 cx,
@@ -786,6 +794,8 @@ fn label(key: &Key, state: &KeyboardState) -> String {
         }
         KeyId::Tool(index) => TOOLS.get(index).copied().unwrap_or_default().to_owned(),
         // 「清空」要按两下：第一下之后这张键帽改口，说清楚再点一下就真清
+        // 锁那个键画的是图标（与 ⇧ / ⌫ 一样由 `draw_key` 提前分走），字是空的
+        KeyId::ClipboardLock => String::new(),
         KeyId::ClipboardClear => if state.clear_armed {
             "确认清空"
         } else {

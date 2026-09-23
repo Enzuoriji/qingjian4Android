@@ -50,6 +50,9 @@ ICONS = [
     ("objects", "emoji_objects.svg", "「Objects」——Material 的 `emoji_objects`"),
     ("symbols", "emoji_symbols.svg", "「Symbols」——Material 的 `emoji_symbols`"),
     ("flag", "flag.svg", "「Flags」——Material 的 `flag`"),
+    # 剪贴板控制行那个「锁」（2026-09-23）：锁上之后点一条不弹回字母页，连着粘
+    ("lock", "lock.svg", "剪贴板锁上——Material 的 `lock`"),
+    ("unlock", "lock_open.svg", "剪贴板没锁——Material 的 `lock_open`"),
 ]
 
 

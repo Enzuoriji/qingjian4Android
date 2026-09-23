@@ -31,7 +31,7 @@ use qingjian_translate::Glossary;
 
 use crate::action::{self, Act, Command};
 use crate::error::SessionError;
-use crate::keyboard::{EmojiView, Fired, Keyboard};
+use crate::keyboard::{ClipboardView, EmojiView, Fired, Keyboard};
 use crate::surface;
 use crate::touch::{MotionAction, TOUCH_SLOP, within_slop};
 use config::{ConfigState, attach_cloud, configured_language, push_to_engine};
@@ -576,6 +576,12 @@ pub struct Session {
     /// 剪贴板列表甩出去之后的那一段滑行（与候选条那条带子各走各的）。
     clipboard_fling: Option<Fling>,
 
+    /// 剪贴板那把**锁**：锁上之后点一条粘完**不回字母页**，可以连着粘几条。
+    ///
+    /// 只在剪贴板页有效——切到别的页就解开（它的用途就是「这一次连着粘」，
+    /// 不切走一直锁着的话，下次进来粘一条发现没回字母页会莫名其妙）。
+    clipboard_locked: bool,
+
     /// 「清空」的第一下已经点过了、正等第二下确认（**5 秒内**有效）。
     ///
     /// 手滑一下就清光所有历史太狠，所以做成点两下：第一下把键帽改成「确认清空」、
@@ -915,6 +921,7 @@ impl Session {
                 Recent::open(dir.join(CLIPBOARD_FILE), CLIPBOARD_LIMIT)
             }),
             clipboard_fling: None,
+            clipboard_locked: false,
             clear_armed: None,
             cleared_clipboard: None,
             clipboard_scrolled: None,
@@ -991,6 +998,9 @@ impl Session {
         // 剪贴板页从头看起（每次进来都回到最新的那几条）
         if panel == Panel::Clipboard {
             self.clipboard_scroll = 0.0;
+        } else {
+            // 锁只在剪贴板页里算数：切到别的页就解开（它的用途是「这一次连着粘」）
+            self.clipboard_locked = false;
         }
         // 表情页：把跟手的零头和没跑完的动画清掉（上次停在哪一页还在哪一页，
         // 与剪贴板那边不一样——那边每次进来都回最新的几条，这边保留看的进度）
@@ -1164,9 +1174,12 @@ impl Session {
                 self.renderer.as_mut(),
                 shift,
                 mode,
-                clipboard,
-                offset,
-                self.clear_armed.is_some(),
+                ClipboardView {
+                    entries: clipboard,
+                    offset,
+                    clear_armed: self.clear_armed.is_some(),
+                    locked: self.clipboard_locked,
+                },
                 emoji,
             ),
             None => Vec::new(),
@@ -1207,9 +1220,12 @@ impl Session {
                 self.renderer.as_mut(),
                 shift,
                 mode,
-                clipboard,
-                offset,
-                self.clear_armed.is_some(),
+                ClipboardView {
+                    entries: clipboard,
+                    offset,
+                    clear_armed: self.clear_armed.is_some(),
+                    locked: self.clipboard_locked,
+                },
                 emoji,
             ),
             None => Vec::new(),
@@ -1788,6 +1804,7 @@ impl Session {
             Act::PasteClipboard(index) => self.paste_clipboard(index),
             Act::DeleteClipboard(index) => self.delete_clipboard(index),
             Act::ClearClipboard => self.request_clear(),
+            Act::ToggleClipboardLock => self.toggle_clipboard_lock(),
         }
     }
 
@@ -2542,7 +2559,10 @@ impl Session {
             return;
         };
         self.commit_text(entry);
-        self.set_panel(Panel::Letters);
+        // 插完收回字母页——**锁上了就不回**（锁就是给「连着粘几条」用的）
+        if !self.clipboard_locked {
+            self.set_panel(Panel::Letters);
+        }
     }
 
     /// 删掉剪贴板里第 `index` 格（**屏幕上那一格**）那条。在记录上往左滑、松手走这条。
@@ -2561,6 +2581,12 @@ impl Session {
     }
 
     /// 清空整份剪贴板历史。
+    /// 拨一下剪贴板那把锁（锁上 / 解开）。
+    fn toggle_clipboard_lock(&mut self) {
+        self.clipboard_locked = !self.clipboard_locked;
+        self.mark_keyboard_dirty();
+    }
+
     /// 点「清空」：**第一下只是预备，第二下才真清**（用户 2026-09-22 要的）。
     ///
     /// 手滑一下就清光所有历史太狠。第一下之后键帽改口说「确认清空」，再过 `CLEAR_CONFIRM_WINDOW`

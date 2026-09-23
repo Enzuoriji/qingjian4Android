@@ -59,6 +59,9 @@ pub enum KeyId {
     /// 清空整份剪贴板历史。
     ClipboardClear,
 
+    /// 剪贴板的**锁**：锁上之后点一条不弹回字母页，可以连着粘几条。
+    ClipboardLock,
+
     /// 表情页上的第几个格子（**屏幕上那一格**）。字符从 `KeyboardState` 里取。
     Emoji(usize),
 
@@ -172,7 +175,8 @@ impl Key {
             | KeyId::Comma
             | KeyId::Period
             | KeyId::Panel(_)
-            | KeyId::ClipboardClear => KeyStyle::Function,
+            | KeyId::ClipboardClear
+            | KeyId::ClipboardLock => KeyStyle::Function,
         }
     }
 }

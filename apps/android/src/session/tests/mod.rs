@@ -3270,6 +3270,57 @@ fn shrinking_the_pages_pulls_the_scroll_back() {
     assert!(session.emoji_page() <= 1, "当前页也该落到存在的页上");
 }
 
+/// 剪贴板那把**锁**（2026-09-23 用户要的）：锁上之后点一条粘完**不回字母页**，可以连着粘。
+#[test]
+fn the_clipboard_lock_keeps_you_on_the_page() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("一条");
+
+    // 没锁：粘一条就回字母页（一直以来的行为）
+    open_clipboard(&mut session);
+    tap_key(&mut session, KeyId::Clipboard(0));
+    assert_eq!(session.panel, Panel::Letters, "没锁时粘完该回字母页");
+
+    // 锁上再粘：留在剪贴板页
+    open_clipboard(&mut session);
+    tap_key(&mut session, KeyId::ClipboardLock);
+    tap_key(&mut session, KeyId::Clipboard(0));
+    assert_eq!(
+        session.panel,
+        Panel::Clipboard,
+        "锁上之后粘完该留在这一页，好接着粘下一条"
+    );
+
+    // 再点一下解锁，粘一条就回去了
+    tap_key(&mut session, KeyId::ClipboardLock);
+    tap_key(&mut session, KeyId::Clipboard(0));
+    assert_eq!(session.panel, Panel::Letters, "解锁之后照旧回去");
+}
+
+/// 锁**只在剪贴板页里算数**：切到别的页就解开（它的用途是「这一次连着粘」）。
+#[test]
+fn the_lock_is_released_when_you_leave_the_page() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    session.note_clipboard("一条");
+    open_clipboard(&mut session);
+    tap_key(&mut session, KeyId::ClipboardLock);
+
+    // 按「返回」回字母页，再进来（剪贴板页上没有工具键）
+    tap_key(&mut session, KeyId::Panel(Panel::Letters));
+    open_clipboard(&mut session);
+
+    tap_key(&mut session, KeyId::Clipboard(0));
+    assert_eq!(
+        session.panel,
+        Panel::Letters,
+        "走开一趟回来该是没锁的——不然下次进来粘一条不回字母页会莫名其妙"
+    );
+}
+
 /// 「清空」要**按两下**才真清（用户 2026-09-22 要的）：手滑一下就清光所有历史太狠。
 #[test]
 fn clearing_the_clipboard_takes_two_taps() {

@@ -80,4 +80,7 @@ pub enum Act {
 
     /// 表情页上点了个分类标签：切到那一类。
     EmojiGroup(usize),
+
+    /// 剪贴板那把锁：锁上之后点一条不弹回字母页（连着粘几条用）。
+    ToggleClipboardLock,
 }

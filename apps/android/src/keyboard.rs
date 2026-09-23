@@ -157,6 +157,25 @@ pub enum Fired {
     EmojiPageScroll(f32),
 }
 
+/// 剪贴板那一摊：要画的那几条、让开的零头、清空确认、锁。
+///
+/// 打包成一个结构是因为 `surface` / `popup_surface` 都得收它——一个个传，
+/// 调用处会变成一长串看不出谁是谁（`Keyboard::surface` 参数涨到 8 个就是这么来的）。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ClipboardView<'a> {
+    /// 这一屏该画的那几条（会话按滚动量切好的）。
+    pub entries: &'a [String],
+
+    /// 让开不足一格的那点（点）——与 [`EmojiView::shift`] 同一个分工。
+    pub offset: f32,
+
+    /// 「清空」点过一下了、正等第二次确认。
+    pub clear_armed: bool,
+
+    /// 锁上了：点一条粘完**不回字母页**，可以连着粘几条。
+    pub locked: bool,
+}
+
 /// 表情面板要画的那一堆：要摆的几页、上面那条标签、选中的是第几个，外加分页细条。
 ///
 /// 打包成一个结构是因为 `surface` / `popup_surface` 都得收它——一个个传，
@@ -461,17 +480,12 @@ impl Keyboard {
     ///
     /// Shift 与中 / 英是引擎那头的状态（`Session` 拿着），画的时候借过来用一下；
     /// 剪贴板那一份也是（记录在会话里，键盘只负责画出来）；键盘自己只记「哪个键看着是按下的」。
-    // 参数到 8 个了：下次再往里加东西（不是改现有的）就该像 `EmojiView` 那样
-    // 打包一个 `ClipboardView`——剪贴板那一摊（列表 + 零头 + 清空确认）本来是挨着的一家人。
-    #[allow(clippy::too_many_arguments)]
     pub fn surface(
         &mut self,
         renderer: Option<&mut Renderer>,
         shift: ShiftState,
         mode: InputMode,
-        clipboard: &[String],
-        clipboard_offset: f32,
-        clear_armed: bool,
+        clipboard: ClipboardView<'_>,
         emoji: EmojiView<'_>,
     ) -> Vec<u8> {
         if self.metrics.width <= 0.0 {
@@ -483,9 +497,10 @@ impl Keyboard {
                 shift,
                 mode,
                 pressed: self.pressed,
-                clipboard,
-                clipboard_offset,
-                clear_armed,
+                clipboard: clipboard.entries,
+                clipboard_offset: clipboard.offset,
+                clear_armed: clipboard.clear_armed,
+                clipboard_locked: clipboard.locked,
                 emoji_pages: emoji.pages,
                 emoji_shift: emoji.shift,
                 emoji_groups: emoji.labels,
@@ -765,15 +780,12 @@ impl Keyboard {
     /// 按住键时那张预览气泡的位图（8 字节头 + 预乘 RGBA）。没按住、或那个键没什么可预览的，就是空的。
     ///
     /// 壳收到空字节串要把浮动小窗收起来——跟候选条「空表示不该在」一个规矩。
-    #[allow(clippy::too_many_arguments)]
     pub fn popup_surface(
         &mut self,
         renderer: Option<&mut Renderer>,
         shift: ShiftState,
         mode: InputMode,
-        clipboard: &[String],
-        clipboard_offset: f32,
-        clear_armed: bool,
+        clipboard: ClipboardView<'_>,
         emoji: EmojiView<'_>,
     ) -> Vec<u8> {
         let Some((key, rect)) = self.pressed_key() else {
@@ -835,9 +847,10 @@ impl Keyboard {
                 shift,
                 mode,
                 pressed: self.pressed,
-                clipboard,
-                clipboard_offset,
-                clear_armed,
+                clipboard: clipboard.entries,
+                clipboard_offset: clipboard.offset,
+                clear_armed: clipboard.clear_armed,
+                clipboard_locked: clipboard.locked,
                 emoji_pages: emoji.pages,
                 emoji_shift: emoji.shift,
                 emoji_groups: emoji.labels,
