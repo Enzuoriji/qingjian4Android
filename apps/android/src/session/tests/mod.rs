@@ -10,7 +10,7 @@ mod cloud;
 mod config;
 
 use super::flags;
-use super::{CANDIDATE_LIMIT, EMOJI_SLOTS, Session};
+use super::{CANDIDATE_LIMIT, EMOJI_SLOTS, KAOMOJI_SLOTS, Session};
 use crate::action::{Act, Command};
 use crate::touch::MotionAction;
 use qingjian_core::CandidateKind;
@@ -3159,6 +3159,48 @@ fn the_emoji_page_does_not_scroll_vertically() {
 
     assert_eq!(session.emoji_page_scroll, 0.0, "竖着划不该把表情横着挪");
     assert_eq!(session.clipboard_scroll, 0.0, "更不该动到剪贴板那边");
+}
+
+/// 颜文字面板**不分类了**、一页 20 个、右上角那个「最近」是个开关
+/// （2026-09-23 用户要求：22 个中文分类排成一排小标签根本认不出来）。
+///
+/// 分类条整行删掉，省下的高度给了格子（4 行 = 20 格），「最近」改成浮在右上角。
+#[test]
+fn the_kaomoji_page_drops_the_category_strip() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    tap_bar(&mut session, BarHitId::Tools);
+    // 真表在测试环境里未必加载得到，自己造一份「最近 + 全部」
+    session.kaomoji.slots = KAOMOJI_SLOTS;
+    session.kaomoji.sticky_recent = true;
+    session.kaomoji.names = vec!["全部".to_owned()];
+    session.kaomoji.items = vec![(0..40).map(|index| format!("k{index}")).collect()];
+    session.kaomoji.set_recent(&["用过的".to_owned()]);
+    session.emoji_page_scroll = 0.0;
+    tap_key(&mut session, KeyId::Tool(2));
+    assert_eq!(session.panel, Panel::Kaomoji, "该在颜文字页");
+
+    assert_eq!(
+        session.emoji_panel().names,
+        ["最近", "全部"],
+        "该只剩这两类——中间那 22 个中文分类不要了"
+    );
+    assert_eq!(
+        session.emoji_panel().slots,
+        KAOMOJI_SLOTS,
+        "没有标签行，一页多摆一行（20 个）"
+    );
+
+    // 进来默认看「全部」——「最近」是常驻的（按钮要一直在），但头一次进来它多半是空的，
+    // 拿一片空白当门面说不过去
+    assert_eq!(session.emoji_page_group(), 1, "进来该看「全部」");
+
+    // 右上角那个按钮是开关：点一下看最近用过的，再点一下回全部
+    tap_key(&mut session, KeyId::EmojiGroup(0));
+    assert_eq!(session.emoji_page_group(), 0, "点一下切到「最近」");
+    tap_key(&mut session, KeyId::EmojiGroup(0));
+    assert_eq!(session.emoji_page_group(), 1, "再点一下切回「全部」");
 }
 
 /// 上屏一个表情之后**画面不该跳走**（2026-09-23 在模拟器上抓到的）。

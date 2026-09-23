@@ -29,8 +29,8 @@ pub use fonts::directwrite as system_fonts;
 pub use fonts::{FontLibrary, UiFont};
 pub use frame::{Frame, Preedit, PreeditSegment, PreeditStyle, Row, Tone};
 pub use keyboard::{
-    CLIPBOARD_CELLS, EMOJI_COLS, EMOJI_ROWS, GroupIcon, GroupLabel, InputMode, Key, KeyId, KeyRow,
-    KeyStyle, KeyboardLayout, KeyboardState, Panel, ShiftState, TOOLS,
+    CLIPBOARD_CELLS, EMOJI_COLS, EMOJI_ROWS, GroupIcon, GroupLabel, InputMode, KAOMOJI_ROWS, Key,
+    KeyId, KeyRow, KeyStyle, KeyboardLayout, KeyboardState, Panel, ShiftState, TOOLS,
 };
 pub use layout::Layout;
 pub use renderer::{

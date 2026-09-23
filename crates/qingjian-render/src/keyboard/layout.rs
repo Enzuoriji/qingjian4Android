@@ -30,6 +30,10 @@ pub const TOOLS: [&str; 4] = ["剪贴板", "表情", "颜文字", "设置"];
 pub const EMOJI_COLS: usize = 5;
 pub const EMOJI_ROWS: usize = 3;
 
+/// 颜文字页一行摆几行格子——比表情页**多一行**：那一页没有分类标签行，
+/// 省下来的高度给了格子（2026-09-23）。
+pub const KAOMOJI_ROWS: usize = EMOJI_ROWS + 1;
+
 /// 工具页一行摆几个图标格子。一排 5 个，与别的页同一个单位宽。
 const TOOLS_PER_ROW: usize = 5;
 
@@ -267,6 +271,25 @@ impl KeyboardLayout {
         Self { rows }
     }
 
+    /// 颜文字页：**四行格子，没有分类标签行**。
+    ///
+    /// 以前与表情页共用一份布局（上面一条分类标签 + 三行格子），但那 22 个中文分类
+    /// 排成一排小标签根本认不出来——用户看了一眼说「把分类那个条删掉」。
+    /// 现在分类条整行不要了，省下的高度给格子（`KAOMOJI_ROWS` = 4 行 = 20 格一页），
+    /// 「最近」做成浮在**右上角**的一个小按钮（画法与命中在
+    /// [`crate::renderer::keyboard`] 的 `draw_emoji_page` 里）。
+    pub fn kaomoji() -> Self {
+        let mut rows = Vec::new();
+        for row in 0..KAOMOJI_ROWS {
+            rows.push(KeyRow {
+                keys: (0..EMOJI_COLS)
+                    .map(|col| Key::new(KeyId::Emoji(row * EMOJI_COLS + col), 1.0))
+                    .collect(),
+            });
+        }
+        Self { rows }
+    }
+
     /// 剪贴板页：**一条记录占一整行**，最后一行是控制。
     ///
     /// 记录格与别的页一样是 5 个单位一行（铺满整宽、左右边对得齐），
@@ -297,6 +320,18 @@ impl KeyboardLayout {
             .any(|row| row.keys.iter().any(|key| matches!(key.id, KeyId::Emoji(_))))
     }
 
+    /// 这一页是不是颜文字页（表情页与颜文字页的区别只在于**有没有那行分类标签**）。
+    ///
+    /// 判据就是第 0 行：表情页那一行是 `EmojiGroup`，颜文字页整页都是 `Emoji` 格子。
+    pub fn is_kaomoji(&self) -> bool {
+        self.is_emoji()
+            && !self.rows.first().is_some_and(|row| {
+                row.keys
+                    .iter()
+                    .any(|key| matches!(key.id, KeyId::EmojiGroup(_)))
+            })
+    }
+
     /// 这一页是不是剪贴板页。
     ///
     /// 渲染器要知道这个：**空列表时它得在键盘中间写一句话**，不然整块键盘上只剩底下
@@ -317,8 +352,9 @@ impl KeyboardLayout {
             Panel::Symbols => Self::symbols(),
             Panel::Tools => Self::tools(),
             Panel::Clipboard => Self::clipboard(),
-            // emoji 与颜文字共用一份布局（见 `Panel::Kaomoji` 的注释）
-            Panel::Emoji | Panel::Kaomoji => Self::emoji(),
+            Panel::Emoji => Self::emoji(),
+            // 颜文字那份**没有分类标签行**（2026-09-23 改的，见 `Self::kaomoji`）
+            Panel::Kaomoji => Self::kaomoji(),
         }
     }
 

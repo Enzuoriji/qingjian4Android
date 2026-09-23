@@ -18,7 +18,7 @@ use super::{Rendered, Renderer};
 use crate::canvas::Canvas;
 use crate::error::RenderError;
 use crate::keyboard::{
-    CLIPBOARD_CELLS, EMOJI_COLS, GroupLabel, InputMode, Key, KeyId, KeyStyle, KeyWidth,
+    CLIPBOARD_CELLS, EMOJI_COLS, GroupIcon, GroupLabel, InputMode, Key, KeyId, KeyStyle, KeyWidth,
     KeyboardLayout, KeyboardState, Panel, ShiftState, TOOLS,
 };
 use crate::text::TextStyle;
@@ -98,6 +98,7 @@ impl Renderer {
                 rows_height,
                 gap_x,
                 gap_y,
+                layout.is_kaomoji(),
                 &mut keys,
             );
         } else {
@@ -203,6 +204,10 @@ impl Renderer {
     /// - **两处都不滚**：一页摆满就翻下一批（笑脸那一类 158 个 = 11 页）。
     ///
     /// 标签**只点不滑**：换分类点一下、翻页滑下面那片格子——与 fcitx5 一样。
+    ///
+    /// **颜文字页没有那条标签行**（2026-09-23）：那一页的 22 个中文分类做成小标签根本
+    /// 认不出来，用户说了删掉。省下来的高度给格子（4 行 = 20 格），「最近」改成浮在
+    /// 右上角的一个小按钮。
     #[allow(clippy::too_many_arguments)]
     fn draw_emoji_page(
         &mut self,
@@ -214,29 +219,96 @@ impl Renderer {
         rows_height: f32,
         gap_x: f32,
         gap_y: f32,
+        kaomoji: bool,
         keys: &mut Vec<KeyHit>,
     ) {
-        let layout = KeyboardLayout::emoji();
+        let layout = if kaomoji {
+            KeyboardLayout::kaomoji()
+        } else {
+            KeyboardLayout::emoji()
+        };
         let row_height = layout.row_height(rows_height, gap_y);
         let pitch = row_height + gap_y;
         let unit = layout.unit_width(content_width, gap_x);
 
-        self.draw_emoji_labels(canvas, state, theme, scale, content_width, row_height, keys);
-        // 细条贴在标签行的下沿内侧，不额外占一行
-        self.draw_emoji_pager(canvas, state, theme, scale, content_width, row_height);
+        // 表情页顶上有一条分类标签；颜文字页没有，格子直接从键盘顶边起
+        let grid_top = if kaomoji {
+            0.0
+        } else {
+            self.draw_emoji_labels(canvas, state, theme, scale, content_width, row_height, keys);
+            // 细条贴在标签行的下沿内侧，不额外占一行
+            self.draw_emoji_pager(canvas, state, theme, scale, content_width, row_height);
+            pitch
+        };
         self.draw_emoji_grid(
             canvas,
             state,
             theme,
             scale,
             content_width,
-            pitch,
+            grid_top,
             unit,
             gap_x,
             row_height,
             pitch,
             gap_y,
             keys,
+        );
+        if kaomoji {
+            self.draw_recent_button(canvas, theme, scale, content_width, unit, row_height, keys);
+        }
+    }
+
+    /// 颜文字页右上角那个「最近」按钮（2026-09-23）。
+    ///
+    /// 颜文字没有分类标签行了，但「最近用过的」还得有个入口——做成浮在右上角的一个
+    /// 小方块：点一下看最近用过的，再点一下回到全部。
+    ///
+    /// 命中区**插在格子前面**：`hit()` 取的是第一个匹配的，按钮压在右上角那半格上，
+    /// 插在后面就会被那一格抢走。
+    #[allow(clippy::too_many_arguments)]
+    fn draw_recent_button(
+        &mut self,
+        canvas: &mut Canvas,
+        theme: &KeyboardTheme,
+        scale: f32,
+        content_width: f32,
+        unit: f32,
+        row_height: f32,
+        keys: &mut Vec<KeyHit>,
+    ) {
+        let margin = RECENT_BUTTON_MARGIN * scale;
+        let width = (unit * 0.8).min(content_width - margin * 2.0);
+        let height = row_height * 0.62;
+        let x = content_width - width - margin;
+        let y = margin;
+        let radius = (theme.radius * scale).min(width / 2.0).min(height / 2.0);
+        canvas.fill_round_rect(
+            x,
+            y,
+            width,
+            height,
+            radius,
+            theme.key_color(KeyStyle::Letter, false),
+        );
+        let size = (height * 0.55).min(width * 0.55);
+        icon::draw_group(
+            canvas,
+            GroupIcon::Recent,
+            x + width / 2.0,
+            y + height / 2.0,
+            size,
+            theme.label,
+        );
+        keys.insert(
+            0,
+            KeyHit {
+                id: KeyId::EmojiGroup(0),
+                x,
+                y,
+                width,
+                height,
+            },
         );
     }
 
@@ -648,6 +720,9 @@ const CARD_INSET: f32 = 4.0;
 
 /// 剪贴板一条都没有时，键盘中间那行字。
 const BLANK_CLIPBOARD: &str = "暂无剪贴板内容";
+
+/// 颜文字页右上角那个「最近」按钮离键盘上沿、右沿各留多少（点）。
+const RECENT_BUTTON_MARGIN: f32 = 6.0;
 
 /// 表情页要画的那三页里，**当前页**是第几个（帧里永远是它正对着视口）。
 ///

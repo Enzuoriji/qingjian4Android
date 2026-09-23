@@ -10,6 +10,8 @@ mod panel;
 mod state;
 
 pub use key::{Key, KeyId, KeyStyle, KeyWidth};
-pub use layout::{CLIPBOARD_CELLS, EMOJI_COLS, EMOJI_ROWS, KeyRow, KeyboardLayout, TOOLS};
+pub use layout::{
+    CLIPBOARD_CELLS, EMOJI_COLS, EMOJI_ROWS, KAOMOJI_ROWS, KeyRow, KeyboardLayout, TOOLS,
+};
 pub use panel::Panel;
 pub use state::{GroupIcon, GroupLabel, InputMode, KeyboardState, ShiftState};

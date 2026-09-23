@@ -146,8 +146,18 @@ pub mod flags {
 /// （见 `assets/emoji/emoji-panel.tsv`
 /// 与 `assets/kaomoji/kaomoji-panel.tsv`）。**只认前两列**——emoji 那张后头还有中英文名，
 /// 面板上用不上，但留着给以后做搜索。
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct EmojiPanel {
+    /// 一页摆几个（表情 15、颜文字 20——颜文字那页没有标签行，多一行格子）。
+    slots: usize,
+
+    /// 「最近」一条都没有时，留不留它那一类。
+    ///
+    /// 表情页**不留**：没东西就不摆那一格，标签行上干干净净（少一格，别的分类还宽一点）。
+    /// 颜文字页**留**：右上角那个「最近」按钮要一直在，而且它按的**下标**得一直是 0——
+    /// 不然按钮会随着「有没有用过」在「最近」和「全部」之间变意思。
+    sticky_recent: bool,
+
     /// 分类名，顺序就是表面上的顺序。
     names: Vec<String>,
 
@@ -175,6 +185,10 @@ const RECENT_LABEL: &str = "最近";
 /// `EMOJI_COLS × EMOJI_ROWS`，两处是同一个数）。横着翻页翻的单位就是它。
 const EMOJI_SLOTS: usize = 15;
 
+/// 颜文字**一页摆几个**——那一页没有分类标签行，格子比表情页多一行
+/// （`EMOJI_COLS × KAOMOJI_ROWS` = 20）。
+const KAOMOJI_SLOTS: usize = 20;
+
 /// 手速超过这么多（**点/毫秒**）就算「甩」，朝手甩的方向翻一页，跟拖了多远无关。
 ///
 /// 0.05 点/毫秒 = 50 点/秒，正是安卓 `ViewConfiguration` 的 `scaledMinimumFlingVelocity`
@@ -182,9 +196,25 @@ const EMOJI_SLOTS: usize = 15;
 /// **特别低**：轻轻一拨就过线，所以「滑一下就翻页」。只判方向、不看大小（再快也只翻一页）。
 const MIN_PAGE_FLING: f32 = 0.05;
 
+impl Default for EmojiPanel {
+    /// 一页的大小给表情页那个数：**默认值不能是 0**——`rebuild` 按它切页，
+    /// 0（或者没设过）会切成「一页一个」，几十个条目就是几十页。
+    fn default() -> Self {
+        Self {
+            slots: EMOJI_SLOTS,
+            sticky_recent: false,
+            names: Vec::new(),
+            items: Vec::new(),
+            pages: Vec::new(),
+            ranges: Vec::new(),
+            labels: Vec::new(),
+        }
+    }
+}
+
 impl EmojiPanel {
     /// 从文件读。文件不在或读不了就是个空的——表情面板画不出来，别的照常用。
-    fn open(path: &Path) -> Self {
+    fn open(path: &Path, slots: usize, sticky_recent: bool) -> Self {
         let Ok(text) = std::fs::read_to_string(path) else {
             return Self::default();
         };
@@ -214,6 +244,8 @@ impl EmojiPanel {
             return Self::default();
         }
         let mut panel = Self {
+            slots,
+            sticky_recent,
             names,
             items,
             ..Self::default()
@@ -232,7 +264,7 @@ impl EmojiPanel {
         self.ranges.clear();
         for items in &self.items {
             let first = self.pages.len();
-            for chunk in items.chunks(EMOJI_SLOTS) {
+            for chunk in items.chunks(self.slots.max(1)) {
                 self.pages.push(chunk.to_vec());
             }
             // 一个条目都没有的分类给一个**空页**占位：页区间不能是空的，
@@ -282,9 +314,12 @@ impl EmojiPanel {
     fn set_recent(&mut self, recent: &[String]) {
         let has = self.names.first().is_some_and(|name| name == RECENT_LABEL);
         if recent.is_empty() {
-            if has {
+            // 空的：颜文字留着那一类（按钮的意头不变），表情不摆（少一格，别的分类宽一点）
+            if has && !self.sticky_recent {
                 self.names.remove(0);
                 self.items.remove(0);
+            } else if has {
+                self.items[0] = Vec::new();
             }
         } else if has {
             self.items[0] = recent.to_vec();
@@ -293,6 +328,18 @@ impl EmojiPanel {
             self.items.insert(0, recent.to_vec());
         }
         // 页是按内容切的，动过就得重排（「最近」从无到有会多出一整个分类的页）
+        self.rebuild();
+    }
+
+    /// 把现有分类**并成一个**（颜文字用）。
+    ///
+    /// 颜文字那页没有分类标签行（22 个中文分类排成小标签根本认不出来，用户说了删掉），
+    /// 并成一条长表之后翻页就是从头滑到尾。名字留一个占位的「全部」——面板上不画它，
+    /// 只是让「最近」仍然是第 0 类、别的还是第 1 类。
+    fn merge_groups(&mut self) {
+        let all: Vec<String> = self.items.drain(..).flatten().collect();
+        self.names = vec!["全部".to_owned()];
+        self.items = vec![all];
         self.rebuild();
     }
 
@@ -784,11 +831,13 @@ impl Session {
         // 颜文字里那些 `⑅`、`╹`、`∀` 没有字形，摆到面板上就是一排豆腐块；
         // emoji 那边同一张表已经按字形滤过了，这里再过一道是同一条规矩。
         let mut emoji_panel = bundle.map_or_else(EmojiPanel::default, |dir| {
-            EmojiPanel::open(&dir.join(EMOJI_PANEL_FILE))
+            EmojiPanel::open(&dir.join(EMOJI_PANEL_FILE), EMOJI_SLOTS, false)
         });
         let mut kaomoji_panel = bundle.map_or_else(EmojiPanel::default, |dir| {
-            EmojiPanel::open(&dir.join(KAOMOJI_PANEL_FILE))
+            EmojiPanel::open(&dir.join(KAOMOJI_PANEL_FILE), KAOMOJI_SLOTS, true)
         });
+        // 颜文字不分类：22 个中文分类做成标签根本认不出，全并成一条长表（2026-09-23）
+        kaomoji_panel.merge_groups();
         if let Some(renderer) = renderer.as_ref() {
             emoji_panel.retain(|text| renderer.covers(text));
             kaomoji_panel.retain(|text| renderer.covers(text));
@@ -925,9 +974,17 @@ impl Session {
         // 表情页：把跟手的零头和没跑完的动画清掉（上次停在哪一页还在哪一页，
         // 与剪贴板那边不一样——那边每次进来都回最新的几条，这边保留看的进度）
         if matches!(panel, Panel::Emoji | Panel::Kaomoji) {
-            self.emoji_page_scroll = 0.0;
             self.emoji_page_slide = None;
             self.emoji_page_scrolled = None;
+            // 颜文字那页的「最近」是**常驻**的（右上角那个按钮得一直在），所以第 0 类
+            // 总是它——但**进来该看「全部」**，不然头一次进来（还没用过什么）看到的
+            // 就是一片空白。表情那页的「最近」空了就干脆不摆，从头看起就行。
+            let start = if panel == Panel::Kaomoji {
+                self.kaomoji.page_of_group(1)
+            } else {
+                0
+            };
+            self.emoji_page_scroll = start as f32 * self.emoji_page_width();
         }
         // 换页了，正在跑的那段滑行按的是上一页的视口，停掉
         self.clipboard_fling = None;
@@ -2265,6 +2322,13 @@ impl Session {
     /// `index` 就是标签行上第几格——标签是**全部分类平铺**的，格号就是分类号
     /// （2026-09-23 起。原来一屏只摆五个，还得加上这一屏的起点换算）。
     fn pick_emoji_group(&mut self, index: usize) {
+        // 颜文字页没有分类标签行，唯一那个按钮是**右上角的「最近」**，做成开关：
+        // 点一下看最近用过的，再点一下回到全部（`sticky_recent` 保证 0 就是「最近」）。
+        if matches!(self.panel, Panel::Kaomoji) {
+            let target = if self.emoji_page_group() == 0 { 1 } else { 0 };
+            self.set_emoji_group(target.max(index.min(1)));
+            return;
+        }
         self.set_emoji_group(index);
     }
 
@@ -2301,10 +2365,8 @@ impl Session {
         ((self.emoji_page_scroll / width).floor().max(0.0) as usize).min(last)
     }
 
-    /// 当前这一页属于第几个分类（上面那条标签画哪一个高亮）。
-    ///
-    /// 只有测试直接问它——生产那条路在 [`emoji_view`] 里就地算了（那边借不到整台会话）。
-    #[cfg(test)]
+    /// 当前这一页属于第几个分类（上面那条标签画哪一个高亮；颜文字那页则是
+    /// 「右上角那个按钮现在是看最近还是看全部」）。
     fn emoji_page_group(&self) -> usize {
         self.emoji_panel().group_of_page(self.emoji_page())
     }
