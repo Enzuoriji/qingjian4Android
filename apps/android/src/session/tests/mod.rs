@@ -2052,6 +2052,9 @@ fn swiping_up_on_backspace_clears_to_the_start() {
 
     session.touch(MotionAction::Down, POINTER, x, y);
     session.touch(MotionAction::Move, POINTER, x, y - up);
+    // 壳每一拍都会问一次气泡（真机上就是这么来的）——不画出来的话，
+    // 「松手落在气泡里没有」无从判起（气泡就是那个目标区）
+    session.popup_surface();
 
     assert_eq!(
         session.take_commands(),
@@ -2064,6 +2067,48 @@ fn swiping_up_on_backspace_clears_to_the_start() {
         session.take_commands(),
         vec![Command::ClearToStart.code()],
         "松手才清"
+    );
+}
+
+/// 「松手清空」要**落在气泡里**才算数（2026-09-23 用户要的）。
+///
+/// 气泡不再只是提示，还是个**目标区**：滑上去、停在气泡上松手才清；
+/// 滑过头溜出气泡外面松手，这一下什么也不做（跟拖回原位一个意思：反悔了）。
+#[test]
+fn clearing_only_counts_if_you_let_go_on_the_popup() {
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (cx, cy) = key_centre(&session, KeyId::Backspace);
+    let (_, key_top, _, _) = key_rect(&session, KeyId::Backspace);
+
+    // 滑到键顶**上面一点**——那儿正是气泡本体（它的底边贴着键顶）
+    let inside = key_top - 8.0;
+    session.touch(MotionAction::Down, POINTER, cx, cy);
+    session.touch(MotionAction::Move, POINTER, cx, inside);
+    session.popup_surface();
+    session.touch(MotionAction::Up, POINTER, cx, inside);
+    assert_eq!(
+        session.take_commands(),
+        vec![Command::ClearToStart.code()],
+        "停在气泡上松手：清"
+    );
+
+    // 再来一次，这回滑过头——松手时手指早出了气泡
+    let Some(mut session) = ready() else {
+        return;
+    };
+    let (cx, cy) = key_centre(&session, KeyId::Backspace);
+    let (_, key_top, _, _) = key_rect(&session, KeyId::Backspace);
+    let outside = key_top - 400.0;
+    session.touch(MotionAction::Down, POINTER, cx, cy);
+    session.touch(MotionAction::Move, POINTER, cx, outside);
+    session.popup_surface();
+    session.touch(MotionAction::Up, POINTER, cx, outside);
+    assert_eq!(
+        session.take_commands(),
+        Vec::<i32>::new(),
+        "滑出气泡外面松手：什么也不做"
     );
 }
 

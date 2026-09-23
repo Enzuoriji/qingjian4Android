@@ -48,6 +48,9 @@ const CURSOR_MAX_STEPS: isize = 400;
 ///
 /// 与 [`SWIPE`] 用同一个数：两处都是「手指纵向挪够了，这是手势不是点击」。
 /// 往上一滑就清掉光标前面一整段是**破坏性**的，阈值宁可高一点。
+///
+/// **滑上去只是「预备」，松手落在气泡里才真清**（2026-09-23 用户要的）——
+/// 见 `Keyboard::popup_rect`：气泡是个目标区，不是单纯的提示。
 const CLEAR_SWIPE: f32 = SWIPE;
 
 /// ⌫ 上往上滑之后，气泡上写这句话。
@@ -709,6 +712,8 @@ impl Keyboard {
                     .presses
                     .iter()
                     .position(|press| press.pointer == pointer);
+                // 气泡的矩形要**趁现在**取（下面一动 `presses`，「按着哪个键」就查不到了）
+                let popup_rect = self.popup_rect();
                 let ended = index.map(|index| self.presses.remove(index))?;
                 self.refresh_pressed();
                 // 长按开的那排：松手兑现选中的那个（大写 / 符号 / 小写）
@@ -729,7 +734,13 @@ impl Keyboard {
                 // ⌫ 上往上滑过：松手把光标前面整段清掉。**不是**按一下退格——
                 // 那一下的语义是「清空前面」，跟删一个字不是一回事
                 if ended.clearing {
-                    return Some(Fired::ClearToStart);
+                    // **松手要落在气泡里**才算数（2026-09-23 用户要的）：气泡不再只是提示，
+                    // 还是个**目标**——滑上去、停在气泡上，松手才清；滑过头溜出气泡外面松手，
+                    // 这一下什么也不做（跟拖回原位一个意思：反悔了）。
+                    let inside = popup_rect.is_some_and(|(bx, by, bw, bh)| {
+                        x >= bx && x < bx + bw && y >= by && y < by + bh
+                    });
+                    return inside.then_some(Fired::ClearToStart);
                 }
                 // 剪贴板那条往左滑过：松手删掉它
                 if ended.deleting {
@@ -900,6 +911,28 @@ impl Keyboard {
         // 往里夹一下。夹的是整张位图，内容在里面居中，所以只是整体挪进来，不会变形
         let room = (self.metrics.width * self.metrics.density - bitmap).max(0.0);
         Some((x.clamp(0.0, room), y))
+    }
+
+    /// 那张气泡**该在**的矩形（**键盘局部**坐标，与触摸同一套）：`(左, 上, 宽, 高)`。
+    ///
+    /// 底边贴键顶、横向对键心——就是气泡的本来位置。**不是画出来的那个位置**：
+    /// 最左 / 最右那几个键上气泡会被夹回屏幕里（见 [`Self::popup_origin`] 的防出屏），
+    /// 而手指照旧停在键心正上方——拿夹过的位置判，`⌫`（在最右边）就永远落不进气泡，
+    /// 「松手清空」会彻底失灵（2026-09-23 在测试里量出来的：手指在 x=924，
+    /// 夹过的气泡只有 [666, 908]）。
+    ///
+    /// 用的也是**可见的那块内容**、不是整张位图：位图四周留着一圈透明阴影，
+    /// 算进去的话手指落在阴影上也算数。
+    fn popup_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        let (_, rect) = self.pressed_key()?;
+        let popup = self.popup.as_ref()?;
+        let (width, height) = (popup.content_width as f32, popup.content_height as f32);
+        Some((
+            rect.x + rect.width / 2.0 - width / 2.0,
+            rect.y - height,
+            width,
+            height,
+        ))
     }
 
     /// 此刻正按住的那个键：**布局数据、命中矩形、以及它在这张位图里多大**。
